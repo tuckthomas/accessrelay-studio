@@ -1,0 +1,86 @@
+<UserControl x:Class="EliteScriptStudio.VoiceTrimEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:EliteScriptStudio">
+    <StackPanel Spacing="9">
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+            <ProgressRing x:Name="WaveLoading" IsActive="True" Width="18" Height="18"
+                          AutomationProperties.Name="Analyzing the audio track" />
+            <TextBlock x:Name="Status" Grid.Column="1" Text="Reading the audio track…" TextWrapping="Wrap"
+                       VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+        </Grid>
+
+        <StackPanel x:Name="Editor" Spacing="8" Visibility="Collapsed">
+            <Border BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6">
+                <local:VoiceTrimCanvas x:Name="WaveSurface" Height="288" Background="{ThemeResource ControlFillColorDefaultBrush}"
+                        ManipulationMode="None"
+                        AutomationProperties.AccessibilityView="Raw" SizeChanged="WaveSizeChanged"
+                        PointerPressed="WavePressed" PointerMoved="WaveMoved" PointerReleased="WaveReleased"
+                        PointerCaptureLost="WaveCaptureLost" PointerCanceled="WaveCaptureLost">
+                    <Rectangle x:Name="Region" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0.28"
+                               IsHitTestVisible="False" />
+                    <Path x:Name="Wave" Stroke="{ThemeResource TextFillColorPrimaryBrush}" StrokeThickness="1"
+                          IsHitTestVisible="False" />
+                    <Rectangle x:Name="SeekDivider" Height="1" Fill="{ThemeResource ControlStrokeColorDefaultBrush}" IsHitTestVisible="False" />
+                    <Rectangle x:Name="StartDivider" Height="1" Fill="{ThemeResource ControlStrokeColorDefaultBrush}" IsHitTestVisible="False" />
+                    <Rectangle x:Name="EndDivider" Height="1" Fill="{ThemeResource ControlStrokeColorDefaultBrush}" IsHitTestVisible="False" />
+                    <local:VoiceTrimGrip x:Name="StartStem" Width="16" Background="Transparent" PointerPressed="StartPressed">
+                        <Rectangle Width="2" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" IsHitTestVisible="False" />
+                    </local:VoiceTrimGrip>
+                    <local:VoiceTrimGrip x:Name="EndStem" Width="16" Background="Transparent" PointerPressed="EndPressed">
+                        <Rectangle Width="2" HorizontalAlignment="Center" Fill="{ThemeResource AccentFillColorDefaultBrush}" IsHitTestVisible="False" />
+                    </local:VoiceTrimGrip>
+                    <Rectangle x:Name="PlayheadStem" Width="2" Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                               IsHitTestVisible="False" />
+                    <Path x:Name="PlayheadMarker" Data="M 0,0 L 16,0 L 16,8 L 8,16 L 0,8 Z"
+                          Fill="{ThemeResource TextFillColorPrimaryBrush}" IsHitTestVisible="False" />
+                    <local:VoiceTrimGrip x:Name="StartHandle" Width="74" Height="30" CornerRadius="5"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}" PointerPressed="StartPressed">
+                        <TextBlock Text="Start" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                    </local:VoiceTrimGrip>
+                    <local:VoiceTrimGrip x:Name="EndHandle" Width="74" Height="30" CornerRadius="5"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}" PointerPressed="EndPressed">
+                        <TextBlock Text="End" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                    </local:VoiceTrimGrip>
+                </local:VoiceTrimCanvas>
+            </Border>
+            <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
+                <TextBlock x:Name="ViewStart" Text="0:00" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                    <Button x:Name="ZoomOutButton" Content="−" Click="ZoomOutClicked" AutomationProperties.Name="Zoom out" />
+                    <Button x:Name="ZoomButton" Content="Fit selection" Click="ZoomClicked" />
+                    <Button x:Name="ZoomInButton" Content="+" Click="ZoomInClicked" AutomationProperties.Name="Zoom in" />
+                </StackPanel>
+                <TextBlock x:Name="ViewEnd" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+            <StackPanel x:Name="WaveScroll" Visibility="Collapsed" Spacing="2">
+                <TextBlock Text="Scroll waveform" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <ScrollBar x:Name="ViewPosition" Orientation="Horizontal" IndicatorMode="MouseIndicator"
+                           IsTabStop="True" ValueChanged="ViewPositionChanged"
+                           AutomationProperties.Name="Scroll waveform in seconds" />
+            </StackPanel>
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                <NumberBox x:Name="StartSeconds" Header="Start (seconds)" SpinButtonPlacementMode="Inline"
+                           SmallChange="0.1" LargeChange="1" ValueChanged="StartEdited"
+                           AutomationProperties.Name="Selection start in seconds" />
+                <NumberBox x:Name="EndSeconds" Grid.Column="1" Header="End (seconds)" SpinButtonPlacementMode="Inline"
+                           SmallChange="0.1" LargeChange="1" ValueChanged="EndEdited"
+                           AutomationProperties.Name="Selection end in seconds" />
+            </Grid>
+            <TextBlock x:Name="SelectionLength" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                <Button x:Name="PlayPauseButton" Content="Play selection" Click="PlayPauseClicked" IsEnabled="False"
+                        VerticalAlignment="Bottom" MinWidth="132" />
+                <NumberBox x:Name="PlayheadSeconds" Grid.Column="1" Header="Playhead (seconds)"
+                           SpinButtonPlacementMode="Inline" SmallChange="0.1" LargeChange="1"
+                           IsEnabled="False" ValueChanged="PlayheadEdited" GotFocus="PlayheadGotFocus"
+                           LostFocus="PlayheadLostFocus" AutomationProperties.Name="Playhead position in seconds" />
+            </Grid>
+            <TextBlock x:Name="PreviewStatus" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+                       Visibility="Collapsed" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

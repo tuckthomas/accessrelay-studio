@@ -1,0 +1,14 @@
+{
+  "name": "elite-script-studio-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild viewer.js --bundle --minify --format=esm --legal-comments=inline --outfile=viewer.bundle.js"
+  },
+  "dependencies": {
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

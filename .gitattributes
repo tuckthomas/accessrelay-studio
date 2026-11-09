@@ -1,0 +1,11 @@
+* text=auto
+
+# Keep the signed USB/IP package byte-for-byte identical to upstream.
+/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/usbip2_ude.inf binary
+/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/usbip2_ude.sys binary
+/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/usbip2_ude.cat binary
+/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/*.dll binary
+/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/*.exe binary
+
+# Keep the generated Three.js bundle out of language statistics.
+/src/AccessRelayStudio/Viewer/viewer.bundle.js linguist-generated

@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>AccessRelayStudio</AssemblyName>
+    <Product>AccessRelay Studio</Product>
+    <AssemblyTitle>AccessRelay Studio</AssemblyTitle>
+    <Description>Assistive controller input and voice access for Windows</Description>
+    <PackageLicenseExpression>0BSD</PackageLicenseExpression>
+    <Version>1.8.14</Version>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\AccessRelayStudio.ico</ApplicationIcon>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Verification\**;Input\Probe\**;Viewer\node_modules\**;Audio\VirtualMicHost\target\**;Audio\NeuralHost\**;Run\**;docs\**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" GeneratePathProperty="true" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <None Update="Audio\DialogueSeparation\*.md;Audio\DialogueSeparation\*.txt">
+      <TargetPath>DialogueSeparation\%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\LICENSE" Condition="'$(PkgMicrosoft_ML_OnnxRuntime)' != ''"
+          TargetPath="DialogueSeparation\ONNX-RUNTIME-LICENSE.txt"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\ThirdPartyNotices.txt" Condition="'$(PkgMicrosoft_ML_OnnxRuntime)' != ''"
+          TargetPath="DialogueSeparation\ONNX-RUNTIME-NOTICES.txt"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Audio\VirtualMicHost\AccessRelay.VirtualMicHost.exe;Audio\VirtualMicHost\AccessRelay.VirtualMicUsbId.txt;Audio\VirtualMicHost\PlaySignal.VirtualMicHost.LICENSE.txt;Audio\VirtualMicHost\usbip-audio.LICENSE.txt;Audio\VirtualMicHost\windows-rs.LICENSE.txt;Audio\VirtualMicHost\README.md">
+      <TargetPath>VirtualMicrophone\%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Update="Audio\VirtualMicDriver\Package\*">
+      <TargetPath>VirtualMicrophone\%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Update="Audio\VirtualMicHost\AccessRelay.VirtualXboxHost.exe;Audio\VirtualMicHost\ViGEmBus.LICENSE.txt;Audio\VirtualMicHost\XBOX360.PROVENANCE.md">
+      <TargetPath>VirtualController\%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Update="Assets\*.png;Assets\*.ico;Assets\*.webp;Assets\*.jpg;Assets\*.md"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Viewer\index.html;Viewer\viewer.css;Viewer\viewer.bundle.js;Viewer\THIRD-PARTY-NOTICES.md">
+      <TargetPath>Scene\Viewer\%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Update="Model\XboxOne.glb;Model\EliteSeries2Articulated.glb;Model\DualShock4.glb;Model\SwitchPro.glb;Model\*.txt;Model\*.md">
+      <TargetPath>Scene\Model\%(Filename)%(Extension)</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+</Project>

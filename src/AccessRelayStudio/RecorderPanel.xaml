@@ -1,0 +1,102 @@
+<UserControl x:Class="EliteScriptStudio.RecorderPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="RecorderCard" TargetType="Border">
+            <Setter Property="Background" Value="#1A212B" />
+            <Setter Property="BorderBrush" Value="#303B49" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12" />
+        </Style>
+        <Style x:Key="RecorderHeading" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="RecorderHint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#B5C0CF" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel Spacing="10" HorizontalAlignment="Stretch">
+        <Border Style="{StaticResource RecorderCard}">
+            <StackPanel Spacing="9">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                    <Ellipse x:Name="CaptureIndicator" Width="8" Height="8" Fill="#8FA9C7"
+                             VerticalAlignment="Center" />
+                    <TextBlock x:Name="CaptureStatus" Grid.Column="1" Text="Waiting for USB"
+                               TextWrapping="Wrap" Style="{StaticResource RecorderHeading}"
+                               AutomationProperties.LiveSetting="Polite" />
+                </Grid>
+                <TextBlock Text="Start recording, perform the input on your controller, then stop to review it."
+                           Style="{StaticResource RecorderHint}" />
+                <TextBlock Text="Manual controls stay available during recording. Playback uses the included controls."
+                           Style="{StaticResource RecorderHint}" />
+                <StackPanel x:Name="CaptureProgress" Spacing="4" Visibility="Collapsed">
+                    <ProgressBar x:Name="CaptureBar" Minimum="0"
+                                 AutomationProperties.Name="Recording progress" />
+                    <TextBlock x:Name="CaptureTime" Style="{StaticResource RecorderHint}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="StartButton" Content="Start recording" Click="StartClicked"
+                            Style="{StaticResource AccentButtonStyle}" />
+                    <Button x:Name="StopButton" Content="Stop recording" Click="StopClicked"
+                            Style="{StaticResource AccentButtonStyle}" Visibility="Collapsed" />
+                </StackPanel>
+                <TextBlock x:Name="CaptureNote" Style="{StaticResource RecorderHint}" Visibility="Collapsed"
+                           AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
+        </Border>
+
+        <Border x:Name="ReviewCard" Style="{StaticResource RecorderCard}" Visibility="Collapsed">
+            <StackPanel Spacing="9">
+                <TextBlock Text="Review recording" Style="{StaticResource RecorderHeading}" />
+                <TextBlock x:Name="ReviewSummary" Style="{StaticResource RecorderHint}"
+                           AutomationProperties.LiveSetting="Polite" />
+                <TextBox x:Name="RecordingName" Header="Recording name" PlaceholderText="e.g. Fadeaway"
+                         MaxLength="80" TextChanged="RecordingNameChanged" />
+                <ComboBox x:Name="PaddlePicker" Header="Bind to a paddle (optional)" MinWidth="0"
+                          HorizontalAlignment="Stretch" />
+                <TextBlock x:Name="NameError" Text="Enter a name for this recording." Visibility="Collapsed"
+                           Style="{StaticResource RecorderHint}" AutomationProperties.LiveSetting="Polite" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Save recording" Style="{StaticResource AccentButtonStyle}" Click="SaveClicked" />
+                    <Button Content="Discard" Click="DiscardClicked" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource RecorderCard}">
+            <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="Input filters" Style="{StaticResource RecorderHeading}" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                        <Button x:Name="SelectAllFilters" Content="Select all" Click="SelectAllClicked" Padding="8,3" FontSize="12" />
+                        <Button x:Name="ClearFilters" Content="Clear selection" Click="ClearSelectionClicked" Padding="8,3" FontSize="12" />
+                    </StackPanel>
+                </Grid>
+                <RadioButtons x:Name="FilterMode" MaxColumns="2" SelectionChanged="FilterModeChanged"
+                              AutomationProperties.Name="Input filter mode">
+                    <x:String>Include selected</x:String>
+                    <x:String>Ignore selected</x:String>
+                </RadioButtons>
+                <TextBlock x:Name="FilterSummary" Style="{StaticResource RecorderHint}" />
+                <Grid x:Name="FilterGroups" ColumnSpacing="12" RowSpacing="10" SizeChanged="FilterWidthChanged" />
+                <TextBlock Text="Shortcuts" FontWeight="SemiBold" FontSize="12" />
+                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+                    <Button x:Name="AllShortcut" Click="AllInputsClicked" HorizontalAlignment="Stretch" Padding="5,4">
+                        <TextBlock Text="All inputs" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" />
+                    </Button>
+                    <Button x:Name="RightShortcut" Grid.Column="1" Click="RightStickClicked" HorizontalAlignment="Stretch" Padding="5,4">
+                        <TextBlock Text="Right stick only" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" />
+                    </Button>
+                    <Button x:Name="IgnoreLeftShortcut" Grid.Column="2" Click="IgnoreLeftClicked" HorizontalAlignment="Stretch" Padding="5,4">
+                        <TextBlock Text="Ignore left stick" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" />
+                    </Button>
+                </Grid>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

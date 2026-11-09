@@ -1,0 +1,21 @@
+<Application x:Class="EliteScriptStudio.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources />
+            </ResourceDictionary.MergedDictionaries>
+            <SolidColorBrush x:Key="StudioWindowBrush" Color="#10151E" />
+            <SolidColorBrush x:Key="StudioVoiceSurfaceBrush" Color="#19212D" />
+            <SolidColorBrush x:Key="StudioVoiceOutlineBrush" Color="#354154" />
+            <SolidColorBrush x:Key="StudioControlBrush" Color="#242C38" />
+            <SolidColorBrush x:Key="StudioControlHoverBrush" Color="#2F3D4E" />
+            <SolidColorBrush x:Key="StudioControlOutlineBrush" Color="#414D5D" />
+            <SolidColorBrush x:Key="StudioAccentBrush" Color="#0078E9" />
+            <SolidColorBrush x:Key="StudioAccentHoverBrush" Color="#1688F0" />
+            <SolidColorBrush x:Key="StudioAccentPressedBrush" Color="#0068C7" />
+            <SolidColorBrush x:Key="StudioOnAccentBrush" Color="#FFFFFF" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

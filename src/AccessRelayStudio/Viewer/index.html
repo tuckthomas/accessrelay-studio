@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' blob:; img-src 'self' blob: data:; worker-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>3D controller layout</title>
+  <link rel="stylesheet" href="./viewer.css">
+  <script type="module" src="./viewer.bundle.js"></script>
+</head>
+<body>
+  <header class="viewer-toolbar">
+    <div class="viewer-caption">
+      <span class="viewer-name">3D controller layout</span>
+      <span class="viewer-hint">Drag the shell to turn · Drag a stick to tilt</span>
+    </div>
+    <div class="view-buttons" role="group" aria-label="Controller view">
+      <button type="button" data-layout="both" aria-pressed="false">Both</button>
+      <button type="button" data-layout="front" aria-pressed="true">Front</button>
+      <button type="button" data-layout="rear" aria-pressed="false">Rear</button>
+    </div>
+    <button type="button" class="reset-view" title="Reset rotation and zoom" aria-label="Reset rotation and zoom" disabled>Reset view</button>
+  </header>
+  <main class="stage" aria-label="Interactive 3D controller layout">
+    <canvas class="scene" aria-hidden="true"></canvas>
+    <section class="pane pane-front" data-view="front" aria-label="Front controls">
+      <svg class="leaders" aria-hidden="true"></svg>
+      <div class="labels labels-left"></div>
+      <div class="labels labels-right"></div>
+    </section>
+    <section class="pane pane-rear" data-view="rear" aria-label="Rear view" hidden>
+      <svg class="leaders" aria-hidden="true"></svg>
+      <div class="labels labels-left"></div>
+      <div class="labels labels-right"></div>
+    </section>
+    <p class="message" role="status">Loading 3D controller…</p>
+  </main>
+</body>
+</html>

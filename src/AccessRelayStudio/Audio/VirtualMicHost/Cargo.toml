@@ -1,0 +1,17 @@
+[package]
+name = "playsignal-virtual-mic-host"
+version = "0.1.0"
+edition = "2021"
+license = "0BSD"
+publish = false
+default-run = "playsignal-virtual-mic-host"
+
+[[bin]]
+name = "accessrelay-virtual-xbox-host"
+path = "src/xbox360.rs"
+
+[dependencies]
+usbip-audio = { git = "https://github.com/network-audio/usbip-audio", rev = "58032ab0664ffec1d0c178f40a3a69359c21f597" }
+
+[profile.release]
+strip = true
