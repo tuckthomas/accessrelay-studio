@@ -2,7 +2,7 @@ namespace EliteScriptStudio.Core;
 
 public readonly record struct MacroStatus(
     ScriptKind Script, ControlId? Control, bool LateMiss, int PhaseIndex,
-    int ElapsedMs, int TotalMs, StickPhase? Phase, string? RecordingName = null)
+    int ElapsedMs, int TotalMs, StickPhase? Phase, string? RecordingName = null, string? Error = null)
 {
     public bool IsActive => Control.HasValue;
 }
@@ -16,6 +16,10 @@ public sealed class MacroEngine
     private StudioProfile _profile = StudioProfile.CreateDefault();
     private Plan[] _plans = [];
     private Dictionary<Guid, Plan> _recordingPlans = [];
+    private Dictionary<Guid, LuaControllerProgram> _luaPrograms = [];
+    private LuaControllerProgram? _lua;
+    private ControlId? _luaControl;
+    private long _luaStarted;
     private Run? _active;
     private MacroStatus _status;
     private uint _consume;
@@ -45,6 +49,7 @@ public sealed class MacroEngine
         }).ToArray();
         var recordingPlans = profile.Recordings.ToDictionary(
             entry => entry.Key, entry => new Plan([], entry.Value.DurationMs, entry.Value));
+        var luaPrograms = profile.LuaScripts.ToDictionary(entry => entry.Key, entry => new LuaControllerProgram(entry.Value));
         uint consume = 0;
         foreach (var (control, binding) in profile.Bindings)
         {
@@ -54,9 +59,11 @@ public sealed class MacroEngine
 
         lock (_sync)
         {
+            _lua?.Cancel();
             _profile = profile;
             _plans = plans;
             _recordingPlans = recordingPlans;
+            _luaPrograms = luaPrograms;
             _consume = consume;
             _enabled = _enabledOverride ?? profile.ScriptsEnabled;
             Reset();
@@ -115,9 +122,22 @@ public sealed class MacroEngine
                 StartPressedShot(rising, timestampMs);
 
             ControllerState output = ControlMap.Consume(input, _consume);
+            if (_lua is { } lua)
+            {
+                output = lua.Tick(input, paddles, output, timestampMs, out var error);
+                _status = new(ScriptKind.Lua, lua.IsRunning ? _luaControl : null, false, 0,
+                    (int)Math.Min(int.MaxValue, Math.Max(0, timestampMs - _luaStarted)), 0, null, lua.Name, error);
+                if (!lua.IsRunning)
+                {
+                    _lua = null;
+                    _luaControl = null;
+                }
+                return output;
+            }
             if (_active is not { } active)
             {
-                _status = default;
+                if (_status.Error is null)
+                    _status = default;
                 return output;
             }
 
@@ -148,11 +168,24 @@ public sealed class MacroEngine
     {
         foreach (var control in ControlMap.TriggerOrder)
         {
-            if ((rising & (uint)control) == 0 || _active?.Control == control)
+            if ((rising & (uint)control) == 0 || _active?.Control == control || _luaControl == control)
                 continue;
             var binding = _profile.GetBinding(control);
             if (!binding.Enabled || binding.Script == ScriptKind.Passthrough)
                 continue;
+            _lua?.Cancel();
+            _lua = null;
+            _luaControl = null;
+            _active = null;
+            _status = default;
+            if (binding.Script == ScriptKind.Lua)
+            {
+                _lua = _luaPrograms[binding.LuaScriptId!.Value];
+                _luaControl = control;
+                _luaStarted = timestampMs;
+                _lua.Start(control, timestampMs);
+                return;
+            }
             bool late = binding.Script == ScriptKind.IntentionalMiss && _nextMissLate;
             var plan = binding.Script == ScriptKind.Recorded
                 ? _recordingPlans[binding.RecordingId!.Value]
@@ -166,6 +199,10 @@ public sealed class MacroEngine
 
     private void Reset()
     {
+        foreach (var program in _luaPrograms.Values)
+            program.Reset();
+        _lua = null;
+        _luaControl = null;
         _active = null;
         _status = default;
         _previous = 0;

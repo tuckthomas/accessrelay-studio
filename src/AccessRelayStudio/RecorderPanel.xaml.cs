@@ -3,6 +3,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace EliteScriptStudio;
 
@@ -12,14 +13,19 @@ public sealed partial class RecorderPanel : UserControl
     private static readonly SolidColorBrush ReadyIndicator = new(ColorHelper.FromArgb(255, 76, 199, 117));
     private static readonly SolidColorBrush RecordingIndicator = new(ColorHelper.FromArgb(255, 249, 95, 106));
     private readonly Dictionary<RecordingChannels, CheckBox> _filters = [];
-    private RecordingChannels _selected;
-    private bool _ignoreSelected = true;
+    private const RecordingChannels WithoutLeftStick = RecordingChannels.All &
+        ~(RecordingChannels.LeftStick | RecordingChannels.LeftStickClick);
+    private RecordingChannels _included = RecordingChannels.All;
     private bool _syncFilters = true;
     private bool _connected;
     private bool _recording;
-    private bool _hasPending;
+    private bool _wideLayout;
+    private MacroRecording? _pending;
+    private MacroRecording? _replacement;
+    private MacroRecording? _saved;
+    private string? _savedProfile;
+    private bool _hasPending => _pending is not null;
     private int _filterColumns;
-    private RecordingChannels IncludedChannels => _ignoreSelected ? RecordingChannels.All & ~_selected : _selected;
 
     public RecorderPanel()
     {
@@ -62,53 +68,152 @@ public sealed partial class RecorderPanel : UserControl
 
     public event Action<RecordingChannels>? StartRequested;
     public event Action? StopRequested;
+    public event Action? RecordAgainRequested;
     public event Action? DiscardRequested;
     public event Action<string, ControlId?>? SaveRequested;
+    public event Action<MacroRecording>? SaveJsonRequested;
 
-    public void ShowState(bool connected, bool recording, int elapsedMs = 0,
-        int? pendingDurationMs = null, int pendingFrames = 0, string? note = null)
+    public void SelectInputs(RecordingChannels channels) => SetSelection(channels);
+
+    public void ShowState(bool connected, bool recording, bool hasInput = false, int elapsedMs = 0,
+        MacroRecording? pending = null, string? note = null, string? profileName = null, MacroRecording? replacement = null)
     {
-        bool hasPending = pendingDurationMs.HasValue && !recording;
-        bool stateChanged = connected != _connected || recording != _recording || hasPending != _hasPending;
+        bool started = recording && !_recording;
+        bool replacementChanged = !ReferenceEquals(replacement, _replacement);
+        if (started || (replacementChanged && replacement is not null))
+        {
+            _saved = null;
+            _savedProfile = null;
+            FiltersExpander.IsExpanded = false;
+        }
+        bool pendingChanged = !ReferenceEquals(pending, _pending);
+        bool stateChanged = connected != _connected || recording != _recording || pendingChanged || replacementChanged;
         _connected = connected;
         _recording = recording;
-        _hasPending = hasPending;
-        CaptureStatus.Text = recording ? "Recording" : _hasPending ? "Recording ready to save"
-            : connected ? "Controller connected" : "Connect a controller to start";
+        _pending = pending;
+        _replacement = replacement;
+        string status = recording ? hasInput ? "Capturing input" : "Waiting for included input"
+            : _hasPending ? "Recording ready to review"
+            : connected ? "Ready to record" : "Connect a controller to start";
+        if (CaptureStatus.Text != status)
+            CaptureStatus.Text = status;
         CaptureIndicator.Fill = recording ? RecordingIndicator : connected || _hasPending ? ReadyIndicator : IdleIndicator;
-        CaptureProgress.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
-        if (recording)
+        CaptureProgress.Visibility = recording && hasInput ? Visibility.Visible : Visibility.Collapsed;
+        if (recording && hasInput)
         {
             int boundedElapsed = Math.Clamp(elapsedMs, 0, InputRecorder.MaxDurationMs);
             CaptureBar.Value = boundedElapsed;
             CaptureTime.Text = $"{boundedElapsed / 1000.0:F1} s / {InputRecorder.MaxDurationMs / 1000.0:F0} s";
         }
 
+        if (recording && !hasInput && note is null)
+            note = "Switch to your game when ready. The 15-second limit starts with your first included input.";
         CaptureNote.Visibility = string.IsNullOrWhiteSpace(note) ? Visibility.Collapsed : Visibility.Visible;
         CaptureNote.Text = note ?? string.Empty;
-        ReviewCard.Visibility = _hasPending ? Visibility.Visible : Visibility.Collapsed;
-        if (_hasPending)
-            ReviewSummary.Text = $"{pendingDurationMs.GetValueOrDefault() / 1000.0:F2} s · {pendingFrames:N0} captured {(pendingFrames == 1 ? "frame" : "frames")}";
-        else
-            NameError.Visibility = Visibility.Collapsed;
+        string profile = profileName ?? "the active macro profile";
+        string destination = replacement is not null ? $"Replace “{replacement.Name}” in {profile}"
+            : _saved is not null ? $"Saved to {_savedProfile}" : $"Save to {profile}";
+        if (SaveTarget.Text != destination)
+            SaveTarget.Text = destination;
+        if (pendingChanged || started || replacementChanged)
+            UpdateReview();
+        if (_pending is null && _saved is null)
+        {
+            string summary = recording ? "Choose Stop & review to see the captured sequence."
+                : replacement is not null ? "Start a new take to replace this recording."
+                : "No recording yet. Start a recording and move a selected controller input.";
+            if (ReviewSummary.Text != summary)
+                ReviewSummary.Text = summary;
+        }
         if (stateChanged)
             RefreshActions();
+    }
+
+    public void ShowSaved(MacroRecording recording, string profileName)
+    {
+        _saved = recording;
+        _savedProfile = profileName;
+    }
+
+    internal void RefreshSavedName(MacroRecording recording)
+    {
+        if (_saved?.Id != recording.Id)
+            return;
+        _saved = recording;
+        UpdateReview();
+        RefreshActions();
+    }
+
+    public void ClearSavedPreview(Guid? id = null)
+    {
+        if (_saved is null || (id.HasValue && _saved.Id != id.Value))
+            return;
+        _saved = null;
+        _savedProfile = null;
+        if (_pending is null)
+        {
+            UpdateReview();
+            RefreshActions();
+        }
+    }
+
+    public void ShowExportStatus(Guid recordingId, string message)
+    {
+        if (GetOutputRecording()?.Id == recordingId)
+            ReviewStatus.Text = message;
+    }
+
+    private void UpdateReview()
+    {
+        NameError.Visibility = Visibility.Collapsed;
+        ReviewStatus.Text = _saved is null ? string.Empty : "Available in Input Sequences.";
+        var recording = _pending ?? _saved;
+        RecordingName.Text = _replacement?.Name ?? recording?.Name ?? string.Empty;
+        if (_saved is null)
+            PaddlePicker.SelectedIndex = 0;
+        if (recording is null)
+        {
+            RecordingJson.Text = string.Empty;
+            return;
+        }
+
+        int frames = recording.Frames.Length;
+        ReviewSummary.Text = $"{recording.DurationMs / 1000.0:F2} s · {frames:N0} captured {(frames == 1 ? "frame" : "frames")}";
+        RecordingJson.Text = ProfileStore.FormatRecording(GetOutputRecording() ?? recording);
+        if (_hasPending)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (IsLoaded && ReferenceEquals(_pending, recording))
+                {
+                    ReviewCard.StartBringIntoView();
+                    RecordingName.Focus(FocusState.Programmatic);
+                    RecordingName.SelectAll();
+                }
+            });
+        }
     }
 
     private void RefreshActions()
     {
         bool editable = !_recording && !_hasPending;
-        FilterMode.IsEnabled = editable;
+        CapturePreset.IsEnabled = editable;
+        FiltersExpander.IsEnabled = editable;
         SelectAllFilters.IsEnabled = editable;
         ClearFilters.IsEnabled = editable;
-        AllShortcut.IsEnabled = editable;
-        RightShortcut.IsEnabled = editable;
-        IgnoreLeftShortcut.IsEnabled = editable;
         foreach (var filter in _filters.Values)
             filter.IsEnabled = editable;
-        StartButton.Visibility = _recording ? Visibility.Collapsed : Visibility.Visible;
-        StartButton.IsEnabled = _connected && editable && IncludedChannels != RecordingChannels.None;
-        StopButton.Visibility = _recording ? Visibility.Visible : Visibility.Collapsed;
+        StartButton.IsEnabled = _connected && editable && _included != RecordingChannels.None;
+        StopButton.IsEnabled = _recording;
+        RecordingName.IsEnabled = _hasPending;
+        PaddlePicker.IsEnabled = _hasPending && _replacement is null;
+        SaveProfileButton.Content = _replacement is null ? "Save macro" : "Replace macro";
+        SaveProfileButton.IsEnabled = _hasPending;
+        RecordAgainButton.IsEnabled = _hasPending;
+        DiscardButton.Content = _replacement is null ? "Discard recording" : "Cancel re-record";
+        DiscardButton.IsEnabled = _hasPending || _replacement is not null;
+        CopyJsonButton.IsEnabled = _hasPending || _saved is not null;
+        SaveJsonButton.IsEnabled = CopyJsonButton.IsEnabled;
     }
 
     private void AddGroup(string title, params (string Label, RecordingChannels Channel)[] options)
@@ -126,6 +231,7 @@ public sealed partial class RecorderPanel : UserControl
                 Content = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap },
                 MinWidth = 0, MinHeight = 28
             };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, $"Record {label}");
             box.Checked += FilterChanged;
             box.Unchecked += FilterChanged;
             _filters.Add(channel, box);
@@ -136,6 +242,21 @@ public sealed partial class RecorderPanel : UserControl
 
     private void FilterWidthChanged(object sender, SizeChangedEventArgs args) =>
         ArrangeFilters(args.NewSize.Width >= 540 ? 3 : args.NewSize.Width >= 305 ? 2 : 1);
+
+    private void WorkspaceWidthChanged(object sender, SizeChangedEventArgs args)
+    {
+        bool wide = args.NewSize.Width >= 780;
+        if (_wideLayout == wide)
+            return;
+        _wideLayout = wide;
+        RecorderWorkspace.ColumnDefinitions[0].Width = new GridLength(wide ? 340 : 1,
+            wide ? GridUnitType.Pixel : GridUnitType.Star);
+        RecorderWorkspace.ColumnDefinitions[1].Width = new GridLength(wide ? 1 : 0,
+            wide ? GridUnitType.Star : GridUnitType.Pixel);
+        RecorderWorkspace.ColumnSpacing = wide ? 12 : 0;
+        Grid.SetColumn(ReviewCard, wide ? 1 : 0);
+        Grid.SetRow(ReviewCard, wide ? 0 : 1);
+    }
 
     private void ArrangeFilters(int columns)
     {
@@ -156,29 +277,31 @@ public sealed partial class RecorderPanel : UserControl
         }
     }
 
-    private void FilterModeChanged(object sender, SelectionChangedEventArgs args)
+    private void CapturePresetChanged(object sender, SelectionChangedEventArgs args)
     {
-        if (_syncFilters || FilterMode.SelectedIndex < 0)
+        if (_syncFilters || CapturePreset.SelectedIndex < 0)
             return;
-        _ignoreSelected = FilterMode.SelectedIndex == 1;
-        UpdateFilters();
+        if (CapturePreset.SelectedIndex == 3)
+        {
+            FiltersExpander.IsExpanded = true;
+            return;
+        }
+        FiltersExpander.IsExpanded = false;
+        SetSelection(CapturePreset.SelectedIndex switch
+        {
+            1 => RecordingChannels.RightStick,
+            2 => WithoutLeftStick,
+            _ => RecordingChannels.All
+        });
     }
 
-    private void SelectAllClicked(object sender, RoutedEventArgs args) => SetSelection(RecordingChannels.All, _ignoreSelected);
+    private void SelectAllClicked(object sender, RoutedEventArgs args) => SetSelection(RecordingChannels.All);
 
-    private void ClearSelectionClicked(object sender, RoutedEventArgs args) => SetSelection(RecordingChannels.None, _ignoreSelected);
+    private void ClearSelectionClicked(object sender, RoutedEventArgs args) => SetSelection(RecordingChannels.None);
 
-    private void AllInputsClicked(object sender, RoutedEventArgs args) => SetSelection(RecordingChannels.None, ignore: true);
-
-    private void RightStickClicked(object sender, RoutedEventArgs args) => SetSelection(RecordingChannels.RightStick, ignore: false);
-
-    private void IgnoreLeftClicked(object sender, RoutedEventArgs args) =>
-        SetSelection(RecordingChannels.LeftStick | RecordingChannels.LeftStickClick, ignore: true);
-
-    private void SetSelection(RecordingChannels selected, bool ignore)
+    private void SetSelection(RecordingChannels included)
     {
-        _selected = selected;
-        _ignoreSelected = ignore;
+        _included = included;
         UpdateFilters();
     }
 
@@ -186,39 +309,37 @@ public sealed partial class RecorderPanel : UserControl
     {
         if (_syncFilters)
             return;
-        _selected = RecordingChannels.None;
+        _included = RecordingChannels.None;
         foreach (var (channel, box) in _filters)
             if (box.IsChecked == true)
-                _selected |= channel;
+                _included |= channel;
         UpdateFilters();
     }
 
     private void UpdateFilters()
     {
         _syncFilters = true;
-        string action = _ignoreSelected ? "Ignore" : "Include";
         foreach (var (channel, box) in _filters)
+            box.IsChecked = (_included & channel) != 0;
+        CapturePreset.SelectedIndex = _included switch
         {
-            box.IsChecked = (_selected & channel) != 0;
-            string label = ((TextBlock)box.Content).Text;
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, $"{action} {label}");
-        }
-        FilterMode.SelectedIndex = _ignoreSelected ? 1 : 0;
+            RecordingChannels.All => 0,
+            RecordingChannels.RightStick => 1,
+            WithoutLeftStick => 2,
+            _ => 3
+        };
         _syncFilters = false;
-        var included = IncludedChannels;
-        int count = _filters.Keys.Count(channel => (included & channel) != 0);
-        string meaning = _ignoreSelected ? "Checked inputs stay manual on playback." : "Only checked inputs are recorded.";
+        int count = _filters.Keys.Count(channel => (_included & channel) != 0);
         FilterSummary.Text = count > 0
-            ? $"Records {count} of {_filters.Count} inputs. {meaning}"
-            : $"No inputs selected for recording. {meaning}";
+            ? $"Records {count} of {_filters.Count} inputs."
+            : "Choose at least one input to enable recording.";
         RefreshActions();
     }
 
     private void StartClicked(object sender, RoutedEventArgs args)
     {
-        var included = IncludedChannels;
-        if (_connected && !_recording && !_hasPending && included != RecordingChannels.None)
-            StartRequested?.Invoke(included);
+        if (_connected && !_recording && !_hasPending && _included != RecordingChannels.None)
+            StartRequested?.Invoke(_included);
     }
 
     private void StopClicked(object sender, RoutedEventArgs args)
@@ -244,13 +365,53 @@ public sealed partial class RecorderPanel : UserControl
             RecordingName.Focus(FocusState.Programmatic);
             return;
         }
-        SaveRequested?.Invoke(name, (PaddlePicker.SelectedItem as PaddleOption)?.Control);
+        SaveRequested?.Invoke(name, _replacement is null ? (PaddlePicker.SelectedItem as PaddleOption)?.Control : null);
+    }
+
+    private void RecordAgainClicked(object sender, RoutedEventArgs args)
+    {
+        if (_hasPending)
+            RecordAgainRequested?.Invoke();
     }
 
     private void DiscardClicked(object sender, RoutedEventArgs args)
     {
-        if (_hasPending)
+        if (_hasPending || _replacement is not null)
             DiscardRequested?.Invoke();
+    }
+
+    private void CopyJsonClicked(object sender, RoutedEventArgs args)
+    {
+        if (GetOutputRecording() is not { } recording)
+            return;
+        try
+        {
+            var data = new DataPackage();
+            RecordingJson.Text = ProfileStore.FormatRecording(recording);
+            data.SetText(RecordingJson.Text);
+            Clipboard.SetContent(data);
+            ReviewStatus.Text = "Macro JSON copied.";
+        }
+        catch (Exception error) { ReviewStatus.Text = error.Message; }
+    }
+
+    private void SaveJsonClicked(object sender, RoutedEventArgs args)
+    {
+        if (GetOutputRecording() is { } recording)
+        {
+            RecordingJson.Text = ProfileStore.FormatRecording(recording);
+            SaveJsonRequested?.Invoke(recording);
+        }
+    }
+
+    private MacroRecording? GetOutputRecording()
+    {
+        if (_pending is not { } recording)
+            return _saved;
+        string name = RecordingName.Text.Trim();
+        if (name.Length == 0 || name.Any(char.IsControl))
+            name = _replacement?.Name ?? recording.Name;
+        return recording with { Id = _replacement?.Id ?? recording.Id, Name = name };
     }
 
     private sealed record PaddleOption(string Label, ControlId? Control)

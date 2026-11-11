@@ -71,10 +71,10 @@ public sealed partial class ControllerMap : UserControl
         AddDpadDirection(ControlId.DPadRight, "D-pad Right", front.At(421, 510));
 
         _rearCalloutStart = CalloutLayer.Children.Count;
-        AddCallout("Small Left Paddle\n(P1)", ControlId.SmallLeft, rear.At(292, 521), new(48, 511, 145, 44), true);
-        AddCallout("Small Right Paddle\n(P2)", ControlId.SmallRight, rear.At(708, 521), new(624, 511, 164, 44), false);
-        AddCallout("Large Left Paddle\n(P3)", ControlId.LargeLeft, rear.At(272, 610), new(42, 584, 145, 44), true);
-        AddCallout("Large Right Paddle\n(P4)", ControlId.LargeRight, rear.At(728, 610), new(632, 584, 156, 44), false);
+        AddCallout("Small Right Paddle\n(P2)", ControlId.SmallRight, rear.At(292, 521), new(48, 511, 145, 44), true);
+        AddCallout("Small Left Paddle\n(P1)", ControlId.SmallLeft, rear.At(708, 521), new(624, 511, 164, 44), false);
+        AddCallout("Large Right Paddle\n(P4)", ControlId.LargeRight, rear.At(272, 610), new(42, 584, 145, 44), true);
+        AddCallout("Large Left Paddle\n(P3)", ControlId.LargeLeft, rear.At(728, 610), new(632, 584, 156, 44), false);
     }
 
     public void ShowPaddles(bool show)

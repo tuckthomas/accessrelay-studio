@@ -5,7 +5,10 @@ using NAudio.Wave.SampleProviders;
 
 namespace EliteScriptStudio.Audio;
 
-public sealed record VoiceProfile(Guid Id, string Name, string ReferencePath, TimeSpan Duration);
+public sealed record VoiceProfile(Guid Id, string Name, string? ReferencePath, TimeSpan Duration)
+{
+    internal VoiceSettings? Effects { get; init; }
+}
 internal sealed record VoiceProfileSelection(Guid? ProfileId, string? ModelPackage);
 public readonly record struct VoiceWaveformBin(float Minimum, float Maximum);
 public sealed record VoiceWaveform(TimeSpan Duration, IReadOnlyList<VoiceWaveformBin> Bins);
@@ -164,6 +167,17 @@ public sealed partial class VoiceProfiles
     public static Task<VoiceWaveform> ReadWaveformAsync(string path, CancellationToken cancellation = default) =>
         Task.Run(() => ReadWaveform(ResolveSource(path), cancellation), cancellation);
 
+    internal VoiceProfile SaveEffects(string name, VoiceSettings settings)
+    {
+        name = name.Trim();
+        if (!ValidName(name))
+            throw new ArgumentException("Enter a voice profile name between 1 and 80 characters.", nameof(name));
+        if (!ValidEffects(settings))
+            throw new ArgumentException("Choose valid built-in effects settings.", nameof(settings));
+
+        return CommitProfile(_ => new(2, name, 0, settings with { Muted = false }));
+    }
+
     private VoiceProfile Import(string name, string sourcePath, TimeSpan startAt, TimeSpan? endAt, CancellationToken cancellation)
     {
         ArgumentNullException.ThrowIfNull(name);
@@ -183,17 +197,26 @@ public sealed partial class VoiceProfiles
             selectedSamples = (int)Math.Round((end - startAt).TotalSeconds * ReferenceSampleRate);
         }
 
+        return CommitProfile(temporary =>
+        {
+            int samples = WriteReference(source, Path.Combine(temporary, ReferenceFile), video, startAt, selectedSamples, cancellation);
+            return new(1, name, samples);
+        }, cancellation);
+    }
+
+    private VoiceProfile CommitProfile(Func<string, ProfileDocument> create, CancellationToken cancellation = default)
+    {
         Guid id = Guid.NewGuid();
         string destination = Folder(id);
         string temporary = Path.Combine(DirectoryPath, ".import-" + id.ToString("N"));
         Directory.CreateDirectory(temporary);
         try
         {
-            int samples = WriteReference(source, Path.Combine(temporary, ReferenceFile), video, startAt, selectedSamples, cancellation);
-            File.WriteAllText(Path.Combine(temporary, MetadataFile), JsonSerializer.Serialize(new ProfileDocument(1, name, samples), Json));
+            var document = create(temporary);
+            File.WriteAllText(Path.Combine(temporary, MetadataFile), JsonSerializer.Serialize(document, Json));
             cancellation.ThrowIfCancellationRequested();
             Directory.Move(temporary, destination);
-            return ToProfile(id, name, Path.Combine(destination, ReferenceFile), samples);
+            return ToProfile(id, destination, document);
         }
         catch
         {
@@ -403,14 +426,18 @@ public sealed partial class VoiceProfiles
     {
         string metadataPath = Path.Combine(directory, MetadataFile);
         string referencePath = Path.Combine(directory, ReferenceFile);
-        if (IsLink(directory) || IsLink(metadataPath) || IsLink(referencePath))
+        if (IsLink(directory) || IsLink(metadataPath))
             return null;
 
         using var metadata = File.Open(metadataPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         if (metadata.Length > 4096)
             return null;
         var document = JsonSerializer.Deserialize<ProfileDocument>(metadata, Json);
-        if (document is not { Version: 1, Samples: >= MinSamples and <= MaxSamples } || !ValidName(document.Name))
+        if (document is null || !ValidName(document.Name))
+            return null;
+        if (document is { Version: 2, Samples: 0, Effects: { } effects })
+            return ValidEffects(effects) ? ToProfile(id, directory, document) : null;
+        if (document is not { Version: 1, Samples: >= MinSamples and <= MaxSamples, Effects: null } || IsLink(referencePath))
             return null;
 
         using var reference = File.Open(referencePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
@@ -420,16 +447,20 @@ public sealed partial class VoiceProfiles
         if (!wave.WaveFormat.Equals(ReferenceFormat) || wave.Length != 2L * document.Samples || reference.Length < wave.Length + 44)
             return null;
 
-        return ToProfile(id, document.Name, referencePath, document.Samples);
+        return ToProfile(id, directory, document);
     }
 
     private static bool ValidName(string? name) => name is { Length: > 0 and <= 80 } &&
         !string.IsNullOrWhiteSpace(name) && !name.Any(char.IsControl);
 
+    private static bool ValidEffects(VoiceSettings settings) => Enum.IsDefined(settings.Preset) &&
+        settings.PitchSemitones is >= -8 and <= 8 && settings.GainDb is >= -18 and <= 12;
+
     private static bool IsLink(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
 
-    private static VoiceProfile ToProfile(Guid id, string name, string reference, int samples) =>
-        new(id, name, reference, TimeSpan.FromSeconds((double)samples / ReferenceSampleRate));
+    private static VoiceProfile ToProfile(Guid id, string directory, ProfileDocument document) => document.Effects is { } effects
+        ? new(id, document.Name, null, TimeSpan.Zero) { Effects = effects }
+        : new(id, document.Name, Path.Combine(directory, ReferenceFile), TimeSpan.FromSeconds((double)document.Samples / ReferenceSampleRate));
 
     private string Folder(Guid id) => Path.Combine(DirectoryPath, id.ToString("N"));
 
@@ -463,5 +494,5 @@ public sealed partial class VoiceProfiles
         }
     }
 
-    private sealed record ProfileDocument(int Version, string Name, int Samples);
+    private sealed record ProfileDocument(int Version, string Name, int Samples, VoiceSettings? Effects = null);
 }

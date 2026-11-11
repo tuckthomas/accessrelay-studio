@@ -9,7 +9,7 @@ internal sealed record RuntimeSample(ControllerSample Input, ControllerState Out
     string OutputStatus, MacroStatus Macro, double MeanPollMs, double P95PollMs, double P99PollMs,
     long PaddlePulse, PaddleButtons LastPaddles, uint VisibleControls);
 
-internal readonly record struct RecorderState(bool Connected, bool IsRecording, int ElapsedMs,
+internal readonly record struct RecorderState(bool Connected, bool IsRecording, bool HasInput, bool SupportsBackgroundInput, int ElapsedMs,
     MacroRecording? Pending, string? Note);
 
 internal sealed class StudioRuntime : IDisposable
@@ -20,6 +20,7 @@ internal sealed class StudioRuntime : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Thread _worker;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private StickDeadzone _stickDeadzone;
     private IControllerOutput? _output;
     private string _outputStatus = "Virtual output off";
     private RuntimeSample? _latest;
@@ -40,14 +41,16 @@ internal sealed class StudioRuntime : IDisposable
         get
         {
             lock (_sync)
-                return new(_latest?.Input.IsConnected == true, _recorder is not null,
+                return new(_latest?.Input.IsConnected == true, _recorder is not null, _recorder?.HasInput == true,
+                    _latest?.Input.SupportsBackgroundInput == true,
                     _recorder?.ElapsedMs ?? 0, _pending, _recordingNote);
         }
     }
 
-    public StudioRuntime(EliteInputMonitor input, StudioProfile initial)
+    public StudioRuntime(EliteInputMonitor input, StudioProfile initial, StickDeadzone stickDeadzone)
     {
         _input = input;
+        _stickDeadzone = stickDeadzone;
         _engine.Apply(initial);
         _worker = new Thread(Poll) { IsBackground = true, Name = "Gamepad Studio input" };
         _worker.Start();
@@ -61,6 +64,11 @@ internal sealed class StudioRuntime : IDisposable
     public void SetScriptsEnabled(bool enabled)
     {
         lock (_sync) _engine.SetEnabled(enabled);
+    }
+
+    public void SetStickDeadzone(StickDeadzone settings)
+    {
+        lock (_sync) _stickDeadzone = settings;
     }
 
     public void SelectController(string? id)
@@ -85,21 +93,22 @@ internal sealed class StudioRuntime : IDisposable
         }
     }
 
-    public void StartRecording(RecordingChannels channels)
+    public void StartRecording(RecordingChannels channels, bool replacePending = false)
     {
         lock (_sync)
         {
             if (_recorder is not null)
                 return;
-            if (_pending is not null)
+            if (_pending is not null && !replacePending)
                 throw new InvalidOperationException("Save or discard the previous recording first.");
             if (_latest?.Input is not { IsConnected: true } input)
                 throw new InvalidOperationException("Connect a controller to start a recording.");
 
             _recorder = new InputRecorder(channels);
+            _pending = null;
             _recordingConnection = input.ConnectionVersion;
             _recordingBeganAt = _clock.ElapsedMilliseconds;
-            _recordingNote = "Recording physical input. Scripts are paused during capture.";
+            _recordingNote = null;
             _engine.Tick(default, PaddleButtons.None, false, _recordingBeganAt);
         }
     }
@@ -107,7 +116,7 @@ internal sealed class StudioRuntime : IDisposable
     public void StopRecording()
     {
         lock (_sync)
-            FinishRecording(_clock.ElapsedMilliseconds, "Recording ready to save.");
+            FinishRecording(_clock.ElapsedMilliseconds, null);
     }
 
     public void DiscardRecording()
@@ -120,13 +129,14 @@ internal sealed class StudioRuntime : IDisposable
         }
     }
 
-    private void FinishRecording(long now, string note)
+    private void FinishRecording(long now, string? note)
     {
         if (_recorder is null)
             return;
         _pending = _recorder.Stop("Untitled recording", now);
         _recorder = null;
-        _recordingNote = _pending is not null ? note : "No input matched the selected recording filters.";
+        _recordingNote = _pending is not null ? note
+            : "No input was captured. Move an included physical control during recording, or choose All inputs and try again.";
     }
 
     public void Attach(IControllerOutput output)
@@ -248,6 +258,7 @@ internal sealed class StudioRuntime : IDisposable
                     }
                     else
                         state = _engine.Tick(input.State, input.HeldPaddles, input.IsConnected, now, input.PressedPaddles);
+                    state = _stickDeadzone.Apply(state);
                     if (_output is not null && !_output.TryWrite(state))
                         DisconnectOutput(_output.Status);
                     Volatile.Write(ref _latest, new(input, state, _output is not null, _outputStatus,

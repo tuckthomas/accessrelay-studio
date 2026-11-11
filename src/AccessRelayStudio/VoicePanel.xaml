@@ -70,6 +70,7 @@
                         <Slider x:Name="Pitch" Minimum="-8" Maximum="8" StepFrequency="0.5" ValueChanged="SettingValueChanged" />
                         <Slider x:Name="Gain" Minimum="-18" Maximum="12" StepFrequency="1" ValueChanged="SettingValueChanged" />
                         <ToggleSwitch x:Name="Mute" Header="Mute output" OnContent="Muted" OffContent="Unmuted" Toggled="SettingsChanged" />
+                        <Button x:Name="SaveEffectsProfileButton" Content="Save effects profile…" Click="SaveEffectsProfileClicked" />
                     </StackPanel>
                 </Border>
                 <Border Grid.Row="2" Grid.ColumnSpan="2" Style="{StaticResource VoiceCard}">

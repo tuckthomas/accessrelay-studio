@@ -3,6 +3,7 @@
 AccessRelay Studio is a Windows accessibility app for adaptive controller input and local voice processing. It helps people record and replay controller sequences, tune controls for their own movement, and use a locally processed microphone signal in other Windows apps.
 
 - **Adaptive input** supports Windows gamepads over USB or Bluetooth, live control feedback, configurable bindings, and a recorder that can include or ignore individual controls and axes.
+- **Lua scripts** add programmable controller logic with live input reads, timed output, persistent numeric state, a source editor, and syntax checks. [Controller API and examples](docs/lua-scripting.md)
 - **Voice access** offers pitch and tone effects, headphone preview, waveform trimming, and optional local reference-voice models and dialogue isolation.
 - **Dashboard** gives controller scripts and live voice separate switches and profile selectors. Live performance metrics include CPU, RAM, GPU, VRAM, controller polling, and virtual output handoff.
 

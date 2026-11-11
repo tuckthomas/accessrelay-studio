@@ -177,8 +177,10 @@ private:
 
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc != 3 || std::wstring_view(argv[1]) != L"--reference")
-            throw std::runtime_error("Expected --reference followed by the local voice profile WAV.");
+        const bool full_precision = argc == 5 && std::wstring_view(argv[3]) == L"--variant" &&
+            std::wstring_view(argv[4]) == L"fp32";
+        if ((argc != 3 && !full_precision) || std::wstring_view(argv[1]) != L"--reference")
+            throw std::runtime_error("Expected --reference <profile.wav> and optional --variant fp32.");
         _setmode(_fileno(stdin), _O_BINARY);
         _setmode(_fileno(stdout), _O_BINARY);
 
@@ -188,7 +190,9 @@ int wmain(int argc, wchar_t** argv) {
             throw std::runtime_error("Could not locate the bundled MeanVC2 model.");
         const auto directory = std::filesystem::path(executable).parent_path();
         const auto reference = read_reference(argv[2]);
-        const auto model = directory / "meanvc2-120ms-40ms-q4_k.gguf";
+        const auto model = full_precision
+            ? directory / "FullPrecision" / "meanvc2-120ms-40ms-fp32.gguf"
+            : directory / "meanvc2-120ms-40ms-q4_k.gguf";
         std::array<float, block_size> input{};
         std::vector<float> output;
         const auto prepare = [&](const char* backend) {

@@ -1,8 +1,8 @@
 # MeanVC2 local voice conversion host
 
-This optional host runs the June 2026 MeanVC2 streaming zero-shot voice converter in audio.cpp. It uses the upstream 120 ms synthesis and 40 ms lookahead quality checkpoint, quantized to Q4_K. It retains streaming state between requests. The imported voice profile supplies up to the first ten seconds of target speech. Conversion runs locally without a network service or temporary audio files.
+This optional host runs the June 2026 MeanVC2 streaming zero-shot voice converter in audio.cpp. It uses the upstream 120 ms synthesis and 40 ms lookahead quality checkpoint. The default package includes Q4_K. Place the [FP32 GGUF](https://huggingface.co/audio-cpp/audio.cpp-gguf/blob/a27679cead37af35763d022bf632cd024ffaf482/MeanVC2-GGUF/meanvc2-120ms-40ms-fp32.gguf) at `FullPrecision/meanvc2-120ms-40ms-fp32.gguf` beside the host to add the **MeanVC2 (Full precision)** option to Live Voice. Its SHA-256 is `340D5DD63CDD9D44045CDC4B394CCCF677AE870A9CE4ED18F0007C8788E65245`. The host retains streaming state between requests. The imported voice profile supplies up to the first ten seconds of target speech. Conversion runs locally without a network service or temporary audio files.
 
-The host tries Vulkan and falls back to CPU if Vulkan setup fails. With the RTX 2070 on the development PC, 160 ms input blocks took 35–37 ms median inference plus pipe I/O, with individual blocks up to 69 ms. Model startup took 39 seconds cold and 1.3 seconds after warming the graphics cache. These are host timings before microphone capture, frame accumulation, output buffering, and the receiving app. The CPU comparison processed the same blocks in 104–110 ms median.
+The host tries Vulkan and falls back to CPU if Vulkan setup fails. With Q4_K on the development PC’s RTX 2070, 160 ms input blocks took 35–37 ms median inference plus pipe I/O, with individual blocks up to 69 ms. Model startup took 39 seconds cold and 1.3 seconds after warming the graphics cache. These are host timings before microphone capture, frame accumulation, output buffering, and the receiving app. The CPU comparison processed the same blocks in 104–110 ms median.
 
 ## Sources and licensing
 
@@ -19,4 +19,4 @@ In an x64 Visual Studio developer command prompt, set `AUDIOCPP_SDK` to the extr
 cl /nologo /EHsc /std:c++20 /O2 /MT /DNOMINMAX /DAUDIOCPP_USE_DLL /I"%AUDIOCPP_SDK%\include" host.cpp /FePlaySignal.MeanVC2Host.exe /link "%AUDIOCPP_SDK%\libs\audiocpp.lib"
 ```
 
-Run the executable with `--reference <path to mono PCM16 WAV>`. It writes `READY` followed by a newline after warmup. Send requests of 7,680 little-endian float32 samples at 48 kHz. Each response is a little-endian int32 sample count followed by that many float32 samples at 48 kHz. Output counts can vary, including zero while conversion buffers. Close stdin to stop.
+Run the executable with `--reference <path to mono PCM16 WAV>`. Add `--variant fp32` to select the optional full-precision model. It writes `READY` followed by a newline after warmup. Send requests of 7,680 little-endian float32 samples at 48 kHz. Each response is a little-endian int32 sample count followed by that many float32 samples at 48 kHz. Output counts can vary, including zero while conversion buffers. Close stdin to stop.

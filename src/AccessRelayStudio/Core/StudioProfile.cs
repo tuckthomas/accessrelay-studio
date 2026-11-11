@@ -3,10 +3,11 @@ using System.IO;
 
 namespace EliteScriptStudio.Core;
 
-public enum ScriptKind { Passthrough, Rhythm, IntentionalMiss, Moving, Stepback, Recorded }
+public enum ScriptKind { Passthrough, Rhythm, IntentionalMiss, Moving, Stepback, Recorded, Lua }
 public enum ShotVariant { Rhythm, MissEarly, MissLate, Moving, Stepback }
 
-public sealed record ScriptBinding(ScriptKind Script, bool Enabled = true, bool Consume = false, Guid? RecordingId = null);
+public sealed record ScriptBinding(ScriptKind Script, bool Enabled = true, bool Consume = false, Guid? RecordingId = null,
+    Guid? LuaScriptId = null);
 
 public sealed record ScriptTiming(
     int StartDelay = 0, int DownSweep = 0, int DownHold = 512, int UpSweep = 80,
@@ -56,6 +57,16 @@ public sealed record StudioProfile
     public ImmutableDictionary<ShotVariant, ScriptTiming> Timings { get; init; } = Defaults;
     public ImmutableDictionary<Guid, MacroRecording> Recordings { get; init; } =
         ImmutableDictionary<Guid, MacroRecording>.Empty;
+    public ImmutableDictionary<Guid, LuaControllerScript> LuaScripts { get; init; } =
+        ImmutableDictionary<Guid, LuaControllerScript>.Empty;
+
+    public StudioProfile WithLuaScript(LuaControllerScript script) => this with { LuaScripts = LuaScripts.SetItem(script.Id, script) };
+
+    public StudioProfile WithoutLuaScript(Guid id) => this with
+    {
+        LuaScripts = LuaScripts.Remove(id),
+        Bindings = Bindings.RemoveRange(Bindings.Where(binding => binding.Value.LuaScriptId == id).Select(binding => binding.Key))
+    };
 
     public static StudioProfile CreateDefault(string name = "PC Profile") => new()
     {
@@ -83,6 +94,35 @@ public sealed record StudioProfile
     public StudioProfile WithRecording(MacroRecording recording) =>
         this with { Recordings = Recordings.SetItem(recording.Id, recording) };
 
+    internal StudioProfile RenameRecording(Guid id, string name)
+    {
+        if (!Recordings.TryGetValue(id, out var source))
+            throw new InvalidOperationException("This macro is no longer in the profile.");
+
+        var renamed = source with { Name = name.Trim() };
+        renamed.Validate();
+        return renamed == source ? this : WithRecording(renamed);
+    }
+
+    internal (StudioProfile Profile, MacroRecording Copy) DuplicateRecording(Guid id, string name)
+    {
+        if (Recordings.Count >= MacroRecording.MaxRecordingsPerProfile)
+            throw new InvalidOperationException($"This profile already has {MacroRecording.MaxRecordingsPerProfile} saved macros.");
+        if (!Recordings.TryGetValue(id, out var source))
+            throw new InvalidOperationException("The original macro is no longer in this profile.");
+
+        var copy = source with { Id = Guid.NewGuid(), Name = name.Trim() };
+        copy.Validate();
+        return (WithRecording(copy), copy);
+    }
+
+    public StudioProfile WithoutRecording(Guid id) => this with
+    {
+        Recordings = Recordings.Remove(id),
+        Bindings = Bindings.RemoveRange(Bindings.Where(binding => binding.Value.RecordingId == id)
+            .Select(binding => binding.Key))
+    };
+
     public void Validate()
     {
         if (Id == Guid.Empty)
@@ -97,10 +137,20 @@ public sealed record StudioProfile
                 throw new InvalidDataException("The profile contains an invalid recording ID.");
             recording.Validate();
         }
+        if (LuaScripts is null || LuaScripts.Count > LuaControllerScript.MaxScripts)
+            throw new InvalidDataException($"A profile can contain up to {LuaControllerScript.MaxScripts} Lua scripts.");
+        foreach (var (id, script) in LuaScripts)
+        {
+            if (script is null || script.Id != id)
+                throw new InvalidDataException("The profile contains an invalid Lua script ID.");
+            script.Validate();
+        }
         if (Bindings is null || Bindings.Any(entry => !Enum.IsDefined(entry.Key) || entry.Value is null
             || !Enum.IsDefined(entry.Value.Script)
             || (entry.Value.Script == ScriptKind.Recorded
-                && (entry.Value.RecordingId is not Guid id || !Recordings.ContainsKey(id)))))
+                && (entry.Value.RecordingId is not Guid id || !Recordings.ContainsKey(id)))
+            || (entry.Value.Script == ScriptKind.Lua
+                && (entry.Value.LuaScriptId is not Guid luaId || !LuaScripts.ContainsKey(luaId)))))
             throw new InvalidDataException("The profile contains an invalid control or script binding.");
         if (Timings is null || Timings.Count != Defaults.Count)
             throw new InvalidDataException("The profile needs timing for all five shot variants.");

@@ -381,7 +381,7 @@ def build():
     large_outline = [(-.099,.089),(-.074,.122),(.035,.131),(.094,.112),(.119,.076),
                      (.124,.037),(.108,-.020),(.094,-.087),(.053,-.166),(.026,-.183),
                      (.002,-.163),(.008,-.108),(.018,-.052),(-.004,-.005),(-.045,.018),(-.097,.032)]
-    for name, sign in [("Left",1),("Right",-1)]:
+    for name, sign in [("Right",1),("Left",-1)]:
         small = [(sign * -x, y) for x,y in small_outline]
         large = [(sign * x, y) for x,y in large_outline]
         model.part("Small"+name, loft(model, spline(small), [(.85,-.047),(1,-.037),(1,-.013),(.84,.004)], chrome),

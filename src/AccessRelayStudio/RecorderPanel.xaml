@@ -20,19 +20,27 @@
         </Style>
     </UserControl.Resources>
 
-    <StackPanel Spacing="10" HorizontalAlignment="Stretch">
-        <Border Style="{StaticResource RecorderCard}">
+    <Grid x:Name="RecorderWorkspace" ColumnDefinitions="*,0" RowDefinitions="Auto,Auto"
+          RowSpacing="10" SizeChanged="WorkspaceWidthChanged">
+        <Border Grid.Row="0" VerticalAlignment="Top" Style="{StaticResource RecorderCard}">
             <StackPanel Spacing="9">
+                <TextBlock Text="1. Record" FontSize="19" Style="{StaticResource RecorderHeading}" />
+                <ComboBox x:Name="CapturePreset" Header="What to record" MinWidth="0" HorizontalAlignment="Stretch"
+                          SelectionChanged="CapturePresetChanged">
+                    <x:String>All inputs</x:String>
+                    <x:String>Right stick only</x:String>
+                    <x:String>Ignore left stick</x:String>
+                    <x:String>Custom</x:String>
+                </ComboBox>
+                <TextBlock x:Name="FilterSummary" Style="{StaticResource RecorderHint}" />
                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
                     <Ellipse x:Name="CaptureIndicator" Width="8" Height="8" Fill="#8FA9C7"
                              VerticalAlignment="Center" />
-                    <TextBlock x:Name="CaptureStatus" Grid.Column="1" Text="Waiting for USB"
+                    <TextBlock x:Name="CaptureStatus" Grid.Column="1" Text="Connect a controller to start"
                                TextWrapping="Wrap" Style="{StaticResource RecorderHeading}"
                                AutomationProperties.LiveSetting="Polite" />
                 </Grid>
-                <TextBlock Text="Start recording, perform the input on your controller, then stop to review it."
-                           Style="{StaticResource RecorderHint}" />
-                <TextBlock Text="Manual controls stay available during recording. Playback uses the included controls."
+                <TextBlock Text="Press or move an included control on your physical gamepad. Scripts pause during recording."
                            Style="{StaticResource RecorderHint}" />
                 <StackPanel x:Name="CaptureProgress" Spacing="4" Visibility="Collapsed">
                     <ProgressBar x:Name="CaptureBar" Minimum="0"
@@ -41,62 +49,58 @@
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button x:Name="StartButton" Content="Start recording" Click="StartClicked"
-                            Style="{StaticResource AccentButtonStyle}" />
-                    <Button x:Name="StopButton" Content="Stop recording" Click="StopClicked"
-                            Style="{StaticResource AccentButtonStyle}" Visibility="Collapsed" />
+                            IsEnabled="False" Style="{StaticResource AccentButtonStyle}" />
+                    <Button x:Name="StopButton" Content="Stop &amp; review" Click="StopClicked"
+                            IsEnabled="False" Style="{StaticResource AccentButtonStyle}" />
                 </StackPanel>
                 <TextBlock x:Name="CaptureNote" Style="{StaticResource RecorderHint}" Visibility="Collapsed"
                            AutomationProperties.LiveSetting="Polite" />
+                <Expander x:Name="FiltersExpander" Header="Custom input filters" IsExpanded="False"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Checked inputs are recorded. Unchecked inputs stay manual during playback."
+                                   Style="{StaticResource RecorderHint}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button x:Name="SelectAllFilters" Content="Select all" Click="SelectAllClicked" />
+                            <Button x:Name="ClearFilters" Content="Clear selection" Click="ClearSelectionClicked" />
+                        </StackPanel>
+                        <Grid x:Name="FilterGroups" ColumnSpacing="12" RowSpacing="10" SizeChanged="FilterWidthChanged" />
+                    </StackPanel>
+                </Expander>
             </StackPanel>
         </Border>
 
-        <Border x:Name="ReviewCard" Style="{StaticResource RecorderCard}" Visibility="Collapsed">
+        <Border x:Name="ReviewCard" Grid.Row="1" VerticalAlignment="Top" Style="{StaticResource RecorderCard}">
             <StackPanel Spacing="9">
-                <TextBlock Text="Review recording" Style="{StaticResource RecorderHeading}" />
+                <TextBlock Text="2. Review &amp; save" FontSize="19" Style="{StaticResource RecorderHeading}" />
                 <TextBlock x:Name="ReviewSummary" Style="{StaticResource RecorderHint}"
+                           Text="Your recording will appear here after you stop."
                            AutomationProperties.LiveSetting="Polite" />
+                <TextBlock x:Name="SaveTarget" Text="Saves to the active macro profile."
+                           Style="{StaticResource RecorderHint}" />
                 <TextBox x:Name="RecordingName" Header="Recording name" PlaceholderText="e.g. Fadeaway"
-                         MaxLength="80" TextChanged="RecordingNameChanged" />
+                         IsEnabled="False" MaxLength="80" TextChanged="RecordingNameChanged" />
                 <ComboBox x:Name="PaddlePicker" Header="Bind to a paddle (optional)" MinWidth="0"
-                          HorizontalAlignment="Stretch" />
+                          IsEnabled="False" HorizontalAlignment="Stretch" />
                 <TextBlock x:Name="NameError" Text="Enter a name for this recording." Visibility="Collapsed"
                            Style="{StaticResource RecorderHint}" AutomationProperties.LiveSetting="Polite" />
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Save recording" Style="{StaticResource AccentButtonStyle}" Click="SaveClicked" />
-                    <Button Content="Discard" Click="DiscardClicked" />
+                    <Button x:Name="SaveProfileButton" Content="Save macro" IsEnabled="False"
+                            Style="{StaticResource AccentButtonStyle}" Click="SaveClicked" />
+                    <Button x:Name="RecordAgainButton" Content="Record again" IsEnabled="False" Click="RecordAgainClicked" />
+                    <Button x:Name="DiscardButton" Content="Discard recording" IsEnabled="False" Click="DiscardClicked" />
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="CopyJsonButton" Content="Copy JSON" IsEnabled="False" Click="CopyJsonClicked" />
+                    <Button x:Name="SaveJsonButton" Content="Export JSON" IsEnabled="False" Click="SaveJsonClicked" />
+                </StackPanel>
+                <TextBox x:Name="RecordingJson" Header="Recorded macro JSON" Height="260" FontFamily="Consolas"
+                         PlaceholderText="No recorded inputs yet."
+                         IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Auto" />
+                <TextBlock x:Name="ReviewStatus" Style="{StaticResource RecorderHint}"
+                           AutomationProperties.LiveSetting="Polite" />
             </StackPanel>
         </Border>
-
-        <Border Style="{StaticResource RecorderCard}">
-            <StackPanel Spacing="8">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <TextBlock Text="Input filters" Style="{StaticResource RecorderHeading}" VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Button x:Name="SelectAllFilters" Content="Select all" Click="SelectAllClicked" Padding="8,3" FontSize="12" />
-                        <Button x:Name="ClearFilters" Content="Clear selection" Click="ClearSelectionClicked" Padding="8,3" FontSize="12" />
-                    </StackPanel>
-                </Grid>
-                <RadioButtons x:Name="FilterMode" MaxColumns="2" SelectionChanged="FilterModeChanged"
-                              AutomationProperties.Name="Input filter mode">
-                    <x:String>Include selected</x:String>
-                    <x:String>Ignore selected</x:String>
-                </RadioButtons>
-                <TextBlock x:Name="FilterSummary" Style="{StaticResource RecorderHint}" />
-                <Grid x:Name="FilterGroups" ColumnSpacing="12" RowSpacing="10" SizeChanged="FilterWidthChanged" />
-                <TextBlock Text="Shortcuts" FontWeight="SemiBold" FontSize="12" />
-                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-                    <Button x:Name="AllShortcut" Click="AllInputsClicked" HorizontalAlignment="Stretch" Padding="5,4">
-                        <TextBlock Text="All inputs" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" />
-                    </Button>
-                    <Button x:Name="RightShortcut" Grid.Column="1" Click="RightStickClicked" HorizontalAlignment="Stretch" Padding="5,4">
-                        <TextBlock Text="Right stick only" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" />
-                    </Button>
-                    <Button x:Name="IgnoreLeftShortcut" Grid.Column="2" Click="IgnoreLeftClicked" HorizontalAlignment="Stretch" Padding="5,4">
-                        <TextBlock Text="Ignore left stick" TextWrapping="Wrap" TextAlignment="Center" FontSize="12" />
-                    </Button>
-                </Grid>
-            </StackPanel>
-        </Border>
-    </StackPanel>
+    </Grid>
 </UserControl>

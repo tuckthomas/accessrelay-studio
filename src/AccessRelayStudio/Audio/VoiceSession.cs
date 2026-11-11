@@ -99,7 +99,8 @@ public sealed class VoiceSession : IDisposable
                 : throw new InvalidOperationException("Start the virtual microphone before changing its live profile.");
         }
 
-        var replacement = await NeuralVoiceWorker.OpenAsync(model, profile.ReferencePath, cancellation).ConfigureAwait(false);
+        var replacement = await OpenModelAsync(model, profile, cancellation).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Choose a reference-voice model to switch profiles on this stream.");
         NeuralVoiceWorker? previous;
         try
         {
@@ -123,9 +124,9 @@ public sealed class VoiceSession : IDisposable
     {
         if (!model.UsesReference)
             return null;
-        if (profile is null)
+        if (profile?.ReferencePath is not { } reference)
             throw new InvalidOperationException("Select an imported voice profile for the AI model.");
-        return await NeuralVoiceWorker.OpenAsync(model, profile.ReferencePath, cancellation).ConfigureAwait(false);
+        return await NeuralVoiceWorker.OpenAsync(model, reference, cancellation).ConfigureAwait(false);
     }
 
     private void StartStream(string microphoneId, string? outputId, VoiceSettings settings,

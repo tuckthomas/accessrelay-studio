@@ -21,11 +21,12 @@ public sealed partial class MainWindow : Window
 {
     private enum StudioPage
     {
-        Dashboard, Bindings, Parameters, Profiles, Calibration, Monitor, Sequences, Recorder, Voice, Settings, Updates, Help, About
+        Dashboard, Bindings, Parameters, Profiles, Calibration, Monitor, Sequences, Recorder, Lua, Plugins, Voice, Settings, Updates, Help, About
     }
     private static readonly Brush ConnectedBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 54, 221, 93));
     private static readonly Brush WaitingBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 169, 187, 209));
     private readonly ProfileStore _store = new();
+    private StickDeadzone _stickDeadzone;
     private readonly DispatcherQueueTimer _refresh;
     private readonly DispatcherQueueTimer _performanceRefresh;
     private SystemPerformanceMonitor? _performance;
@@ -63,6 +64,14 @@ public sealed partial class MainWindow : Window
     private IReadOnlyList<StickPhase> _preview = [];
     private TextBlock? _previewStatus;
     private RecorderPanel? _recorderPanel;
+    private LuaScriptPanel? _luaPanel;
+    private Nba2K27PluginPanel? _nba2K27Plugin;
+    private StackPanel? _savedMacroList;
+    private StackPanel? _macroNameEditor;
+    private MacroRecording? _replacementRecording;
+    private Guid? _parameterRecordingId;
+    private RecordingEditor? _recordingEditor;
+    private bool _exportingRecording;
     private VoicePanel? _voicePanel;
     private string? _recordError;
     private IReadOnlyList<ControllerDevice> _knownDevices = [];
@@ -75,6 +84,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         _draft = _active;
+        _stickDeadzone = _store.LoadStickDeadzone();
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(StudioTitleBar);
@@ -137,6 +147,13 @@ public sealed partial class MainWindow : Window
         Root.Loaded += StartMonitoring;
         AppWindow.Closing += (_, args) =>
         {
+            if (_luaPanel?.HasUnsavedChanges == true)
+            {
+                args.Cancel = true;
+                SelectPage(StudioPage.Lua);
+                Status.Text = "Save & apply or revert your Lua edits before closing Studio.";
+                return;
+            }
             if (RecorderInUse())
             {
                 args.Cancel = true;
@@ -171,7 +188,7 @@ public sealed partial class MainWindow : Window
         Root.Loaded -= StartMonitoring;
         try
         {
-            _runtime = new StudioRuntime(new EliteInputMonitor(WindowNative.GetWindowHandle(this)), _active);
+            _runtime = new StudioRuntime(new EliteInputMonitor(WindowNative.GetWindowHandle(this)), _active, _stickDeadzone);
             _runtime.SetScriptsEnabled(false);
         }
         catch (Exception error)
@@ -191,11 +208,13 @@ public sealed partial class MainWindow : Window
 
     private Choice<ScriptBinding>[] Scripts() =>
     [
-        .. Enum.GetValues<ScriptKind>().Where(script => script != ScriptKind.Recorded)
+        .. Enum.GetValues<ScriptKind>().Where(script => script is not (ScriptKind.Recorded or ScriptKind.Lua))
             .Select(script => new Choice<ScriptBinding>(new(script), ScriptName(script))),
         .. _draft.Recordings.Values.OrderBy(recording => recording.Name, StringComparer.OrdinalIgnoreCase)
             .Select(recording => new Choice<ScriptBinding>(
-                new(ScriptKind.Recorded, RecordingId: recording.Id), $"{recording.Name} · Recording"))
+                new(ScriptKind.Recorded, RecordingId: recording.Id), $"{recording.Name} · Recording")),
+        .. _draft.LuaScripts.Values.OrderBy(script => script.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(script => new Choice<ScriptBinding>(new(ScriptKind.Lua, LuaScriptId: script.Id), $"{script.Name} · Lua"))
     ];
 
     private static string ScriptName(ScriptKind script) => script switch
@@ -210,12 +229,15 @@ public sealed partial class MainWindow : Window
     private string BindingName(ScriptBinding binding) =>
         binding.Script == ScriptKind.Recorded && binding.RecordingId is Guid id
             && _draft.Recordings.TryGetValue(id, out var recording)
-            ? recording.Name : ScriptName(binding.Script);
+            ? recording.Name : binding.Script == ScriptKind.Lua && binding.LuaScriptId is Guid luaId
+                && _draft.LuaScripts.TryGetValue(luaId, out var lua) ? lua.Name : ScriptName(binding.Script);
 
     private MacroRecording? SelectedRecording(StudioProfile profile)
     {
         if (_showBuiltInTiming)
             return null;
+        if ((CurrentPage is StudioPage.Parameters or StudioPage.Calibration) && _parameterRecordingId is Guid selected)
+            return profile.Recordings.GetValueOrDefault(selected);
         var binding = profile.GetBinding(_selected);
         return binding.Script == ScriptKind.Recorded && binding.RecordingId is Guid id
             ? profile.Recordings.GetValueOrDefault(id) : null;
@@ -265,9 +287,10 @@ public sealed partial class MainWindow : Window
     private void SelectControl(ControlId selected)
     {
         _selected = selected;
+        _parameterRecordingId = null;
         _showBuiltInTiming = false;
         var script = _draft.GetBinding(selected).Script;
-        if (script is not (ScriptKind.Passthrough or ScriptKind.Recorded))
+        if (script is not (ScriptKind.Passthrough or ScriptKind.Recorded or ScriptKind.Lua))
             _variant = Trajectory.VariantFor(script);
         RefreshInspector();
         RefreshTimingPage();
@@ -305,7 +328,8 @@ public sealed partial class MainWindow : Window
     {
         picker.ItemsSource = scripts;
         picker.SelectedIndex = Array.FindIndex(scripts, choice =>
-            choice.Value.Script == binding.Script && choice.Value.RecordingId == binding.RecordingId);
+            choice.Value.Script == binding.Script && choice.Value.RecordingId == binding.RecordingId
+                && choice.Value.LuaScriptId == binding.LuaScriptId);
     }
 
     private void RefreshBindingHints() =>
@@ -379,6 +403,7 @@ public sealed partial class MainWindow : Window
         if (_syncing || TimingPicker.SelectedItem is not Choice<ShotVariant> choice)
             return;
         _variant = choice.Value;
+        _parameterRecordingId = null;
         BuildTimingFields();
         RefreshTimingPage();
     }
@@ -391,11 +416,14 @@ public sealed partial class MainWindow : Window
         TimingPicker.Visibility = recording is null ? Visibility.Visible : Visibility.Collapsed;
         TimingHint.Text = recording is null
             ? "Timings in milliseconds · 0 is instant down"
-            : $"{recording.Name} · {recording.DurationMs} ms · {recording.Frames.Length} frames";
+            : RecordingTimingHint(recording);
         if (recording is not null)
+        {
+            AddRecordedTimingFields(recording);
             return;
+        }
         var timing = _draft.GetTiming(_variant);
-        AddField("Down Hold (ms)", timing.DownHold, 1, ScriptTiming.MaxMs, 1500, (t, ms) => t with { DownHold = ms });
+        AddField("Down Hold (ms)", timing.DownHold, 1, ScriptTiming.MaxMs, ScriptTiming.MaxMs, (t, ms) => t with { DownHold = ms });
         AddField("Up Sweep (ms)", timing.UpSweep, 4, ScriptTiming.MaxMs, 360, (t, ms) => t with { UpSweep = ms });
         AddField("Down Sweep (ms)", timing.DownSweep, 0, ScriptTiming.MaxMs, 360, (t, ms) => t with { DownSweep = ms is 1 or 2 ? 3 : ms });
         AddField("Start Delay (ms)", timing.StartDelay, 0, ScriptTiming.MaxMs, 800, (t, ms) => t with { StartDelay = ms });
@@ -410,8 +438,67 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private static string RecordingTimingHint(MacroRecording recording) =>
+        $"{recording.Name} · {recording.DurationMs} ms · {recording.Frames.Length} frames";
+
+    private void AddRecordedTimingFields(MacroRecording recording)
+    {
+        var (downSweep, downHold, upSweep, upHold) = recording.FindRightStickIntervals();
+        AddRange("Down Hold (ms)", downHold, InputRecorder.MaxDurationMs);
+        AddRange("Up Sweep (ms)", upSweep, 360);
+        AddRange("Down Sweep (ms)", downSweep, 360);
+        AddRange("Up Hold (ms)", upHold, 400);
+        if (TimingInputs.Children.Count == 0)
+            AddRange("Duration (ms)", new RecordedInterval(0, recording.Frames.Length), 1500);
+
+        if (CurrentPage != StudioPage.Parameters)
+        {
+            int row = TimingInputs.RowDefinitions.Count;
+            TimingInputs.RowDefinitions.Add(new() { Height = GridLength.Auto });
+            var edit = new Button { Content = "Open frame editor", HorizontalAlignment = HorizontalAlignment.Stretch };
+            edit.Click += (_, _) => OpenRecordedParameters(recording.Id);
+            Grid.SetRow(edit, row);
+            TimingInputs.Children.Add(edit);
+        }
+
+        void AddRange(string label, RecordedInterval? range, int sliderMaximum)
+        {
+            if (range is not { } interval)
+                return;
+            MacroRecording Current() => _draft.Recordings.GetValueOrDefault(recording.Id) ?? recording;
+            int Limit(int next)
+            {
+                var current = Current();
+                return Math.Min(next, InputRecorder.MaxDurationMs - current.DurationMs + current.IntervalDuration(interval));
+            }
+            AddParameterField(label, recording.IntervalDuration(interval), interval.End - interval.Start,
+                InputRecorder.MaxDurationMs, Limit(sliderMaximum), next =>
+                {
+                    var current = Current();
+                    if (next != current.IntervalDuration(interval))
+                        StageRecordingEdit(current.WithIntervalDuration(interval.Start, interval.End, next));
+                }, Limit);
+        }
+    }
+
     private void AddField(string label, int value, int minimum, int maximum, int sliderMaximum,
         Func<ScriptTiming, int, ScriptTiming> edit)
+    {
+        var variant = _variant;
+        AddParameterField(label, value, minimum, maximum, sliderMaximum, next =>
+        {
+            var original = _draft.GetTiming(variant);
+            var updated = edit(original, next);
+            if (original == updated)
+                return;
+            _draft = _draft.WithTiming(variant, updated);
+            DraftChanged();
+            RefreshTimingPage();
+        }, next => label == "Down Sweep (ms)" && next is 1 or 2 ? 3 : next);
+    }
+
+    private void AddParameterField(string label, int value, int minimum, int maximum, int sliderMaximum,
+        Action<int> changed, Func<int, int> normalize)
     {
         int rowIndex = TimingInputs.RowDefinitions.Count;
         TimingInputs.RowDefinitions.Add(new() { Height = GridLength.Auto });
@@ -439,28 +526,19 @@ public sealed partial class MainWindow : Window
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(number, label);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(slider, label + " slider");
-        var variant = _variant;
         bool normalizing = false;
         void SetValue(double entered)
         {
             if (normalizing)
                 return;
-            int next = double.IsFinite(entered) ? (int)Math.Clamp(Math.Round(entered), minimum, maximum) : minimum;
-            if (label == "Down Sweep (ms)" && next is 1 or 2)
-                next = 3;
+            int next = normalize(double.IsFinite(entered) ? (int)Math.Clamp(Math.Round(entered), minimum, maximum) : minimum);
             normalizing = true;
             number.Value = next;
             if (next > slider.Maximum)
                 slider.Maximum = next;
             slider.Value = next;
             normalizing = false;
-            var original = _draft.GetTiming(variant);
-            var updated = edit(original, next);
-            if (original == updated)
-                return;
-            _draft = _draft.WithTiming(variant, updated);
-            DraftChanged();
-            RefreshTimingPage();
+            changed(next);
         }
         number.ValueChanged += (_, args) => SetValue(double.IsFinite(args.NewValue) ? args.NewValue : args.OldValue);
         slider.ValueChanged += (_, args) => SetValue(args.NewValue);
@@ -557,12 +635,28 @@ public sealed partial class MainWindow : Window
             Status.Text = "Stop the recording before applying profile changes.";
             return false;
         }
+        if (_recordingEditor is { } editor && !editor.TryGetResult(out _))
+        {
+            Status.Text = "Update or reset the edited fields before applying.";
+            return false;
+        }
         try
         {
-            _store.Save(_draft);
+            foreach (var script in _draft.LuaScripts.Values)
+                _ = new LuaControllerProgram(script);
+            if (_draft.Recordings != _active.Recordings || _draft.LuaScripts != _active.LuaScripts)
+            {
+                _store.SaveRecordingEdit(_active, _draft);
+                foreach (var (id, recording) in _draft.Recordings)
+                    if (_active.Recordings.GetValueOrDefault(id) != recording)
+                        _recorderPanel?.ClearSavedPreview(id);
+            }
+            else
+                _store.Save(_draft);
             _runtime?.Apply(_draft);
             _active = _draft;
             SetProfiles(_store.LoadAll());
+            RefreshSavedMacros();
             ShowProfileNotice(DashboardMacroProfileNotice, "");
             Status.Text = $"Saved and applied {_active.Name}";
             return true;
@@ -610,6 +704,7 @@ public sealed partial class MainWindow : Window
         if (_syncing || sender is not ComboBox { SelectedItem: StudioProfile profile } || profile.Id == _active.Id)
             return;
         string? blocker = RecorderInUse() ? "Finish and save or discard the recording before switching macro profiles."
+            : _luaPanel?.HasUnsavedChanges == true ? "Save & apply or revert your Lua edits before switching macro profiles."
             : _draft != _active ? "Apply or revert your bindings draft before switching macro profiles."
             : null;
         if (blocker is not null)
@@ -633,6 +728,12 @@ public sealed partial class MainWindow : Window
     {
         profiles ??= _store.LoadAll();
         _runtime?.Apply(profile);
+        if (_active.Id != profile.Id)
+        {
+            _replacementRecording = null;
+            _parameterRecordingId = null;
+            _recorderPanel?.ClearSavedPreview();
+        }
         _active = _draft = profile;
         SetProfiles(profiles);
         RefreshInspector();
@@ -740,6 +841,7 @@ public sealed partial class MainWindow : Window
             VoiceLiveBadge.Visibility = micBadge;
         if (_runtime?.Latest is { } sample)
         {
+            _luaPanel?.ShowRuntime(sample.Macro);
             var input = sample.Input;
             UpdateDeviceDisplay(input);
             if (CurrentPage == StudioPage.Bindings)
@@ -756,11 +858,15 @@ public sealed partial class MainWindow : Window
             if (_monitor is not null)
             {
                 string pressed = string.Join(", ", ControlMap.All.Where(control => ControlMap.IsPressed(control, input.State, input.HeldPaddles)).Select(ControlName));
-                _monitor.Text = $"PHYSICAL CONTROLLER\n{input.Source}\n{FormatState(input.State)}\n" +
+                string readout = $"PHYSICAL CONTROLLER · RAW STICK READINGS\n{input.Source}\n{FormatState(input.State)}\n" +
+                    $"Distance from center  L {StickDeadzone.DistancePercent(input.State.LeftX, input.State.LeftY):F1}%  " +
+                    $"R {StickDeadzone.DistancePercent(input.State.RightX, input.State.RightY):F1}%\n" +
                     $"Pressed  {(pressed.Length == 0 ? "—" : pressed)}\n\nPADDLE SOURCE\n{input.PaddleSource}\n" +
                     $"Held  {input.HeldPaddles}    Last press  {sample.LastPaddles}\n\nVIRTUAL XBOX OUTPUT\n{sample.OutputStatus}\n" +
                     (sample.OutputActive ? $"Last submitted report\n{FormatState(sample.Output)}\n" : "Computed preview\n" + FormatState(sample.Output) + "\n") +
                     $"\nLOCAL POLL INTERVAL\nMean {sample.MeanPollMs:F1} ms · p95 {sample.P95PollMs:F1} ms · p99 {sample.P99PollMs:F1} ms";
+                if (_monitor.Text != readout)
+                    _monitor.Text = readout;
             }
             if (_probe is not null && _probeIndex >= 0 && sample.PaddlePulse > _probePulse)
             {
@@ -865,6 +971,7 @@ public sealed partial class MainWindow : Window
         int tab = Navigation.SelectedIndex - (int)StudioPage.Bindings;
         TopNavigation.SelectedIndex = tab >= 0 && tab < TopNavigation.Items.Count ? tab : -1;
         _syncing = false;
+        BuildTimingFields();
         ShowPage();
     }
 
@@ -980,6 +1087,7 @@ public sealed partial class MainWindow : Window
                 _ when _outputStart?.IsCancellationRequested == true => "Cancelling virtual Xbox output startup…",
                 _ when _openingOutput => "Starting virtual Xbox output for controller passthrough…",
                 _ when _scriptsOutputError is { } error => error,
+                _ when sample?.Macro.Error is { } luaError => luaError,
                 (_, false, true) => "Off. The virtual Xbox controller passes through your physical input.",
                 (_, false, false) => "Off. Your controller bindings are ready when you turn scripts on.",
                 (_, true, _) when runtime?.Recording.IsRecording == true => "Paused during macro recording.",
@@ -1065,7 +1173,10 @@ public sealed partial class MainWindow : Window
 
     private void ShowPage()
     {
+        CloseMacroNameEditor();
         Details.Children.Clear();
+        _savedMacroList = null;
+        _recordingEditor = null;
         _managedMacroProfile = null;
         _monitor = null;
         _monitorDevicePicker = null;
@@ -1073,11 +1184,13 @@ public sealed partial class MainWindow : Window
         _probeIndex = -1;
         _previewStatus = null;
         StudioPage page = CurrentPage;
+        if (_refresh is { } refresh)
+            refresh.Interval = TimeSpan.FromMilliseconds(page == StudioPage.Monitor ? 16 : 32);
         if (_performance is { } performance)
             performance.Enabled = page == StudioPage.Dashboard;
         MacroProfileActions.Visibility = page is StudioPage.Bindings or StudioPage.Parameters or StudioPage.Profiles
-            or StudioPage.Calibration or StudioPage.Sequences or StudioPage.Recorder ? Visibility.Visible : Visibility.Collapsed;
-        bool fullWidth = page is StudioPage.Dashboard or StudioPage.Voice;
+            or StudioPage.Calibration or StudioPage.Sequences or StudioPage.Recorder or StudioPage.Lua ? Visibility.Visible : Visibility.Collapsed;
+        bool fullWidth = page is StudioPage.Dashboard or StudioPage.Voice or StudioPage.Recorder or StudioPage.Lua or StudioPage.Plugins or StudioPage.Sequences;
         BindingsInspector.Visibility = fullWidth ? Visibility.Collapsed : Visibility.Visible;
         Grid.SetColumnSpan(WorkspacePanel, fullWidth ? 2 : 1);
         MapFooter.Visibility = fullWidth ? Visibility.Collapsed : Visibility.Visible;
@@ -1105,10 +1218,21 @@ public sealed partial class MainWindow : Window
                 RefreshDashboardVoiceProfiles();
                 break;
             case StudioPage.Parameters:
-                Heading("Parameters", "Edit timings in the inspector and review the exact action list.");
-                ShowTrajectory();
-                if (SelectedRecording(_draft) is null)
+                if (SelectedRecording(_draft) is { } recorded)
                 {
+                    Heading("Parameters", $"{recorded.Name} · Adjust timing in the inspector, then choose Apply.");
+                    _recordingEditor = new RecordingEditor(recorded);
+                    _recordingEditor.RecordingChanged += updated =>
+                    {
+                        StageRecordingEdit(updated);
+                        BuildTimingFields();
+                    };
+                    Details.Children.Add(_recordingEditor);
+                }
+                else
+                {
+                    Heading("Parameters", "Edit timings in the inspector and review the exact action list.");
+                    ShowTrajectory();
                     AddButton("Reset this timing preset", () =>
                     {
                         _draft = _draft.WithTiming(_variant, StudioProfile.CreateDefault().GetTiming(_variant));
@@ -1134,6 +1258,7 @@ public sealed partial class MainWindow : Window
                 _monitorDevicePicker.SelectionChanged += DeviceSelectionChanged;
                 Details.Children.Add(_monitorDevicePicker);
                 FillDevicePickers();
+                AddStickDeadzoneControls();
                 AddButton("Probe Elite keypad paddles", () =>
                 {
                     if (_runtime?.Latest is not { } sample || !sample.Input.IsPaddleInterfacePresent || !sample.Input.IsConnected)
@@ -1155,17 +1280,16 @@ public sealed partial class MainWindow : Window
                 _monitor.FontFamily = new FontFamily("Consolas");
                 break;
             case StudioPage.Sequences:
-                Heading("Input Sequences", "Review built-in presets and recordings saved in this profile.");
+                Heading("Input Sequences", "Manage saved macros and open built-in scripts for editing.");
+                AddSavedMacroList();
                 AddButton("Open Macro Recorder", () => SelectPage(StudioPage.Recorder));
-                foreach (var recording in _draft.Recordings.Values.OrderBy(recording => recording.Name, StringComparer.OrdinalIgnoreCase))
-                {
-                    DetailText($"{recording.Name} · {recording.DurationMs} ms · {recording.Frames.Length} frames");
-                    AddButton($"Remove {recording.Name} from draft", () => RemoveRecording(recording.Id));
-                }
+                AddButton("Open Lua scripts", () => SelectPage(StudioPage.Lua));
+                DetailText("Built-in scripts").Style = (Style)Root.Resources["Section"];
                 foreach (var variant in Enum.GetValues<ShotVariant>())
                     AddButton(VariantName(variant), () =>
                     {
                         _showBuiltInTiming = true;
+                        _parameterRecordingId = null;
                         _variant = variant;
                         RefreshInspector();
                         SelectPage(StudioPage.Parameters);
@@ -1174,6 +1298,18 @@ public sealed partial class MainWindow : Window
             case StudioPage.Recorder:
                 Heading("Macro Recorder", "Record an input sequence and choose which controls to replay.");
                 ShowRecorder();
+                break;
+            case StudioPage.Lua:
+                Heading("Lua Scripts", "Write controller logic, check its syntax, and save it to the current macro profile.");
+                _luaPanel ??= new LuaScriptPanel(SaveLuaScript, DeleteLuaScript);
+                _luaPanel.SetProfile(_draft);
+                Details.Children.Add(_luaPanel);
+                break;
+            case StudioPage.Plugins:
+                Heading("Plugins", "Tune your saved input sequences for specific games.");
+                _nba2K27Plugin ??= new Nba2K27PluginPanel(SavePluginTuning, VariantName);
+                _nba2K27Plugin.SetProfile(_active);
+                Details.Children.Add(_nba2K27Plugin);
                 break;
             case StudioPage.Voice:
                 Heading("Live Voice", "Process your microphone locally for communication in Windows apps.");
@@ -1232,6 +1368,56 @@ public sealed partial class MainWindow : Window
 
     private static string BuildVersion => typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "Local build";
 
+    private void AddStickDeadzoneControls()
+    {
+        var left = DeadzoneField("Left stick (%)", _stickDeadzone.LeftPercent);
+        var right = DeadzoneField("Right stick (%)", _stickDeadzone.RightPercent);
+        var fields = new Grid { ColumnSpacing = 12, MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        fields.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(right, 1);
+        fields.Children.Add(left);
+        fields.Children.Add(right);
+
+        var heading = DetailText("Stick center deadzones");
+        heading.Style = (Style)Root.Resources["Section"];
+        DetailText("Applies live to virtual output and saves for this PC. Set a stick to 0% to turn its deadzone off.")
+            .Style = (Style)Root.Resources["Hint"];
+        Details.Children.Add(fields);
+        left.ValueChanged += (_, args) => Save(_stickDeadzone with { LeftPercent = args.NewValue });
+        right.ValueChanged += (_, args) => Save(_stickDeadzone with { RightPercent = args.NewValue });
+
+        void Save(StickDeadzone settings)
+        {
+            if (settings == _stickDeadzone)
+                return;
+            if (settings.IsValid)
+            {
+                try
+                {
+                    _store.SaveStickDeadzone(settings);
+                    _stickDeadzone = settings;
+                    _runtime?.SetStickDeadzone(settings);
+                    Status.Text = "Stick deadzones saved and applied.";
+                    return;
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    Status.Text = $"Couldn’t save the stick deadzones. {error.Message}";
+                }
+            }
+            left.Value = _stickDeadzone.LeftPercent;
+            right.Value = _stickDeadzone.RightPercent;
+        }
+
+        static NumberBox DeadzoneField(string label, double value) => new()
+        {
+            Header = label, Value = value, Minimum = 0, Maximum = StickDeadzone.MaximumPercent,
+            SmallChange = 0.5, LargeChange = 5, MinWidth = 115,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact
+        };
+    }
+
     private TextBlock DetailText(string text)
     {
         var block = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, LineHeight = 23 };
@@ -1275,6 +1461,27 @@ public sealed partial class MainWindow : Window
 
     private bool RecorderInUse() => _runtime?.Recording is { IsRecording: true } or { Pending: not null };
 
+    private void SavePluginTuning(StudioProfile expected, StudioProfile updated)
+    {
+        if (_closing || _active != expected)
+            throw new InvalidOperationException("The active macro profile changed. Open Plugins and load the macro again.");
+        if (RecorderInUse())
+            throw new InvalidOperationException("Finish and save or discard the recording first.");
+        if (_draft != _active)
+            throw new InvalidOperationException("Apply or revert your existing edits before changing a macro here.");
+
+        var profiles = _macroProfiles.Select(profile => profile.Id == updated.Id ? updated : profile).ToArray();
+        _store.SaveRecordingEdit(expected, updated);
+        _runtime?.Apply(updated);
+        _active = _draft = updated;
+        foreach (var (id, recording) in updated.Recordings)
+            if (expected.Recordings.GetValueOrDefault(id) != recording)
+                _recorderPanel?.ClearSavedPreview(id);
+        SetProfiles(profiles);
+        RefreshInspector();
+        Status.Text = $"Saved and applied {updated.Name}";
+    }
+
     private void ShowRecorder()
     {
         if (_recorderPanel is null)
@@ -1287,10 +1494,126 @@ public sealed partial class MainWindow : Window
                 _runtime.StartRecording(channels);
             });
             _recorderPanel.StopRequested += () => UpdateRecording(() => _runtime?.StopRecording());
-            _recorderPanel.DiscardRequested += () => UpdateRecording(() => _runtime?.DiscardRecording());
+            _recorderPanel.DiscardRequested += () => UpdateRecording(() =>
+            {
+                _runtime?.DiscardRecording();
+                _replacementRecording = null;
+            });
+            _recorderPanel.RecordAgainRequested += () => UpdateRecording(() =>
+            {
+                if (_runtime is { } runtime && runtime.Recording.Pending is { } take)
+                    runtime.StartRecording(take.Channels, replacePending: true);
+            });
             _recorderPanel.SaveRequested += (name, paddle) => UpdateRecording(() => SaveRecording(name, paddle));
+            _recorderPanel.SaveJsonRequested += recording => _ = ExportRecordingAsync(recording);
         }
+        AddButton("Saved macros", () => _savedMacroList?.StartBringIntoView());
         Details.Children.Add(_recorderPanel);
+        AddSavedMacroList();
+        RefreshRecorder();
+    }
+
+    private void AddSavedMacroList()
+    {
+        _savedMacroList = new StackPanel { Spacing = 8, Margin = new Thickness(0, 8, 0, 4) };
+        Details.Children.Add(_savedMacroList);
+        RefreshSavedMacros();
+    }
+
+    private void RefreshSavedMacros(Guid? focusId = null)
+    {
+        if (_savedMacroList is not { } list)
+            return;
+        CloseMacroNameEditor();
+        list.Children.Clear();
+        list.Children.Add(new TextBlock
+        {
+            Text = "Saved macros", FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap
+        });
+        list.Children.Add(new TextBlock
+        {
+            Text = $"{_active.Name} · {_active.Recordings.Count} of {MacroRecording.MaxRecordingsPerProfile} macros",
+            Style = (Style)Root.Resources["Hint"]
+        });
+        if (_active.Recordings.Count == 0)
+            list.Children.Add(new TextBlock { Text = "Save a recording to add it here." });
+
+        foreach (var recording in _active.Recordings.Values.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var card = new StackPanel { Spacing = 8 };
+            card.Children.Add(new TextBlock
+            {
+                Text = recording.Name, FontSize = 17, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            });
+            var triggers = _active.Bindings.Where(binding => binding.Value.RecordingId == recording.Id)
+                .OrderBy(binding => binding.Key).Select(binding => ControlName(binding.Key)).ToArray();
+            string assignment = triggers.Length == 0 ? "Unassigned" : string.Join(", ", triggers);
+            card.Children.Add(new TextBlock
+            {
+                Text = $"{recording.DurationMs / 1000.0:F2} s · {recording.Frames.Length} frames · {assignment}",
+                Style = (Style)Root.Resources["Hint"]
+            });
+            var editActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var otherActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var editTiming = AddAction(editActions, "Edit timing", _ => OpenRecordedParameters(recording.Id));
+            editTiming.Background = (Brush)Application.Current.Resources["StudioAccentBrush"];
+            AddAction(editActions, "Rename", button => OpenMacroNameEditor(card, button, recording, duplicate: false));
+            AddAction(editActions, "Duplicate", button => OpenMacroNameEditor(card, button, recording, duplicate: true));
+            AddAction(otherActions, "Re-record", _ => BeginRerecord(recording.Id));
+            AddAction(otherActions, "View JSON", button => _ = ShowRecordingJsonAsync(recording));
+            AddAction(otherActions, "Delete", button => _ = DeleteRecordingAsync(recording.Id));
+            card.Children.Add(editActions);
+            card.Children.Add(otherActions);
+            list.Children.Add(new Border
+            {
+                Style = (Style)Root.Resources["DashboardCard"], Child = card
+            });
+            if (recording.Id == focusId)
+            {
+                editTiming.Loaded += (_, _) =>
+                {
+                    card.StartBringIntoView();
+                    editTiming.Focus(FocusState.Programmatic);
+                };
+            }
+
+            Button AddAction(Panel group, string label, Action<Button> action)
+            {
+                var button = new Button { Content = label };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, $"{label} macro {recording.Name}");
+                button.Click += (_, _) => action(button);
+                group.Children.Add(button);
+                return button;
+            }
+        }
+    }
+
+    private void BeginRerecord(Guid id)
+    {
+        if (RecorderInUse())
+        {
+            ShowRecordingError("Finish the current recording or discard it before re-recording a saved macro.");
+            return;
+        }
+        if (!_active.Recordings.TryGetValue(id, out var recording))
+            return;
+        _replacementRecording = recording;
+        SelectPage(StudioPage.Recorder);
+        _recorderPanel?.SelectInputs(recording.Channels);
+        DetailScroll.ChangeView(null, 0, null, disableAnimation: true);
+        UpdateRecording(() =>
+        {
+            if (_runtime is null)
+                throw new InvalidOperationException("Start the controller monitor before recording.");
+            _runtime.StartRecording(recording.Channels);
+        });
+    }
+
+    private void ShowRecordingError(string message)
+    {
+        Status.Text = _recordError = message;
         RefreshRecorder();
     }
 
@@ -1309,15 +1632,111 @@ public sealed partial class MainWindow : Window
         if (state.IsRecording)
             RecordingBadge.Content = $"● Recording {state.ElapsedMs / 1000.0:F1}s";
         if (CurrentPage == StudioPage.Recorder)
-            _recorderPanel?.ShowState(state.Connected, state.IsRecording, state.ElapsedMs,
-                state.Pending?.DurationMs, state.Pending?.Frames.Length ?? 0, _recordError ?? state.Note);
+        {
+            string? note = _recordError ?? state.Note;
+            if (note is null && state.Connected && !state.SupportsBackgroundInput && state.Pending is null)
+                note = "Background capture is unavailable for this controller. Keep AccessRelay focused to record it.";
+            _recorderPanel?.ShowState(state.Connected, state.IsRecording, state.HasInput, state.ElapsedMs,
+                state.Pending, note, _active.Name, _replacementRecording);
+        }
+    }
+
+    private async Task ExportRecordingAsync(MacroRecording recording)
+    {
+        if (_exportingRecording || _closing)
+            return;
+
+        _exportingRecording = true;
+        try
+        {
+            var picker = new FileSavePicker(AppWindow.Id) { SuggestedFileName = "AccessRelay-Macro" };
+            picker.FileTypeChoices.Add("Recorded macro JSON", [".json"]);
+            if (await picker.PickSaveFileAsync() is { } file)
+            {
+                _store.ExportRecording(recording, file.Path);
+                Status.Text = "Saved a recorded macro JSON file.";
+                if (CurrentPage == StudioPage.Recorder)
+                    _recorderPanel?.ShowExportStatus(recording.Id, "JSON exported.");
+            }
+        }
+        catch (Exception error)
+        {
+            if (!_closing)
+            {
+                Status.Text = error.Message;
+                if (CurrentPage == StudioPage.Recorder)
+                    _recorderPanel?.ShowExportStatus(recording.Id, error.Message);
+            }
+        }
+        finally { _exportingRecording = false; }
+    }
+
+    private async Task ShowRecordingJsonAsync(MacroRecording recording)
+    {
+        if (_closing || Root.XamlRoot is not { } root)
+            return;
+
+        var code = new TextBox
+        {
+            Header = "Recorded macro JSON", Text = ProfileStore.FormatRecording(recording),
+            IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new FontFamily("Consolas"), Height = 320
+        };
+        ScrollViewer.SetHorizontalScrollBarVisibility(code, ScrollBarVisibility.Auto);
+        ScrollViewer.SetVerticalScrollBarVisibility(code, ScrollBarVisibility.Auto);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root, Title = recording.Name, Content = code,
+            PrimaryButtonText = "Save JSON", CloseButtonText = "Close"
+        };
+        try
+        {
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+                await ExportRecordingAsync(recording);
+        }
+        catch (Exception error) { if (!_closing) Status.Text = error.Message; }
+    }
+
+    private void OpenRecordedParameters(Guid id)
+    {
+        if (_closing || !_draft.Recordings.ContainsKey(id))
+            return;
+        _parameterRecordingId = id;
+        _showBuiltInTiming = false;
+        if (CurrentPage == StudioPage.Parameters)
+        {
+            BuildTimingFields();
+            ShowPage();
+        }
+        else
+            SelectPage(StudioPage.Parameters);
+        DetailScroll.ChangeView(null, 0, null, disableAnimation: true);
+    }
+
+    private void StageRecordingEdit(MacroRecording recording)
+    {
+        if (!_draft.Recordings.TryGetValue(recording.Id, out var current) || current == recording)
+            return;
+        _draft = _draft.WithRecording(recording);
+        TimingHint.Text = RecordingTimingHint(recording);
+        _recordingEditor?.UpdateRecording(recording);
+        if (CurrentPage == StudioPage.Calibration)
+            RefreshTimingPage();
+        DraftChanged();
     }
 
     private void SaveRecording(string name, ControlId? paddle)
     {
         if (_runtime?.Recording.Pending is not { } pending)
             return;
-        var recording = pending with { Name = name.Trim() };
+        var replacement = _replacementRecording;
+        if (replacement is not null)
+        {
+            if (!_active.Recordings.TryGetValue(replacement.Id, out var current) || current != replacement)
+                throw new InvalidOperationException("This macro changed. Cancel the re-record and start it again.");
+            paddle = null;
+        }
+        var recording = pending with { Id = replacement?.Id ?? pending.Id, Name = name.Trim() };
         var saved = _active.WithRecording(recording);
         var draft = _draft.WithRecording(recording);
         if (paddle is ControlId target && ControlMap.Paddles.Contains(target))
@@ -1333,6 +1752,8 @@ public sealed partial class MainWindow : Window
         _draft = _draft == _active ? saved : draft;
         _active = saved;
         _runtime.DiscardRecording();
+        _replacementRecording = null;
+        _recorderPanel?.ShowSaved(recording, saved.Name);
         if (paddle is ControlId control && ControlMap.Paddles.Contains(control))
         {
             _selected = control;
@@ -1340,21 +1761,177 @@ public sealed partial class MainWindow : Window
         }
         SetProfiles(_store.LoadAll());
         RefreshInspector();
-        Status.Text = paddle is ControlId assigned
+        RefreshSavedMacros();
+        Status.Text = replacement is not null ? $"Re-recorded {recording.Name} in {_active.Name}"
+            : paddle is ControlId assigned
             ? $"Saved {recording.Name} and bound it to {ControlName(assigned)}"
             : $"Saved {recording.Name} in {_active.Name}";
     }
 
-    private void RemoveRecording(Guid id)
+    private void OpenMacroNameEditor(Panel card, Button trigger, MacroRecording source, bool duplicate)
     {
-        _draft = _draft with
+        if (_closing || _active.Recordings.GetValueOrDefault(source.Id) != source)
+            return;
+
+        var profile = _active;
+        CloseMacroNameEditor();
+        var editor = new StackPanel { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 0) };
+        _macroNameEditor = editor;
+        var message = new TextBlock { Style = (Style)Root.Resources["Hint"] };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(message, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
+        editor.Children.Add(message);
+        card.Children.Add(editor);
+        if (RecorderInUse() || duplicate && profile.Recordings.Count >= MacroRecording.MaxRecordingsPerProfile)
         {
-            Recordings = _draft.Recordings.Remove(id),
-            Bindings = _draft.Bindings.RemoveRange(_draft.Bindings.Where(pair => pair.Value.RecordingId == id).Select(pair => pair.Key))
+            message.Text = RecorderInUse() ? "Finish and save or discard the current recording first."
+                : $"This profile already has {MacroRecording.MaxRecordingsPerProfile} saved macros.";
+            return;
+        }
+
+        var name = new TextBox { Header = duplicate ? "Name for the copy" : "Macro name", MaxLength = 80, MinWidth = 220 };
+        name.Text = duplicate ? SuggestedMacroCopyName(profile, source.Name, name.MaxLength) : source.Name;
+        var confirm = new Button { Content = duplicate ? "Create copy" : "Save name", IsEnabled = duplicate };
+        confirm.Background = (Brush)Application.Current.Resources["StudioAccentBrush"];
+        var cancel = new Button { Content = "Cancel" };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actions.Children.Add(confirm);
+        actions.Children.Add(cancel);
+        editor.Children.Insert(0, name);
+        editor.Children.Insert(1, actions);
+        name.TextChanged += (_, _) =>
+        {
+            string value = name.Text.Trim();
+            confirm.IsEnabled = value.Length > 0 && !value.Any(char.IsControl) && (duplicate || value != source.Name);
+            message.Text = "";
         };
+        confirm.Click += (_, _) => Save();
+        cancel.Click += (_, _) => Cancel();
+        name.KeyDown += (_, args) =>
+        {
+            if (args.Key == Windows.System.VirtualKey.Enter && confirm.IsEnabled)
+            {
+                args.Handled = true;
+                Save();
+            }
+            else if (args.Key == Windows.System.VirtualKey.Escape)
+            {
+                args.Handled = true;
+                Cancel();
+            }
+        };
+        name.Focus(FocusState.Programmatic);
+        name.SelectAll();
+        editor.StartBringIntoView();
+
+        void Cancel()
+        {
+            CloseMacroNameEditor();
+            trigger.Focus(FocusState.Programmatic);
+        }
+
+        void Save()
+        {
+            try { SaveMacroName(profile, source.Id, name.Text, duplicate); }
+            catch (Exception error) { if (!_closing) message.Text = error.Message; }
+        }
+    }
+
+    private void CloseMacroNameEditor()
+    {
+        if (_macroNameEditor is { Parent: Panel parent } editor)
+            parent.Children.Remove(editor);
+        _macroNameEditor = null;
+    }
+
+    private static string SuggestedMacroCopyName(StudioProfile profile, string source, int maxLength)
+    {
+        for (int number = 1; ; number++)
+        {
+            string suffix = number == 1 ? " copy" : $" copy {number}";
+            int length = Math.Min(source.Length, maxLength - suffix.Length);
+            if (char.IsHighSurrogate(source[length - 1]))
+                length--;
+            string candidate = source[..length].TrimEnd() + suffix;
+            if (!profile.Recordings.Values.Any(macro => string.Equals(macro.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+                return candidate;
+        }
+    }
+
+    private void SaveMacroName(StudioProfile profile, Guid id, string name, bool duplicate)
+    {
+        if (_closing || _active != profile || RecorderInUse())
+            throw new InvalidOperationException("The macro profile or recorder state changed. Reopen the macro action and try again.");
+
+        StudioProfile saved, draft;
+        MacroRecording result;
+        if (duplicate)
+        {
+            (saved, result) = profile.DuplicateRecording(id, name);
+            draft = _draft == profile ? saved : _draft.WithRecording(result);
+        }
+        else
+        {
+            saved = profile.RenameRecording(id, name);
+            result = saved.Recordings[id];
+            draft = _draft == profile ? saved : _draft.RenameRecording(id, name);
+        }
+
+        _store.SaveRecordingEdit(profile, saved);
+        if (!duplicate)
+        {
+            _runtime?.Apply(saved);
+            _recorderPanel?.RefreshSavedName(result);
+        }
+        _active = saved;
+        _draft = draft;
+        _recordError = null;
+        SetProfiles(_macroProfiles.Select(item => item.Id == saved.Id ? saved : item).ToArray());
         RefreshInspector();
-        ShowPage();
-        Status.Text = "Recording removal staged · Apply to save or Revert to restore";
+        RefreshSavedMacros(result.Id);
+        RefreshRecorder();
+        Status.Text = duplicate ? $"Created “{result.Name}”. Assign it in Bindings when ready."
+            : $"Renamed macro to “{result.Name}”.";
+    }
+
+    private async Task DeleteRecordingAsync(Guid id)
+    {
+        if (RecorderInUse())
+        {
+            ShowRecordingError("Finish or discard the current recording before deleting a saved macro.");
+            return;
+        }
+        var profile = _active;
+        if (_closing || Root.XamlRoot is not { } root || !profile.Recordings.TryGetValue(id, out var recording))
+            return;
+        int bindings = profile.Bindings.Values.Count(binding => binding.RecordingId == id);
+        string detail = bindings == 0 ? $"This removes the recording from {profile.Name}."
+            : $"This also clears {bindings} {(bindings == 1 ? "binding" : "bindings")} in {profile.Name}.";
+        try
+        {
+            if (!await StudioDialog.ConfirmDeletionAsync(root, Root.ActualTheme, "macro", recording.Name, detail,
+                    title: "Delete macro?") || _closing || _active.Id != profile.Id || RecorderInUse() ||
+                !_active.Recordings.TryGetValue(id, out var current) || current != recording)
+                return;
+
+            var saved = _active.WithoutRecording(id);
+            var draft = _draft == _active ? saved : _draft.WithoutRecording(id);
+            _store.Save(saved);
+            _runtime?.Apply(saved);
+            _active = saved;
+            _draft = draft;
+            if (_parameterRecordingId == id)
+                _parameterRecordingId = null;
+            if (_replacementRecording?.Id == id)
+                _replacementRecording = null;
+            _recorderPanel?.ClearSavedPreview(id);
+            _recordError = null;
+            SetProfiles(_store.LoadAll());
+            RefreshInspector();
+            RefreshSavedMacros();
+            RefreshRecorder();
+            Status.Text = $"Deleted {recording.Name} from {saved.Name}";
+        }
+        catch (Exception error) { if (!_closing) ShowRecordingError(error.Message); }
     }
 
     private (string Title, IReadOnlyList<StickPhase> Phases, MacroRecording? Recording) BuildPreview(StudioProfile profile)
@@ -1458,7 +2035,7 @@ public sealed partial class MainWindow : Window
             var remaining = _store.LoadAll().Where(candidate => candidate.Id != profile.Id).ToArray();
             string detail = remaining.Length == 0 ? "Studio will create an empty Default macro profile."
                 : "Studio will select another saved macro profile.";
-            bool confirmed = await ProfileDeletionDialog.ConfirmAsync(root, Root.ActualTheme, "macro", profile.Name, detail);
+            bool confirmed = await StudioDialog.ConfirmDeletionAsync(root, Root.ActualTheme, "macro", profile.Name, detail);
             if (!confirmed || _closing || _active.Id != profile.Id || RecorderInUse() || _draft != _active)
                 return;
 

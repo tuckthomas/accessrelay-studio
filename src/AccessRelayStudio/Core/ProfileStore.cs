@@ -9,8 +9,10 @@ public sealed class ProfileStore
 {
     private const int OriginalVersion = 1;
     private const int RecordingVersion = 2;
+    private const int LuaVersion = 3;
     private const int MaxFileBytes = 12 * 1024 * 1024;
     private const string SelectionFile = "active-macro-profile.txt";
+    private const string StickDeadzoneFile = "stick-deadzones.json";
     private sealed record ProfileDocument(int Version, StudioProfile Profile);
 
     private static readonly JsonSerializerOptions Format = new()
@@ -53,6 +55,33 @@ public sealed class ProfileStore
     public void SaveSelectedId(Guid id) => WriteAtomically(Path.Combine(DirectoryPath, SelectionFile),
         stream => stream.Write(Encoding.ASCII.GetBytes(id.ToString("N"))));
 
+    internal StickDeadzone LoadStickDeadzone()
+    {
+        try
+        {
+            using var stream = File.Open(Path.Combine(DirectoryPath, StickDeadzoneFile), FileMode.Open,
+                FileAccess.Read, FileShare.Read | FileShare.Delete);
+            if (stream.Length <= 256 && JsonSerializer.Deserialize<double[]>(stream) is [double left, double right])
+            {
+                var settings = new StickDeadzone(left, right);
+                if (settings.IsValid)
+                    return settings;
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (JsonException) { }
+        return StickDeadzone.Default;
+    }
+
+    internal void SaveStickDeadzone(StickDeadzone settings)
+    {
+        if (!settings.IsValid)
+            throw new InvalidDataException($"Deadzone must be between 0 and {StickDeadzone.MaximumPercent}%.");
+        WriteAtomically(Path.Combine(DirectoryPath, StickDeadzoneFile),
+            stream => JsonSerializer.Serialize(stream, new[] { settings.LeftPercent, settings.RightPercent }));
+    }
+
     public IReadOnlyList<StudioProfile> LoadAll()
     {
         if (!Directory.Exists(DirectoryPath))
@@ -80,6 +109,14 @@ public sealed class ProfileStore
 
     public void Save(StudioProfile profile) => Write(profile, FileFor(profile.Id));
 
+    internal void SaveRecordingEdit(StudioProfile original, StudioProfile updated)
+    {
+        if (original.Id != updated.Id || !string.Equals(JsonSerializer.Serialize(Load(original.Id), Format),
+            JsonSerializer.Serialize(original, Format), StringComparison.Ordinal))
+            throw new InvalidOperationException("This profile changed in another window. Reopen AccessRelay before saving the edit.");
+        Save(updated);
+    }
+
     public void Delete(Guid id)
     {
         try { File.Delete(FileFor(id)); }
@@ -94,6 +131,18 @@ public sealed class ProfileStore
     }
 
     public void Export(StudioProfile profile, string path) => Write(profile, path);
+
+    internal static string FormatRecording(MacroRecording recording) => JsonSerializer.Serialize(recording, Format);
+
+    internal void ExportRecording(MacroRecording recording, string path)
+    {
+        recording.Validate();
+        if (string.Equals(Path.GetDirectoryName(Path.GetFullPath(path)),
+            Path.TrimEndingDirectorySeparator(DirectoryPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Choose a location outside the macro profiles folder.");
+
+        WriteAtomically(path, stream => JsonSerializer.Serialize(stream, recording, Format));
+    }
 
     private string FileFor(Guid id) => Path.Combine(DirectoryPath, id.ToString("N") + ".json");
 
@@ -111,7 +160,7 @@ public sealed class ProfileStore
         {
             throw new InvalidDataException("The profile file is invalid.", error);
         }
-        if (document is null || document.Version is not (OriginalVersion or RecordingVersion) || document.Profile is null)
+        if (document is null || document.Version is not (OriginalVersion or RecordingVersion or LuaVersion) || document.Profile is null)
             throw new InvalidDataException("The profile file format is unsupported.");
         document.Profile.Validate();
         return document.Profile;
@@ -122,7 +171,7 @@ public sealed class ProfileStore
         profile.Validate();
         WriteAtomically(path, stream =>
         {
-            int version = profile.Recordings.Count == 0 ? OriginalVersion : RecordingVersion;
+            int version = profile.LuaScripts.Count != 0 ? LuaVersion : profile.Recordings.Count == 0 ? OriginalVersion : RecordingVersion;
             JsonSerializer.Serialize(stream, new ProfileDocument(version, profile), Format);
             if (stream.Length > MaxFileBytes)
                 throw new InvalidDataException("The profile file is too large.");

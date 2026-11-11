@@ -14,11 +14,12 @@ const controls = Object.freeze({
   SmallLeft: 0x40000, SmallRight: 0x80000, LargeLeft: 0x100000, LargeRight: 0x200000
 });
 const controlNames = Object.keys(controls);
+// The rear camera shows the controller's right paddles on the left of the screen.
 const paddleCallouts = [
-  ["left", 0.40, "SmallLeft", "Small Left Paddle", "P1"],
-  ["right", 0.40, "SmallRight", "Small Right Paddle", "P2"],
-  ["left", 0.65, "LargeLeft", "Large Left Paddle", "P3"],
-  ["right", 0.65, "LargeRight", "Large Right Paddle", "P4"]
+  ["left", 0.40, "SmallRight", "Small Right Paddle", "P2"],
+  ["right", 0.40, "SmallLeft", "Small Left Paddle", "P1"],
+  ["left", 0.65, "LargeRight", "Large Right Paddle", "P4"],
+  ["right", 0.65, "LargeLeft", "Large Left Paddle", "P3"]
 ];
 const optionalPaddles = new Set(paddleCallouts.map(([, , id]) => id));
 const stickAxes = Object.freeze({

@@ -10,7 +10,6 @@ public sealed class InputRecorder
     private readonly Guid _id = Guid.NewGuid();
     private readonly RecordingChannels _channels;
     private readonly List<RecordedFrame> _frames = [];
-    private long? _armedAt;
     private long? _startedAt;
     private long? _endedAt;
     private int? _trailingIdleSince;
@@ -30,24 +29,23 @@ public sealed class InputRecorder
     {
         if (_endedAt.HasValue)
             return false;
-        _armedAt ??= timestampMs;
-        ElapsedMs = Math.Max(ElapsedMs, (int)Math.Clamp(timestampMs - _armedAt.Value, 0, MaxDurationMs));
-        if (ElapsedMs == MaxDurationMs)
-        {
-            _endedAt = _armedAt.Value + MaxDurationMs;
-            return false;
-        }
-
         var filtered = RecordingFilter.Overlay(_channels, default, input);
         bool active = IsActive(filtered);
-        if (!_startedAt.HasValue)
+        if (_startedAt is not long started)
         {
             if (!active)
                 return true;
-            _startedAt = _armedAt.Value + ElapsedMs;
+            _startedAt = started = timestampMs;
         }
 
-        int time = (int)(_armedAt.Value + ElapsedMs - _startedAt.Value);
+        ElapsedMs = Math.Max(ElapsedMs, (int)Math.Clamp(timestampMs - started, 0, MaxDurationMs));
+        if (ElapsedMs == MaxDurationMs)
+        {
+            _endedAt = started + MaxDurationMs;
+            return false;
+        }
+
+        int time = ElapsedMs;
         _trailingIdleSince = active ? null : _trailingIdleSince ?? time;
         if (_frames.Count != 0 && _frames[^1].State == filtered)
             return true;
@@ -58,7 +56,7 @@ public sealed class InputRecorder
         }
         if (_frames.Count == MacroRecording.MaxFrames)
         {
-            _endedAt = _armedAt.Value + ElapsedMs;
+            _endedAt = started + time;
             return false;
         }
         _frames.Add(new(time, filtered));
@@ -67,12 +65,13 @@ public sealed class InputRecorder
 
     public MacroRecording? Stop(string name, long timestampMs)
     {
-        _endedAt ??= _armedAt is long armed
-            ? armed + Math.Max(ElapsedMs, Math.Clamp(timestampMs - armed, 0, MaxDurationMs))
-            : timestampMs;
         if (_startedAt is not long started || _frames.Count == 0)
+        {
+            _endedAt ??= timestampMs;
             return null;
+        }
 
+        _endedAt ??= started + Math.Max(ElapsedMs, Math.Clamp(timestampMs - started, 0, MaxDurationMs));
         int duration = Math.Clamp((int)(_endedAt.Value - started), _frames[^1].TimeMs + 1, MaxDurationMs);
         if (_trailingIdleSince is int idle)
             duration = Math.Min(duration, idle + NeutralTailMs);

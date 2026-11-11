@@ -40,7 +40,7 @@ This document authorizes a concrete implementation sequence, not a claim that th
 
 ## 3. Repository baseline and existing integration points
 
-The published baseline inspected for this plan is commit `069d41abf379dd0a027b9302da4a00438f0cad33`. The working tree also contains unpublished changes, including Lua and NBA 2K tuning additions. The plan-only commit must preserve those changes and must not silently publish them. Implementation must reconcile those additions with the committed branch before relying on them as shipped prerequisites.
+The initial published baseline inspected for this plan was commit `069d41abf379dd0a027b9302da4a00438f0cad33`; the first plan commit was `171d60d`. The feature baseline must also include the existing application changes: Lua scripting, NBA 2K tuning, recorder editing, background input, controller model/viewer updates, voice updates, and build guards. Publish those changes and this updated plan to `main` before advancing the feature branch. These existing application changes are prerequisites/context, not an implementation of the proposed vision feature.
 
 Paths below are relative to the repository root. Names in the proposed-files section describe new components, not existing APIs.
 
@@ -56,7 +56,7 @@ Paths below are relative to the repository root. Names in the proposed-files sec
 | `src/AccessRelayStudio/Core/StudioProfile.cs` and `ProfileStore.cs` | Coordinate profile compatibility. Keep vision configuration versioned and do not invalidate older profiles. |
 | `src/AccessRelayStudio/Audio/DialogueSeparatorModel.cs` | Existing CPU ONNX integration is an example of dependency use, not a ready-made real-time vision engine. Preserve audio behavior when changing native runtime packaging. |
 | `src/AccessRelayStudio/Verification/` | Extend deterministic verification for timing math, state ownership, cancellation, and profile validation. |
-| Local additions: `Core/LuaControllerScript.cs`, `Core/Nba2K27Tuning.cs` | Coordinate after their source baseline is reconciled. Do not make deadline scheduling depend on Lua coroutine timing. |
+| `Core/LuaControllerScript.cs`, `Core/Nba2K27Tuning.cs` | Coordinate existing Lua/tuning behavior with vision ownership. Do not make deadline scheduling depend on Lua coroutine timing. |
 
 The existing `RecentHandoffMs` metric measures local enqueue-to-helper-stdin-flush duration. It is not USB report consumption, browser acceptance, network transit, or Xbox input acknowledgement. The plan must retain that distinction in code, logs, and UI.
 
@@ -187,7 +187,7 @@ Vision must not hold the shoot button past the user's physical release. Loss of 
 
 Establish channel ownership between vision, macros, and Lua. The first version should reject or suspend assistance for conflicting shoot-channel automation, with a clear explanation. Unrelated buttons and sticks continue normally.
 
-For the local Lua implementation, `output.release(control)` relinquishes ownership to normal input; it does not force the physical button released. A vision release latch must explicitly force the outgoing channel off. Lua observations/events may be added later without putting Lua resumes or callbacks in the release-deadline path.
+For the existing Lua implementation, `output.release(control)` relinquishes ownership to normal input; it does not force the physical button released. A vision release latch must explicitly force the outgoing channel off. Lua observations/events may be added later without putting Lua resumes or callbacks in the release-deadline path.
 
 Audit the existing 32-report output FIFO. Coalescing must preserve meaningful press/release edges and never let an old held report follow a latched release. Define bounded backpressure and fault behavior. Do not reduce the queue blindly or discard all intermediate states: a short press must remain observable by the virtual device. Include the existing helper process and local transport in every latency measurement.
 
@@ -263,7 +263,7 @@ The current verification project links `Core/*.cs` into a portable `net10.0` exe
 
 | Phase | Deliverable and exit evidence |
 | --- | --- |
-| 0. Establish the source baseline | Reconcile existing unpublished work deliberately. Confirm a reproducible build and identify which Lua/tuning changes are prerequisites. |
+| 0. Establish the source baseline | Publish the existing application changes and updated plan to `main`, validate the managed verification and Windows Release publish, then advance the feature branch to that baseline. Keep optional native-host and physical hardware checks distinct from managed build results. |
 | 1. Prove the controller route | Existing virtual output controls the selected Remote Play session; press/hold/release, player assignment, manual passthrough, duplicates, cancellation, and reconnect behavior are recorded. No vision automation yet. |
 | 2. Capture and instrument | User-selected window capture, bounded newest-frame handling, timestamps, resizing/freeze/loss handling, and observation-only diagnostics work. Measure the path on the actual Remote Play stream. |
 | 3. Implement arbitration and deadlines | Deterministic verification proves channel ownership, cancellation, release latching, queue ordering, and generation invalidation. Synthetic observations exercise the path without a trained model; mark them as synthetic. |
@@ -321,9 +321,9 @@ Extend the verification project deliberately with explicit compile includes or a
 
 ## 17. Documentation delivery and branch workflow
 
-For this request, commit only this Markdown plan on the current `main`, push that commit normally to `origin/main`, and verify the remote file and commit. Then create and push `codex/remote-play-vision` from that exact plan commit, set its upstream, and leave it checked out for feature work.
+Publish the existing application source/documentation changes together with the updated implementation plan to `origin/main`. Include the tracked edits, intentional deletion, and new source/documentation files that were already present when the plan was requested. Review the publication scope and run the relevant existing verification and Release publish checks first. Keep ignored build outputs, models, recordings, credentials, and machine-specific configuration outside the source commit.
 
-Preserve all pre-existing staged, unstaged, and untracked work. Do not stash, reset, force-push, or include unrelated changes to satisfy the documentation request. Creating the feature branch does not imply those existing local changes have been published or that implementation is complete.
+The initial plan was already pushed separately and the feature branch was created. Complete the requested baseline by pushing the application changes normally to `main`, then fast-forwarding `codex/remote-play-vision` to that exact baseline commit. Push the feature branch, verify both remote refs and published content, and leave it checked out with its upstream set. Do not reset, stash, discard, or force-push existing work. Completion means the authorized application changes are committed and published, not left uncommitted in the working tree. This baseline publication does not mean the vision feature itself has been implemented.
 
 ## 18. Technical references
 

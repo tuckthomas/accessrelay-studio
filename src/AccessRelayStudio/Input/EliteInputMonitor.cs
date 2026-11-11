@@ -22,6 +22,7 @@ public readonly record struct ControllerSample(
 {
     public ControllerDevice? Device { get; init; }
     public IReadOnlyList<ControllerDevice> Devices { get; init; } = Array.Empty<ControllerDevice>();
+    public bool SupportsBackgroundInput { get; init; }
 }
 
 /// <summary>Reads standardized physical Windows gamepads and the optional wired Elite keypad.</summary>
@@ -32,6 +33,7 @@ public sealed class EliteInputMonitor : IDisposable
     private const ushort EliteSeries2Usb = 0x0B00;
     private const ushort VirtualXbox360 = 0x028E;
     private readonly RawPaddleInput _paddles;
+    private readonly GameInputBackground? _background;
     private Gamepad? _gamepad;
     private ControllerDevice? _device;
     private IReadOnlyList<ControllerDevice> _devices = Array.Empty<ControllerDevice>();
@@ -40,6 +42,7 @@ public sealed class EliteInputMonitor : IDisposable
     private string[] _lastIds = [];
     private GamepadInventory _inventory = GamepadInventory.Empty;
     private long _nextScan;
+    private long _nextBackgroundBind;
     private long _connectionVersion;
     private long _paddleVersion;
     private int _scanRequested = 1;
@@ -49,6 +52,7 @@ public sealed class EliteInputMonitor : IDisposable
     public EliteInputMonitor(nint hwnd)
     {
         _paddles = new RawPaddleInput(hwnd);
+        _background = GameInputBackground.TryCreate();
         RawGameController.RawGameControllerAdded += OnControllerChanged;
         RawGameController.RawGameControllerRemoved += OnControllerChanged;
     }
@@ -86,7 +90,8 @@ public sealed class EliteInputMonitor : IDisposable
         {
             try
             {
-                state = ConvertReading(_gamepad.GetCurrentReading());
+                state = ConvertReading(_background is not null && _background.TryRead(out var reading)
+                    ? reading : _gamepad.GetCurrentReading());
             }
             catch (COMException)
             {
@@ -123,7 +128,8 @@ public sealed class EliteInputMonitor : IDisposable
             _connectionVersion)
         {
             Device = _device,
-            Devices = _devices
+            Devices = _devices,
+            SupportsBackgroundInput = _background?.IsBound == true
         };
     }
 
@@ -141,16 +147,20 @@ public sealed class EliteInputMonitor : IDisposable
             if (refreshTopology || !ids.SequenceEqual(_lastIds))
             {
                 _lastIds = ids;
-                _inventory = PhysicalGamepadInventory.Find(windowsGamepads.Select(device => device.Hardware).ToHashSet());
+                var requested = windowsGamepads.Select(device => device.Hardware).ToHashSet();
+                if (_device is { } current && _background?.IsBound == true)
+                    requested.Add(new(current.VendorId, current.ProductId));
+                _inventory = PhysicalGamepadInventory.Find(requested);
             }
 
-            var verified = new List<(ControllerDevice Device, Gamepad Gamepad)>();
+            var verified = new List<(ControllerDevice Device, Gamepad Gamepad, bool UniqueIdentity)>();
             foreach (var group in windowsGamepads.GroupBy(device => device.Hardware))
             {
                 var physical = _inventory.Physical.Where(device => device.Hardware == group.Key).ToArray();
                 if (!CanSelectIdentity(group.Key, group.Count(), physical, _inventory.Virtual, Volatile.Read(ref _outputActive) != 0))
                     continue;
 
+                bool uniqueIdentity = group.Count() == 1 && physical.Select(device => device.Container).Distinct().Count() == 1;
                 string[] transports = physical.Select(device => device.Transport).Distinct().ToArray();
                 bool elite = group.Key.Vendor == MicrosoftVendor && group.Key.Product is EliteSeries2Usb or 0x0B05 or 0x0B22;
                 foreach (var candidate in group)
@@ -160,7 +170,24 @@ public sealed class EliteInputMonitor : IDisposable
                         transport = "Wireless adapter";
                     bool keypad = elite && group.Key.Product == EliteSeries2Usb && transport == "USB" && physical.Length == 1;
                     verified.Add((new(candidate.Id, candidate.Name, group.Key.Vendor, group.Key.Product, transport, elite, keypad),
-                        candidate.Gamepad));
+                        candidate.Gamepad, uniqueIdentity));
+                }
+            }
+
+            // Windows.Gaming.Input can omit the physical pad when this window loses focus.
+            // Keep the same already verified device while its background handle still reads.
+            string? selectedId = Volatile.Read(ref _selectedId);
+            if (_device is { } bound && _gamepad is { } previous && _background?.IsBound == true &&
+                (selectedId is null || selectedId == bound.Id))
+            {
+                var identity = new HardwareId(bound.VendorId, bound.ProductId);
+                if (windowsGamepads.All(candidate => candidate.Hardware != identity))
+                {
+                    var physical = _inventory.Physical.Where(device => device.Hardware == identity).ToArray();
+                    if (physical.Select(device => device.Container).Distinct().Count() == 1 &&
+                        CanSelectIdentity(identity, 1, physical, _inventory.Virtual, Volatile.Read(ref _outputActive) != 0) &&
+                        _background.TryRead(out _))
+                        verified.Add((bound, previous, true));
                 }
             }
 
@@ -171,14 +198,17 @@ public sealed class EliteInputMonitor : IDisposable
             if (!_devices.SequenceEqual(descriptors))
                 _devices = Array.AsReadOnly(descriptors);
 
-            string? selectedId = Volatile.Read(ref _selectedId);
             var selected = selectedId is null
                 ? verified.FirstOrDefault(candidate => candidate.Device.Id == _device?.Id)
                 : verified.FirstOrDefault(candidate => candidate.Device.Id == selectedId);
             if (selected.Device is null && selectedId is null)
                 selected = verified.FirstOrDefault();
             if (selected.Device is { } device)
+            {
                 SetController(selected.Gamepad, device, $"{device.Name} · {device.Transport} · {device.VendorId:X4}:{device.ProductId:X4}");
+                RefreshBackgroundBinding(device, selected.UniqueIdentity,
+                    refreshTopology && windowsGamepads.Any(candidate => candidate.Id == device.Id));
+            }
             else
                 SetController(null, null, selectedId is not null ? "Selected controller is disconnected or unavailable" :
                     windowsGamepads.Length > 0 ? "Windows reported a gamepad with unverified or virtual hardware identity" :
@@ -189,6 +219,24 @@ public sealed class EliteInputMonitor : IDisposable
         {
             _devices = Array.Empty<ControllerDevice>();
             SetController(null, null, "Windows controller enumeration is temporarily unavailable");
+        }
+    }
+
+    private void RefreshBackgroundBinding(ControllerDevice device, bool uniqueIdentity, bool refreshTopology)
+    {
+        if (_background is null)
+            return;
+        if (!uniqueIdentity)
+        {
+            _background.Bind(null);
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (refreshTopology || (!_background.IsBound && now >= _nextBackgroundBind))
+        {
+            _nextBackgroundBind = now + Stopwatch.Frequency;
+            _background.Bind(new HardwareId(device.VendorId, device.ProductId));
         }
     }
 
@@ -217,7 +265,11 @@ public sealed class EliteInputMonitor : IDisposable
     private void SetController(Gamepad? controller, ControllerDevice? device, string source)
     {
         if (device != _device)
+        {
             _connectionVersion++;
+            _background?.Bind(null);
+            _nextBackgroundBind = 0;
+        }
         _gamepad = controller;
         _device = device;
         _source = source;
@@ -267,6 +319,7 @@ public sealed class EliteInputMonitor : IDisposable
 
         RawGameController.RawGameControllerAdded -= OnControllerChanged;
         RawGameController.RawGameControllerRemoved -= OnControllerChanged;
+        _background?.Dispose();
         _paddles.Dispose();
     }
 }

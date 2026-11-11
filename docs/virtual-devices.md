@@ -32,6 +32,14 @@ For private in-house testing only, the [pid.codes test PID](https://pid.codes/12
 
 The private test VID/PID `1209:0001` is shared and unsuitable for distribution. Keep all builds produced with this option in-house. The generated file marks the identity `PRIVATE-TEST`. An unmarked test VID/PID is rejected.
 
+When publishing a build that must support Live Voice, require the microphone files in the publish command.
+
+```powershell
+dotnet publish ./src/AccessRelayStudio/AccessRelayStudio.csproj -c Release -p:RequireVirtualMicrophone=true -o ./artifacts/Run
+```
+
+The publish fails if the configured identity or helper is missing. A staged identity also enables this check automatically.
+
 ## Windows setup
 
 Use **Settings → Install virtual device driver** in Studio if the signed host controller is missing. Windows requests administrator approval for this installation. Once installed, Studio attaches and detaches its virtual devices from a standard account. The USB/IP connection stays on the local PC.

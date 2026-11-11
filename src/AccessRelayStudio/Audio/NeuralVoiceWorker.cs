@@ -7,19 +7,23 @@ using System.Threading.Channels;
 namespace EliteScriptStudio.Audio;
 
 internal sealed record VoiceModelOption(string Name, string Description, string? Package = null, string? Executable = null,
-    int OutputPrimeMilliseconds = 20, string? ModelFile = null)
+    int OutputPrimeMilliseconds = 20, string? ModelFile = null, string? Variant = null)
 {
     private static readonly VoiceModelOption[] Catalog =
     [
         new("Built-in effects", "Adjust pitch and tone with the original real-time presets."),
-        new("MeanVC2", "Streaming reference-voice conversion with the 120 ms model and 40 ms of lookahead.",
+        new("MeanVC2 (4-bit)", "Smaller streaming reference-voice model with 120 ms synthesis and 40 ms of lookahead.",
             "MeanVC2", "PlaySignal.MeanVC2Host.exe", OutputPrimeMilliseconds: 200,
             ModelFile: "meanvc2-120ms-40ms-q4_k.gguf"),
+        new("MeanVC2 (Full precision)", "Full-precision streaming reference-voice model with 120 ms synthesis and 40 ms of lookahead.",
+            "MeanVC2", "PlaySignal.MeanVC2Host.exe", OutputPrimeMilliseconds: 200,
+            ModelFile: "FullPrecision/meanvc2-120ms-40ms-fp32.gguf", Variant: "fp32"),
         new("MioCodec V2", "Local reference-voice conversion in 160 ms blocks. Requires a Vulkan-capable GPU.",
             "MioCodec", "PlaySignal.MioCodecHost.exe", ModelFile: "miocodec-25hz-44khz-v2-q8_0.gguf")
     ];
 
     public bool UsesReference => Executable is not null;
+    public string? SelectionKey => Variant is null ? Package : $"{Package}-{Variant}";
     public string PathOnDisk => Path.Combine(AppContext.BaseDirectory, "NeuralVoice", Package ?? "");
     public bool IsAvailable => !UsesReference ||
         File.Exists(Path.Combine(PathOnDisk, Executable!)) &&
@@ -70,6 +74,11 @@ internal sealed class NeuralVoiceWorker : IDisposable
         };
         start.ArgumentList.Add("--reference");
         start.ArgumentList.Add(reference);
+        if (model.Variant is { } variant)
+        {
+            start.ArgumentList.Add("--variant");
+            start.ArgumentList.Add(variant);
+        }
         var process = Process.Start(start) ?? throw new InvalidOperationException("Windows could not start the AI voice host.");
         var worker = new NeuralVoiceWorker(process, model.OutputPrimeMilliseconds);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);

@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Lua timing, live input, state, cancellation, budgets and profile compatibility", LuaVerification.Run),
     ("Default bindings and manual passthrough", Defaults),
     ("Preview and runtime agree for all five variants", AllTrajectories),
     ("Down/up sweep totals and phase boundaries", SweepDurations),
@@ -13,9 +14,16 @@ var tests = new (string Name, Action Run)[]
     ("Recorder filters and replays only right stick through a complete tap", RightStickRecording),
     ("Recorder captures and overlays a single axis", SingleAxisRecording),
     ("Recorder preserves ignored channels, timestamps and safe cancellation", FilteredRecording),
+    ("Recorder starts its duration limit at the first included input", DelayedRecordingStart),
     ("Recording profile round-trip and version 1 compatibility", RecordingPersistence),
+    ("Saved macros duplicate, retime and rename independently while preserving bindings", RecordingDuplication),
+    ("Recording replacement at capacity and selective deletion persist", RecordingReplacementAndDeletion),
+    ("Recording interval and frame edits preserve timing and manual input", RecordingEdits),
+    ("Recorded right-stick phases use exact frame boundaries", RecordedRightStickPhases),
+    ("NBA 2K27 feedback retimes the selected shot and preserves recorded input", Nba2K27Feedback),
     ("Version 2 recording masks keep both axes for legacy stick aliases", LegacyRecordingMasks),
     ("Live input retains quick presses and projects both sticks", LiveFeedback),
+    ("Stick output returns to zero at center while preserving movement and buttons", CenteredStickOutput),
     ("Profile round-trip, in-place save and import", Persistence),
     ("Profile deletion only removes the matching file and respects open handles", ProfileDeletion)
 };
@@ -23,6 +31,42 @@ foreach (var (name, run) in tests)
 {
     run();
     Console.WriteLine($"PASS {name}");
+}
+
+static void CenteredStickOutput()
+{
+    var resting = new ControllerState((ushort)ControlId.A, 70, 160, -213, 923, 513, -431);
+    Equal(resting with { LeftX = 0, LeftY = 0, RightX = 0, RightY = 0 }, StickDeadzone.Default.Apply(resting));
+    Equal(resting, new StickDeadzone(0, 0).Apply(resting));
+    Equal(resting with { LeftX = 0, LeftY = 0 }, new StickDeadzone(3.5, 1).Apply(resting));
+    Equal(resting with { RightX = 0, RightY = 0 }, new StickDeadzone(1, 2.5).Apply(resting));
+
+    var diagonal = resting with { LeftX = 1200, LeftY = 1200 };
+    Equal(diagonal with { RightX = 0, RightY = 0 }, StickDeadzone.Default.Apply(diagonal));
+    var boundary = resting with { LeftX = -1638, LeftY = 0, RightX = 1639, RightY = 0 };
+    Equal(boundary with { LeftX = 0 }, StickDeadzone.Default.Apply(boundary));
+    var full = resting with { LeftX = short.MinValue, LeftY = short.MinValue, RightX = 0, RightY = short.MaxValue };
+    Equal(full, StickDeadzone.Default.Apply(full));
+    Equal(default, StickDeadzone.Default.Apply(full with { Buttons = 0, LeftTrigger = 0, RightTrigger = 0,
+        LeftX = 0, LeftY = 1000, RightX = -1000, RightY = 0 }));
+
+    string directory = Path.Combine(Path.GetTempPath(), $"AccessRelay.Deadzone.Verify.{Guid.NewGuid():N}");
+    try
+    {
+        var store = new ProfileStore(directory);
+        Equal(StickDeadzone.Default, store.LoadStickDeadzone());
+        var customized = new StickDeadzone(0, 3.5);
+        store.SaveStickDeadzone(customized);
+        Equal(customized, new ProfileStore(directory).LoadStickDeadzone());
+        Expect<InvalidDataException>(() => store.SaveStickDeadzone(new(51, 1)));
+        Equal(customized, store.LoadStickDeadzone());
+        Equal(0, store.LoadAll().Count);
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+            Directory.Delete(directory, recursive: true);
+    }
 }
 
 static void LiveFeedback()
@@ -286,12 +330,41 @@ static void FilteredRecording()
 
     var empty = new InputRecorder(RecordingChannels.RightStick);
     Equal(true, empty.Capture(ignored, 1000));
-    Equal(false, empty.Capture(ignored, 1000 + InputRecorder.MaxDurationMs));
+    Equal(true, empty.Capture(ignored, 1000 + InputRecorder.MaxDurationMs));
+    Equal(0, empty.ElapsedMs);
     Equal<MacroRecording?>(null, empty.Stop("No captured movement", 50000));
+    Equal(false, empty.Capture(active, 50001));
     var capped = new InputRecorder(RecordingChannels.RightStick);
     capped.Capture(active, 1000);
     Equal(false, capped.Capture(active, 1000 + InputRecorder.MaxDurationMs));
     Equal(InputRecorder.MaxDurationMs, capped.Stop("Long hold", 50000)!.DurationMs);
+}
+
+static void DelayedRecordingStart()
+{
+    const long armedAt = 100;
+    long firstInputAt = armedAt + InputRecorder.MaxDurationMs + 5000;
+    var recorder = new InputRecorder(RecordingChannels.RightStickY);
+    var ignored = default(ControllerState) with { Buttons = (ushort)ControlId.A, LeftY = -32000 };
+    var first = default(ControllerState) with { RightY = -28000 };
+    var second = first with { RightY = 25000 };
+
+    Equal(true, recorder.Capture(default, armedAt));
+    Equal(true, recorder.Capture(ignored, firstInputAt - 1));
+    Equal(false, recorder.HasInput);
+    Equal(0, recorder.ElapsedMs);
+    Equal(true, recorder.Capture(first, firstInputAt));
+    Equal(true, recorder.HasInput);
+    Equal(0, recorder.ElapsedMs);
+    Equal(true, recorder.Capture(second, firstInputAt + 200));
+    Equal(200, recorder.ElapsedMs);
+    Equal(false, recorder.Capture(second, firstInputAt + InputRecorder.MaxDurationMs));
+
+    var take = recorder.Stop("Delayed movement", firstInputAt + InputRecorder.MaxDurationMs + 2000)!;
+    Equal(InputRecorder.MaxDurationMs, take.DurationMs);
+    Equal(2, take.Frames.Length);
+    Equal(new RecordedFrame(0, first), take.Frames[0]);
+    Equal(new RecordedFrame(200, second), take.Frames[1]);
 }
 
 static void SingleAxisRecording()
@@ -378,6 +451,305 @@ static void RecordingPersistence()
             Directory.Delete(directory);
         }
     }
+}
+
+static void RecordingDuplication()
+{
+    string directory = Path.Combine(Path.GetTempPath(), $"AccessRelay.RecordingDuplication.Verify.{Guid.NewGuid():N}");
+    var source = new MacroRecording(Guid.NewGuid(), "Three-pointer", RecordingChannels.RightStickY,
+        [new(0, default(ControllerState) with { RightY = -30000 }),
+         new(80, default), new(112, default(ControllerState) with { RightY = 30000 }),
+         new(150, default)], 180);
+    var original = Enabled().WithRecording(source)
+        .WithBinding(ControlId.LargeRight, new(ScriptKind.Recorded, RecordingId: source.Id));
+    string path = Path.Combine(directory, original.Id.ToString("N") + ".json");
+    try
+    {
+        var store = new ProfileStore(directory);
+        store.Save(original);
+        var snapshot = store.Load(original.Id);
+        var (updated, copy) = snapshot.DuplicateRecording(source.Id, "Midrange");
+        Equal(false, source.Id == copy.Id);
+        store.SaveRecordingEdit(snapshot, updated);
+
+        var saved = store.Load(original.Id);
+        var savedCopy = saved.Recordings[copy.Id];
+        Equal(2, saved.Recordings.Count);
+        Equal("Midrange", savedCopy.Name);
+        Equal(source.Channels, savedCopy.Channels);
+        Equal(source.DurationMs, savedCopy.DurationMs);
+        Sequence(source.Frames, savedCopy.Frames);
+        Sequence(original.Bindings.OrderBy(binding => binding.Key), saved.Bindings.OrderBy(binding => binding.Key));
+
+        var retimed = Nba2K27Tuning.Apply(savedCopy, new Nba2K27Adjustment(-16, 0));
+        store.SaveRecordingEdit(saved, saved.WithRecording(retimed));
+        var edited = store.Load(original.Id);
+        Sequence(source.Frames, edited.Recordings[source.Id].Frames);
+        Equal(source.DurationMs, edited.Recordings[source.Id].DurationMs);
+        Equal(new Nba2K27Intervals(64, 32), Nba2K27Tuning.GetIntervals(edited.Recordings[copy.Id]));
+
+        var renamed = edited.RenameRecording(source.Id, "Standing three")
+            .RenameRecording(copy.Id, "Midrange pull-up");
+        store.SaveRecordingEdit(edited, renamed);
+        var reloaded = store.Load(original.Id);
+        Sequence(edited.Recordings.Keys.Order(), reloaded.Recordings.Keys.Order());
+        Equal("Standing three", reloaded.Recordings[source.Id].Name);
+        Equal("Midrange pull-up", reloaded.Recordings[copy.Id].Name);
+        foreach (var (id, recording) in edited.Recordings)
+        {
+            Equal(id, reloaded.Recordings[id].Id);
+            Equal(recording.Channels, reloaded.Recordings[id].Channels);
+            Equal(recording.DurationMs, reloaded.Recordings[id].DurationMs);
+            Sequence(recording.Frames, reloaded.Recordings[id].Frames);
+        }
+        Sequence(original.Bindings.OrderBy(binding => binding.Key), reloaded.Bindings.OrderBy(binding => binding.Key));
+        Expect<InvalidDataException>(() => reloaded.RenameRecording(copy.Id, "   "));
+        Expect<InvalidDataException>(() => reloaded.RenameRecording(copy.Id, new string('a', 81)));
+
+        for (int i = reloaded.Recordings.Count; i < MacroRecording.MaxRecordingsPerProfile; i++)
+            reloaded = reloaded.WithRecording(source with { Id = Guid.NewGuid(), Name = $"Take {i}" });
+        Expect<InvalidOperationException>(() => reloaded.DuplicateRecording(source.Id, "Extra copy"));
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+        {
+            File.Delete(path);
+            Directory.Delete(directory);
+        }
+    }
+}
+
+static void RecordingReplacementAndDeletion()
+{
+    string directory = Path.Combine(Path.GetTempPath(), $"AccessRelay.RecordingLifecycle.Verify.{Guid.NewGuid():N}");
+    try
+    {
+        var store = new ProfileStore(directory);
+        var original = new MacroRecording(Guid.NewGuid(), "Original take", RecordingChannels.RightStickY,
+            [new(0, default(ControllerState) with { RightY = 8000 })], 100);
+        var other = original with { Id = Guid.NewGuid(), Name = "Keep this take" };
+        var profile = Enabled().WithRecording(original).WithRecording(other)
+            .WithBinding(ControlId.LargeRight, new(ScriptKind.Recorded, RecordingId: original.Id))
+            .WithBinding(ControlId.A, new(ScriptKind.Recorded, Consume: true, RecordingId: original.Id))
+            .WithBinding(ControlId.LargeLeft, new(ScriptKind.Recorded, RecordingId: other.Id));
+        for (int i = profile.Recordings.Count; i < MacroRecording.MaxRecordingsPerProfile; i++)
+            profile = profile.WithRecording(original with { Id = Guid.NewGuid(), Name = $"Extra take {i}" });
+        store.Save(profile);
+
+        var replacement = original with
+        {
+            Name = "Replacement take",
+            Frames = [new(0, default(ControllerState) with { RightY = -16000 })],
+            DurationMs = 150
+        };
+        store.Save(store.Load(profile.Id).WithRecording(replacement));
+        var replaced = store.Load(profile.Id);
+        Equal(MacroRecording.MaxRecordingsPerProfile, replaced.Recordings.Count);
+        Equal(replacement.Name, replaced.Recordings[original.Id].Name);
+        Equal(replacement.DurationMs, replaced.Recordings[original.Id].DurationMs);
+        Sequence(replacement.Frames, replaced.Recordings[original.Id].Frames);
+        Sequence(profile.Bindings.OrderBy(binding => binding.Key), replaced.Bindings.OrderBy(binding => binding.Key));
+
+        store.Save(replaced.WithoutRecording(original.Id));
+        var deleted = store.Load(profile.Id);
+        Sequence(replaced.Recordings.Keys.Where(id => id != original.Id).Order(), deleted.Recordings.Keys.Order());
+        Sequence(replaced.Bindings.Where(binding => binding.Value.RecordingId != original.Id).OrderBy(binding => binding.Key),
+            deleted.Bindings.OrderBy(binding => binding.Key));
+        Equal(other.Name, deleted.Recordings[other.Id].Name);
+        Sequence(other.Frames, deleted.Recordings[other.Id].Frames);
+        Equal(profile.ScriptsEnabled, deleted.ScriptsEnabled);
+        Equal(profile.Name, deleted.Name);
+        Sequence(profile.Timings.OrderBy(timing => timing.Key), deleted.Timings.OrderBy(timing => timing.Key));
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+        {
+            foreach (string path in Directory.EnumerateFiles(directory))
+                File.Delete(path);
+            Directory.Delete(directory);
+        }
+    }
+}
+
+static void RecordingEdits()
+{
+    var original = new MacroRecording(Guid.NewGuid(), "Timing test",
+        RecordingChannels.RightStickY | RecordingChannels.RightTrigger | RecordingChannels.A,
+        [new(0, default(ControllerState) with { RightY = -20000 }),
+         new(20, default(ControllerState) with { RightY = -10000 }),
+         new(40, default),
+         new(41, default(ControllerState) with { RightY = 20000 }),
+         new(80, default)], 100);
+
+    var scaled = original.WithIntervalDuration(1, 4, 36);
+    Sequence([0, 20, 32, 33, 56], scaled.Frames.Select(frame => frame.TimeMs));
+    Equal(76, scaled.DurationMs);
+    Sequence(original.Frames.Select(frame => frame.State), scaled.Frames.Select(frame => frame.State));
+    var compressed = original.WithIntervalDuration(1, 4, 3);
+    Sequence([0, 20, 21, 22, 23], compressed.Frames.Select(frame => frame.TimeMs));
+    Equal(43, compressed.DurationMs);
+    var shortenedTail = original.WithIntervalDuration(4, original.Frames.Length, 10);
+    Sequence(original.Frames, shortenedTail.Frames);
+    Equal(90, shortenedTail.DurationMs);
+    var stretched = original.WithIntervalDuration(0, original.Frames.Length, 200);
+    Sequence([0, 40, 80, 82, 160], stretched.Frames.Select(frame => frame.TimeMs));
+    Equal(200, stretched.DurationMs);
+
+    var editState = new ControllerState((ushort)(ControlId.A | ControlId.B), 99, 123, 9000, -5000, 18000, 15000);
+    var edited = scaled.WithFrame(2, 31, editState);
+    Equal(original.Id, edited.Id);
+    Equal(original.Name, edited.Name);
+    Equal(original.Channels, edited.Channels);
+    Equal(scaled.DurationMs, edited.DurationMs);
+    Equal(new RecordedFrame(31, new((ushort)ControlId.A, 0, 123, 0, 0, 0, 15000)), edited.Frames[2]);
+    Equal(new RecordedFrame(40, default), original.Frames[2]);
+
+    var manual = new ControllerState((ushort)ControlId.B, 64, 72, -9000, 6000, -12000, 4000);
+    var profile = Enabled().WithRecording(edited)
+        .WithBinding(ControlId.LargeRight, new(ScriptKind.Recorded, RecordingId: original.Id));
+    var engine = Start(profile, manual);
+    Equal(manual with { RightTrigger = 0, RightY = -20000 }, engine.Tick(manual, PaddleButtons.LargeRight, true, 100));
+    Equal(manual with { RightTrigger = 0, RightY = -10000 }, engine.Tick(manual, PaddleButtons.None, true, 130));
+    Equal(manual with { Buttons = (ushort)(ControlId.A | ControlId.B), RightTrigger = 123, RightY = 15000 },
+        engine.Tick(manual, PaddleButtons.None, true, 131));
+    Equal(manual with { RightTrigger = 0, RightY = 20000 }, engine.Tick(manual, PaddleButtons.None, true, 133));
+    Equal(manual with { RightTrigger = 0, RightY = 0 }, engine.Tick(manual, PaddleButtons.None, true, 175));
+    Equal(manual, engine.Tick(manual, PaddleButtons.None, true, 176));
+
+    Expect<ArgumentOutOfRangeException>(() => original.WithIntervalDuration(-1, 4, 36));
+    Expect<ArgumentOutOfRangeException>(() => original.WithIntervalDuration(1, 1, 36));
+    Expect<ArgumentOutOfRangeException>(() => original.WithIntervalDuration(1, 4, 2));
+    Expect<ArgumentOutOfRangeException>(() => original.WithIntervalDuration(1, 4, int.MaxValue));
+    Expect<ArgumentOutOfRangeException>(() => original.WithFrame(5, 90, default));
+    Expect<ArgumentOutOfRangeException>(() => original.WithFrame(0, 1, default));
+    Expect<ArgumentOutOfRangeException>(() => original.WithFrame(2, 41, default));
+    Expect<ArgumentOutOfRangeException>(() => original.WithFrame(4, original.DurationMs, default));
+
+    string directory = Path.Combine(Path.GetTempPath(), $"AccessRelay.RecordingEdit.Verify.{Guid.NewGuid():N}");
+    string path = Path.Combine(directory, profile.Id.ToString("N") + ".json");
+    try
+    {
+        var store = new ProfileStore(directory);
+        store.Save(profile.WithRecording(original));
+        var snapshot = store.Load(profile.Id);
+        store.SaveRecordingEdit(snapshot, snapshot.WithRecording(edited));
+
+        var saved = store.LoadAll().Single();
+        Equal(profile.Id, saved.Id);
+        Equal(profile.GetBinding(ControlId.LargeRight), saved.GetBinding(ControlId.LargeRight));
+        Equal(edited.DurationMs, saved.Recordings[original.Id].DurationMs);
+        Sequence(edited.Frames, saved.Recordings[original.Id].Frames);
+
+        byte[] savedBytes = File.ReadAllBytes(path);
+        Expect<InvalidOperationException>(() => store.SaveRecordingEdit(snapshot, snapshot.WithRecording(stretched)));
+        Sequence(savedBytes, File.ReadAllBytes(path));
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+        {
+            File.Delete(path);
+            Directory.Delete(directory);
+        }
+    }
+}
+
+static void RecordedRightStickPhases()
+{
+    var recording = Take(200, (0, 0), (10, -1600), (15, -4000), (25, -19000), (40, -24576), (70, -28000),
+        (100, -10000), (115, 15000), (140, 24576), (155, 30000), (175, 20000), (185, 0));
+    var phases = recording.FindRightStickIntervals();
+    Check(recording, phases.DownSweep, new(2, 4), 25);
+    Check(recording, phases.DownHold, new(4, 6), 60);
+    Check(recording, phases.UpSweep, new(6, 8), 40);
+    Check(recording, phases.UpHold, new(8, 10), 35);
+
+    var edited = recording.WithIntervalDuration(2, 4, 40);
+    Equal(phases, edited.FindRightStickIntervals());
+    Check(edited, phases.DownSweep, new(2, 4), 40);
+    Check(edited, phases.UpSweep, new(6, 8), 40);
+
+    var direct = Take(60, (0, -30000), (25, 26000));
+    var directPhases = direct.FindRightStickIntervals();
+    Equal<RecordedInterval?>(null, directPhases.DownSweep);
+    Check(direct, directPhases.DownHold, new(0, 1), 25);
+    Equal<RecordedInterval?>(null, directPhases.UpSweep);
+    Check(direct, directPhases.UpHold, new(1, 2), 35);
+
+    var interrupted = Take(60, (0, -30000), (10, 0), (20, -30000), (30, 30000));
+    var interruptedPhases = interrupted.FindRightStickIntervals();
+    Check(interrupted, interruptedPhases.DownHold, new(0, 1), 10);
+    Equal<RecordedInterval?>(null, interruptedPhases.UpSweep);
+    Equal<RecordedInterval?>(null, interruptedPhases.UpHold);
+
+    var holding = Take(60, (0, -30000));
+    Check(holding, holding.FindRightStickIntervals().DownHold, new(0, 1), 60);
+    Equal(default, Take(60, (0, 0), (25, 30000)).FindRightStickIntervals());
+    var ignoredY = Take(60, (0, 0)) with { Channels = RecordingChannels.RightStickX };
+    Equal(default, ignoredY.FindRightStickIntervals());
+
+    static MacroRecording Take(int duration, params (int Time, short RightY)[] samples) =>
+        new(Guid.NewGuid(), "Recorded phases", RecordingChannels.RightStickY,
+            [.. samples.Select(sample => new RecordedFrame(sample.Time, default(ControllerState) with { RightY = sample.RightY }))], duration);
+
+    static void Check(MacroRecording take, RecordedInterval? actual, RecordedInterval expected, int duration)
+    {
+        Equal<RecordedInterval?>(expected, actual);
+        Equal(duration, take.IntervalDuration(actual!.Value));
+    }
+}
+
+static void Nba2K27Feedback()
+{
+    var lateAndSlow = Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.Late, Nba2K27TempoFeedback.Slow);
+    Equal(new Nba2K27Adjustment(-16, -8), lateAndSlow);
+    Equal(new Nba2K27Adjustment(16, 8), Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.Early, Nba2K27TempoFeedback.Fast));
+    Equal(new Nba2K27Adjustment(8, 4), Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.SlightlyEarly, Nba2K27TempoFeedback.SlightlyFast));
+    Equal(new Nba2K27Adjustment(-8, -4), Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.SlightlyLate, Nba2K27TempoFeedback.SlightlySlow));
+    Equal(default, Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.Excellent, Nba2K27TempoFeedback.None));
+    Equal(default, Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.None, Nba2K27TempoFeedback.Excellent));
+
+    var timing = new ScriptTiming(StartDelay: 20, DownHold: 80, UpSweep: 33);
+    Equal(timing with { DownHold = 64, UpSweep = 25 }, Nba2K27Tuning.Apply(timing, lateAndSlow));
+    Equal(true, ReferenceEquals(timing, Nba2K27Tuning.Apply(timing, default)));
+    Equal(timing with { DownHold = 1, UpSweep = ScriptTiming.MaxMs },
+        Nba2K27Tuning.Apply(timing, new(int.MinValue, int.MaxValue)));
+
+    var recording = new MacroRecording(Guid.NewGuid(), "Test shot", RecordingChannels.RightStickY | RecordingChannels.A,
+        [Frame(0, 0), Frame(20, -25000, ControlId.A), Frame(30, -30000), Frame(100, -10000), Frame(116, 15000),
+            Frame(133, 32000), Frame(155, 0)], 175);
+    Equal(new Nba2K27Intervals(80, 33), Nba2K27Tuning.GetIntervals(recording));
+    var adjusted = Nba2K27Tuning.Apply(recording, lateAndSlow);
+    Equal(recording.Id, adjusted.Id);
+    Equal(recording.Channels, adjusted.Channels);
+    Equal(151, adjusted.DurationMs);
+    Equal(new Nba2K27Intervals(64, 25), Nba2K27Tuning.GetIntervals(adjusted));
+    Sequence(recording.Frames.Select(frame => frame.State), adjusted.Frames.Select(frame => frame.State));
+    Equal(true, ReferenceEquals(recording, Nba2K27Tuning.Apply(recording, default)));
+    Equal(new Nba2K27Intervals(2, 2),
+        Nba2K27Tuning.GetIntervals(Nba2K27Tuning.Apply(recording, new(int.MinValue, int.MinValue))));
+
+    var atLimit = Nba2K27Tuning.Apply(recording with { DurationMs = InputRecorder.MaxDurationMs }, new(16, -8));
+    Equal(InputRecorder.MaxDurationMs, atLimit.DurationMs);
+    Equal(new Nba2K27Intervals(88, 25), Nba2K27Tuning.GetIntervals(atLimit));
+
+    var snap = recording with { Frames = [Frame(0, -30000), Frame(100, 30000), Frame(150, 0)] };
+    Equal(new Nba2K27Intervals(100, null), Nba2K27Tuning.GetIntervals(snap));
+    Equal(new Nba2K27Intervals(84, null), Nba2K27Tuning.GetIntervals(Nba2K27Tuning.Apply(snap, lateAndSlow)));
+
+    var multiShot = recording with
+    {
+        Frames = [.. recording.Frames, Frame(170, -30000), Frame(200, 30000)],
+        DurationMs = 220
+    };
+    Equal(default, Nba2K27Tuning.GetIntervals(multiShot));
+    Equal(true, ReferenceEquals(multiShot, Nba2K27Tuning.Apply(multiShot, lateAndSlow)));
+    Equal(default, Nba2K27Tuning.GetIntervals(recording with { Frames = [Frame(0, -30000), Frame(150, 0)] }));
+
+    static RecordedFrame Frame(int time, short rightY, ControlId button = 0) =>
+        new(time, default(ControllerState) with { RightY = rightY, Buttons = (ushort)button });
 }
 
 static void LegacyRecordingMasks()

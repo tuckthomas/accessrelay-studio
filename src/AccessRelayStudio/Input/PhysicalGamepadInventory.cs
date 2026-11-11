@@ -104,6 +104,7 @@ internal static partial class PhysicalGamepadInventory
         id.Contains("VIGEM", StringComparison.OrdinalIgnoreCase) ||
         id.Contains("VJOY", StringComparison.OrdinalIgnoreCase) ||
         id.Contains("USBIP", StringComparison.OrdinalIgnoreCase) ||
+        id.Contains("AccessRelay-VirtualXbox", StringComparison.OrdinalIgnoreCase) ||
         id.Contains("SYNTHETICGAMEPAD", StringComparison.OrdinalIgnoreCase) ||
         id.Contains("VIRTUAL", StringComparison.OrdinalIgnoreCase);
 

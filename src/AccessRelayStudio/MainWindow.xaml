@@ -272,6 +272,20 @@
                             </StackPanel>
                         </ListViewItem>
                         <ListViewItem Style="{StaticResource SideItem}"
+                                      AutomationProperties.Name="Lua Scripts" ToolTipService.ToolTip="Lua Scripts">
+                            <StackPanel Orientation="Horizontal" Spacing="15">
+                                <FontIcon Glyph="&#xE943;" FontSize="21" />
+                                <TextBlock Text="Lua Scripts" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ListViewItem>
+                        <ListViewItem Style="{StaticResource SideItem}"
+                                      AutomationProperties.Name="Plugins" ToolTipService.ToolTip="Plugins">
+                            <StackPanel Orientation="Horizontal" Spacing="15">
+                                <FontIcon Glyph="&#xEA86;" FontSize="21" />
+                                <TextBlock Text="Plugins" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </ListViewItem>
+                        <ListViewItem Style="{StaticResource SideItem}"
                                       AutomationProperties.Name="Voice" ToolTipService.ToolTip="Live Voice">
                             <StackPanel Orientation="Horizontal" Spacing="15">
                                 <FontIcon Glyph="&#xE720;" FontSize="21" />

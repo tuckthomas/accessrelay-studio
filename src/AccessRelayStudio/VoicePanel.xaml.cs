@@ -97,11 +97,9 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     internal VoiceProfileControlState GetVoiceProfileState()
     {
         EnsureInitialized();
-        var selected = SelectedModel?.UsesReference == true ? _selectedProfile : null;
-        string message = _profileMessage ?? (_availableProfiles.Count == 0 ? "Import a voice profile in Live Voice."
-            : ReferenceModel is null ? "A reference-voice model is required."
-            : selected is not null ? string.Empty
-            : "Choose an imported voice profile.");
+        var selected = SelectedProfile;
+        string message = _profileMessage ?? (_availableProfiles.Count == 0 ? "Save an effects profile or import a voice profile in Live Voice."
+            : selected is not null ? string.Empty : "Choose a saved voice profile.");
         return new(_availableProfiles, selected?.Id, CanSelectProfile, _profileSwitch is not null, message);
     }
 
@@ -117,18 +115,32 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     internal async Task SelectVoiceProfileAsync(Guid profileId)
     {
         EnsureInitialized();
-        if (!CanSelectProfile || (_selectedProfile?.Id == profileId && SelectedModel?.UsesReference == true)
-            || ReferenceModel is not { } model || _availableProfiles.FirstOrDefault(candidate => candidate.Id == profileId) is not { } profile)
+        if (!CanSelectProfile || SelectedProfile?.Id == profileId ||
+            _availableProfiles.FirstOrDefault(candidate => candidate.Id == profileId) is not { } profile)
             return;
 
+        var model = ModelFor(profile);
+        if (model is null)
+        {
+            _profileMessage = "Install a reference-voice model to use this profile.";
+            UpdateStatus();
+            return;
+        }
+
         bool running = _session.Status.IsRunning;
+        if (running && SelectedModel?.UsesReference != model.UsesReference)
+        {
+            _profileMessage = "Stop voice processing to switch between built-in effects and a reference model.";
+            UpdateStatus();
+            return;
+        }
         using var change = new CancellationTokenSource();
         _profileSwitch = change;
-        _profileMessage = running ? $"Loading {profile.Name}…" : null;
+        _profileMessage = running && model.UsesReference ? $"Loading {profile.Name}…" : null;
         UpdateStatus();
         try
         {
-            if (running)
+            if (running && model.UsesReference)
                 await _session.SwitchVirtualProfileAsync(model, profile, change.Token);
             if (_disposed)
                 return;
@@ -136,8 +148,9 @@ public sealed partial class VoicePanel : UserControl, IDisposable
             _restoringVoiceSelection = true;
             try
             {
-                SetSelectedProfile(profile);
                 Model.SelectedItem = model;
+                SetSelectedProfile(profile);
+                LoadEffects(profile);
             }
             finally
             {
@@ -178,11 +191,12 @@ public sealed partial class VoicePanel : UserControl, IDisposable
         bool starting = _start is not null;
         StartStop.Content = (running, starting, _headphoneSession, IsPreview, IsRecordedPreview) switch
         {
+            (true, _, true, _, false) => "Stop live playback",
             (true, _, true, _, _) => "Stop preview",
             (true, _, false, _, _) => "Stop voice",
             (_, true, _, _, _) => "Cancel start",
             (_, _, _, _, true) => "Record voice preview",
-            (_, _, _, true, _) => "Start headphone preview",
+            (_, _, _, true, _) => "Start live playback",
             _ => "Start virtual mic"
         };
         StartStop.IsEnabled = running || _start is { IsCancellationRequested: false }
@@ -192,6 +206,7 @@ public sealed partial class VoicePanel : UserControl, IDisposable
         Model.IsEnabled = editable;
         Profile.IsEnabled = CanSelectProfile;
         DeleteVoiceProfileButton.IsEnabled = CanDeleteProfile(running);
+        SaveEffectsProfileButton.IsEnabled = !starting && !_deletingProfile && _profileSwitch is null;
         DeleteVoiceProfileHint.Visibility = running && SelectedProfile is not null ? Visibility.Visible : Visibility.Collapsed;
         return running;
     }
@@ -235,11 +250,14 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     private VoiceEndpoint? Input => Microphone.SelectedItem as VoiceEndpoint;
     private VoiceEndpoint? Output => Playback.SelectedItem as VoiceEndpoint;
     private VoiceModelOption? SelectedModel => Model.SelectedItem as VoiceModelOption;
-    private VoiceProfile? SelectedProfile => _selectedProfile;
+    private VoiceProfile? SelectedProfile => _selectedProfile is { } profile && SelectedModel is { } model &&
+        model.UsesReference == (profile.Effects is null) ? profile : null;
     private VoiceModelOption? ReferenceModel => SelectedModel is { UsesReference: true } model ? model
         : (Model.ItemsSource as VoiceModelOption[])?.FirstOrDefault(option => option.UsesReference);
+    private VoiceModelOption? ModelFor(VoiceProfile profile) => profile.Effects is null ? ReferenceModel
+        : (Model.ItemsSource as VoiceModelOption[])?.FirstOrDefault(option => !option.UsesReference);
     private bool CanSelectProfile => !_disposed && !_deletingProfile && _start is null && _profileSwitch is null
-        && (!_headphoneSession || !_session.Status.IsRunning) && ReferenceModel is not null && _availableProfiles.Count != 0;
+        && (!_headphoneSession || !_session.Status.IsRunning || SelectedModel?.UsesReference == false) && _availableProfiles.Count != 0;
     private bool CanDeleteProfile(bool running) => !_disposed && !_deletingProfile && _start is null && _profileSwitch is null
         && !running && SelectedProfile is not null;
     private bool CanStart(bool useHeadphones) => Input is not null && (useHeadphones ? Output is not null : VirtualMicPipe.SetupIssue is null)
@@ -283,10 +301,11 @@ public sealed partial class VoicePanel : UserControl, IDisposable
 
     private void UpdateRouteHelp()
     {
+        HeadphoneMode.Content = SelectedModel?.UsesReference == true ? "Recorded headphone preview" : "Live headphone playback";
         RouteHelp.Text = (IsPreview, IsRecordedPreview) switch
         {
             (_, true) => $"Choose headphones, then speak when the {NeuralVoicePreview.CaptureSeconds}-second recording starts. Studio plays the processed sample after recording ends.",
-            (true, _) => "Choose headphones to hear the processed voice without speaker feedback.",
+            (true, _) => "Choose your headphones and start live playback to hear the built-in effects as you speak.",
             _ when VirtualMicPipe.SetupIssue is { } issue => issue,
             _ => "Start the bundled virtual microphone, then select AccessRelay Virtual Microphone in the app you want to use. Windows may ask for administrator approval the first time."
         };
@@ -313,6 +332,10 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     {
         if (!_loaded || _restoringVoiceSelection)
             return;
+        _restoringVoiceSelection = true;
+        try { SelectCompatibleProfile(); }
+        finally { _restoringVoiceSelection = false; }
+        _profileMessage = null;
         SaveVoiceSelection();
         UpdateModel();
         UpdateSettings();
@@ -339,6 +362,7 @@ public sealed partial class VoicePanel : UserControl, IDisposable
         else if (neural && SelectedProfile is { } profile)
             ModelHelp.Text += $" Saved locally · {profile.Duration.TotalSeconds:0.000} s";
         Preset.Visibility = Pitch.Visibility = neural ? Visibility.Collapsed : Visibility.Visible;
+        SaveEffectsProfileButton.Visibility = neural ? Visibility.Collapsed : Visibility.Visible;
         UpdateRouteHelp();
     }
 
@@ -351,9 +375,12 @@ public sealed partial class VoicePanel : UserControl, IDisposable
             LoadProfiles(selection?.ProfileId);
             if (Model.ItemsSource is VoiceModelOption[] models)
             {
-                var savedModel = selection is null ? null : models.FirstOrDefault(model => model.Package == selection.ModelPackage);
-                Model.SelectedItem = savedModel ?? (SelectedProfile is null ? null : models.FirstOrDefault(model => model.UsesReference))
-                    ?? models.FirstOrDefault();
+                var savedModel = selection is null ? null : models.FirstOrDefault(model => model.SelectionKey == selection.ModelPackage);
+                var initialProfile = _selectedProfile ?? _availableProfiles.FirstOrDefault(profile => profile.Effects is null);
+                Model.SelectedItem = savedModel ?? (initialProfile is null ? null : ModelFor(initialProfile)) ?? models.FirstOrDefault();
+                SelectCompatibleProfile();
+                if (SelectedProfile is { } profile)
+                    LoadEffects(profile);
             }
         }
         catch (Exception error)
@@ -372,17 +399,33 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     {
         _availableProfiles = profiles;
         Profile.ItemsSource = _availableProfiles;
-        SetSelectedProfile(_availableProfiles.FirstOrDefault(profile => profile.Id == select) ?? _availableProfiles.FirstOrDefault());
+        SetSelectedProfile(_availableProfiles.FirstOrDefault(profile => profile.Id == select));
     }
 
     private void SetSelectedProfile(VoiceProfile? profile) => Profile.SelectedItem = _selectedProfile = profile;
+
+    private void SelectCompatibleProfile()
+    {
+        if (SelectedProfile is null)
+            SetSelectedProfile(SelectedModel?.UsesReference == true
+                ? _availableProfiles.FirstOrDefault(profile => profile.Effects is null) : null);
+    }
+
+    private void LoadEffects(VoiceProfile profile)
+    {
+        if (profile.Effects is not { } effects)
+            return;
+        Preset.SelectedItem = effects.Preset;
+        Pitch.Value = effects.PitchSemitones;
+        Gain.Value = effects.GainDb;
+    }
 
     private void SaveVoiceSelection()
     {
         _error = null;
         try
         {
-            _profiles.SaveSelection(SelectedProfile?.Id, SelectedModel?.Package);
+            _profiles.SaveSelection(SelectedProfile?.Id, SelectedModel?.SelectionKey);
         }
         catch (Exception error)
         {
@@ -391,6 +434,35 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     }
 
     private void OpenVoiceProfileEditor(object sender, RoutedEventArgs args) => VoiceTabs.SelectedItem = CreateVoiceProfileTab;
+
+    private async void SaveEffectsProfileClicked(object sender, RoutedEventArgs args)
+    {
+        if (_disposed || XamlRoot is not { } root || SelectedModel?.UsesReference != false)
+            return;
+
+        var settings = Settings();
+        var name = new TextBox { Header = "Profile name", Text = settings.Preset.ToString(), MaxLength = 80 };
+        var dialog = StudioDialog.Create(root, ActualTheme);
+        dialog.Title = "Save built-in effects profile";
+        dialog.Content = name;
+        dialog.PrimaryButtonText = "Save";
+        dialog.CloseButtonText = "Cancel";
+        dialog.DefaultButton = ContentDialogButton.Primary;
+        name.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = !string.IsNullOrWhiteSpace(name.Text);
+        try
+        {
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary || _disposed)
+                return;
+            var profile = _profiles.SaveEffects(name.Text, settings);
+            VoiceProfileSaved(this, profile);
+        }
+        catch (Exception error)
+        {
+            _error = $"Couldn’t save the effects profile. {error.Message}";
+            if (!_disposed)
+                UpdateStatus();
+        }
+    }
 
     private async void DeleteVoiceProfile(object sender, RoutedEventArgs args)
     {
@@ -401,21 +473,26 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     internal async Task DeleteSelectedProfileAsync(XamlRoot root, ElementTheme theme, Guid? expectedProfileId = null)
     {
         if (!CanDeleteSelectedProfile || SelectedProfile is not { } profile
-            || (expectedProfileId is Guid id && (profile.Id != id || SelectedModel?.UsesReference != true)))
+            || (expectedProfileId is Guid id && profile.Id != id))
             return;
 
         _deletingProfile = true;
         UpdateStatus();
         try
         {
-            bool confirmed = await ProfileDeletionDialog.ConfirmAsync(root, theme, "voice", profile.Name,
-                "This deletes the saved reference audio. The original audio or video stays on your computer.");
+            bool confirmed = await StudioDialog.ConfirmDeletionAsync(root, theme, "voice", profile.Name,
+                profile.Effects is null ? "This deletes the saved reference audio. The original audio or video stays on your computer."
+                    : "This deletes the saved effect settings.");
             if (!confirmed || _disposed || _session.Status.IsRunning || SelectedProfile?.Id != profile.Id)
                 return;
 
             _profiles.Delete(profile.Id);
             _restoringVoiceSelection = true;
-            try { SetProfiles(_availableProfiles.Where(candidate => candidate.Id != profile.Id).ToArray(), null); }
+            try
+            {
+                SetProfiles(_availableProfiles.Where(candidate => candidate.Id != profile.Id).ToArray(), null);
+                SelectCompatibleProfile();
+            }
             finally { _restoringVoiceSelection = false; }
             SaveVoiceSelection();
             _profileMessage = $"Deleted “{profile.Name}”.";
@@ -444,13 +521,19 @@ public sealed partial class VoicePanel : UserControl, IDisposable
     {
         if (_disposed)
             return;
-        bool selectNew = _start is null && _profileSwitch is null && !_session.Status.IsRunning;
+        var model = ModelFor(profile);
+        bool selectNew = model is not null && _start is null && _profileSwitch is null &&
+            (!_session.Status.IsRunning || profile.Effects is not null && SelectedModel?.UsesReference == false);
         _restoringVoiceSelection = true;
         try
         {
             LoadProfiles(selectNew ? profile.Id : SelectedProfile?.Id);
-            if (selectNew && ReferenceModel is { } model)
+            if (selectNew)
+            {
                 Model.SelectedItem = model;
+                LoadEffects(profile);
+            }
+            SelectCompatibleProfile();
         }
         catch (Exception error)
         {
@@ -461,8 +544,8 @@ public sealed partial class VoicePanel : UserControl, IDisposable
 
         if (selectNew)
         {
-            _profileMessage = null;
             SaveVoiceSelection();
+            _profileMessage = profile.Effects is null ? null : $"Saved “{profile.Name}”.";
         }
         UpdateModel();
         UpdateSettings();
@@ -474,7 +557,7 @@ public sealed partial class VoicePanel : UserControl, IDisposable
 
     private void UpdateSettings()
     {
-        if (!_loaded)
+        if (!_loaded || _restoringVoiceSelection)
             return;
         var settings = Settings();
         Pitch.Header = $"Pitch · {Pitch.Value:+0.0;-0.0;0.0} semitones";
@@ -503,6 +586,7 @@ public sealed partial class VoicePanel : UserControl, IDisposable
 
         var output = useHeadphones ? Output : null;
         _error = null;
+        _profileMessage = null;
         using var start = new CancellationTokenSource();
         _start = start;
         _headphoneSession = useHeadphones;
@@ -510,7 +594,7 @@ public sealed partial class VoicePanel : UserControl, IDisposable
         {
             if (output is not null)
             {
-                _opening = model.UsesReference ? $"Loading {model.Name} and your voice profile…" : "Starting headphone preview…";
+                _opening = model.UsesReference ? $"Loading {model.Name} and your voice profile…" : "Starting live headphone playback…";
                 UpdateStatus();
                 await _session.StartPreviewAsync(microphone.Id, output.Id, Settings(), model, SelectedProfile, start.Token);
             }
