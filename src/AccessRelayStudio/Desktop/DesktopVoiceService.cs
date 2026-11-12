@@ -186,21 +186,21 @@ internal sealed class DesktopVoiceService : IDesktopModule
                 {
                     RefreshCommandProfile();
                     if (_commandLearning is not null || _commandStarting) throw new InvalidOperationException("Finish or stop the current sound recording/recognizer startup.");
-                    StopCommands(); Guid profile = _commandProfile, id = args.Id();
+                    StopCommands(); Guid recordingProfile = _commandProfile, id = args.Id();
                     if (!_commandRetiring.IsCompleted) throw new InvalidOperationException("The previous local recognizer is still stopping. Try again shortly.");
                     if (!_commandSettings.Bindings.Any(binding => binding.Id == id)) throw new InvalidDataException("Save the command before recording a template.");
                     using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10)); _commandLearning = cancellation;
                     try
                     {
                         using var session = new VoiceCommandSession(args.Text("microphoneId"), _commandSettings,
-                            () => _runtime()?.ActiveProfileId == profile && !cancellation.IsCancellationRequested, null, learning: true);
+                            () => _runtime()?.ActiveProfileId == recordingProfile && !cancellation.IsCancellationRequested, null, learning: true);
                         _commandSession = session;
                         var template = await session.Learned.WaitAsync(cancellation.Token);
                         cancellation.Token.ThrowIfCancellationRequested();
-                        if (_runtime()?.ActiveProfileId != profile) throw new InvalidOperationException("Controller setup changed during recording; template discarded.");
+                        if (_runtime()?.ActiveProfileId != recordingProfile) throw new InvalidOperationException("Controller setup changed during recording; template discarded.");
                         var settings = _commandSettings with { Bindings = [.. _commandSettings.Bindings.Select(binding => binding.Id == id
                             ? binding with { Templates = [.. binding.Templates.TakeLast(2), template] } : binding)] };
-                        _commandStore.Save(profile, settings); _commandSettings = settings;
+                        _commandStore.Save(recordingProfile, settings); _commandSettings = settings;
                         return new { message = "Personal sound saved locally. Test with background speech before enabling gameplay." };
                     }
                     finally { _commandLearning = null; _commandSession = null; }
