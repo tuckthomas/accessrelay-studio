@@ -353,7 +353,10 @@ Implementation commit: `34adbda143249cc7ce4e98cfa0068174aab50816`.
 Validation: PowerShell template generation on Linux produced 20 Pending cases,
 an explicitly incomplete metadata record and overwrite rejection; the real input
 probe compiled without warnings. Windows CI also checks template generation against
-the published app. See `docs/physical-acceptance.md` and
+the published app and passed, together with Windows publishing, portable/native
+simulated-runtime, dataset, vision/performance and native-helper checks:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43299139365.
+See `docs/physical-acceptance.md` and
 `scripts/Start-AccessibilityAcceptance.ps1`. This creates a runnable acceptance
 procedure, not device, screen-reader, microphone or gameplay/model evidence.
 The remaining prerequisites are actual Windows hardware/user access and reviewed
