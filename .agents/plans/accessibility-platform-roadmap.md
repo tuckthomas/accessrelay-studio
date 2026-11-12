@@ -74,7 +74,8 @@ microphone hardware test is claimed.
 - [x] Clear state on Stop, disconnect, profile/device changes, and disabling the feature;
       require a fresh press before reactivation.
 - [x] Test edges, simultaneous controls, precedence, persistence compatibility, and resets.
-- [ ] Validate portable logic and Windows bridge/output behavior before completion.
+- [x] Validate portable logic and Windows runtime/output behavior with simulated devices.
+- [ ] Validate real physical controller/trigger behavior and native UI bridge interaction.
 - [x] Push implementation and record its commit SHA and validation here.
 
 Implementation commit: `14fd7f40f8262df58ce9b60d8d48f03cbecd7d57`. Portable controller verification, 51 frontend
@@ -92,7 +93,8 @@ Real physical device validation remains open. See
 - [x] Reset history on Stop, disconnect, profile/device changes, and disabling;
       define prompt neutralization without residual stick output.
 - [x] Test varying sample rates, neutral input, bounds, independent sticks, and resets.
-- [ ] Measure latency and validate the native input path before completion.
+- [x] Validate filter response and the Windows runtime path with simulated devices.
+- [ ] Measure physical input-to-output latency and comfort on target devices.
 - [x] Push implementation and record its commit SHA and validation here.
 
 Implementation commit: `0d621148bb225dea2e6966ea35f612d4bfe46e26`. Portable filter/controller checks, 52 frontend
@@ -194,10 +196,11 @@ Implementation commits: pending. Marketplace split: deferred until the contract 
 - [ ] Push independent improvements and record section commit SHAs here.
 
 Implementation commits: provenance guard `26866553388b539a973c541c91d4307f76f1b04f`;
-optional-NumPy import follow-up pending push. Validation: 26 dataset/provenance tests
+optional-NumPy import follow-up `0dd0e35a47f17d6a229076d4d980fa50fb2ef9ec`. Validation: 26 dataset/provenance tests
 passed with Python site packages disabled (`-S`); image preprocessing also retained
 its expected RGB tensor behavior with NumPy installed. Windows CI now runs the
-stdlib-only suite; its follow-up result is pending. Enriched
+stdlib-only suite and passed on Windows:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43257634331. Enriched
 conversion and footage deduplication remain unimplemented. Prerequisites: reviewed
 source clips for functional training validation.
 
