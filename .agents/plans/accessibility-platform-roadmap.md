@@ -13,8 +13,7 @@ passing Windows CI with simulated devices; physical-device acceptance remains op
 Sections 5–7 are implemented and passed Windows CI with simulated inputs. Section 8
 has local phrase/template recognition and bounded host arbitration implemented;
 Windows native CI and real microphone evaluation remain to be recorded.
-Section 10 has session and footage-provenance guards implemented; its conversion/data work
-remains open. Section 9 now has NBA extraction and the versioned pack SDK/import/tuning UI
+Section 10 has session and footage-provenance guards implemented; reviewed conversion is now implemented; real source-clip validation remains open. Section 9 now has NBA extraction and the versioned pack SDK/import/tuning UI
 implemented; native CI and Windows interaction acceptance remain to be recorded.
 Sections 11–12 are queued, not implemented.
 
@@ -240,12 +239,13 @@ Marketplace split: deferred until the contract is proven.
       separation. Validation evaluation now rejects training IDs even if labels are relabeled.
 - [x] Evaluate duplicate footage under distinct session IDs; identity checks alone
       do not establish footage independence.
-- [ ] Complete reviewed conversion of enriched recorded evidence, preserving source
+- [x] Complete reviewed conversion of enriched recorded evidence, preserving source
       identity, teacher/student mapping, camera/profile provenance, and meter exclusion.
-- [ ] Prove meter-on supervision cannot leak into meter-off evaluation and preserve
-      strict held-out independence; never remove markers to bypass compatibility checks.
-- [ ] Test conversion and rejection paths with synthetic fixtures, then exercise real
-      reviewed clips before claiming usable gameplay training.
+- [x] Enforce source purpose, disjoint overlay ROI, source/reference identities and
+      integrity-bound reviews; never remove markers to bypass compatibility checks.
+- [ ] Verify actual meter exclusion/label quality and held-out independence on reviewed gameplay.
+- [x] Test conversion and rejection paths with synthetic fixtures and the actual CLI.
+- [ ] Exercise real reviewed clips before claiming usable gameplay training.
 - [ ] Push independent improvements and record section commit SHAs here.
 
 Implementation commits: provenance guard `26866553388b539a973c541c91d4307f76f1b04f`;
@@ -254,7 +254,15 @@ passed with Python site packages disabled (`-S`); image preprocessing also retai
 its expected RGB tensor behavior with NumPy installed. Windows CI now runs the
 stdlib-only suite and passed on Windows:
 https://github.com/tuckthomas/accessrelay-studio/actions/runs/43257634331. Enriched
-conversion remains in progress. Footage reuse guard commit: `855717a127df3fa175438319b3f1daf91ad83cdc`. Validation: all 33 stdlib-only dataset/footage tests passed.
+reviewed conversion commit: `be45856e747052d3b674e389b78e07ccdd175704`.
+Validation: 43 stdlib-only dataset/footage/conversion tests and teacher/validation
+CLI conversions on explicitly synthetic streams passed. Raw evidence remains
+rejected until review proof binds source/labels/reference and all data hashes.
+The converter preserves original evidence and source IDs; it rejects overlapping
+model/overlay ROIs and meter-on evaluation relabeling. No pixel mask or preprocessing
+contract is silently changed. See `docs/vision-model-workflow.md` for the workflow.
+Real clips, label quality and physical model/timing acceptance remain open. Footage reuse guard commit: `855717a127df3fa175438319b3f1daf91ad83cdc`. Validation: all 33 stdlib-only dataset/footage tests passed; Windows CI also passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43287225043.
 The trainer and evaluator record/check RGB frame/window hashes independently of
 session IDs and reject reused configuration-reference footage. These exact checks
 cannot detect every transformation and do not replace source review. Prerequisites: reviewed
