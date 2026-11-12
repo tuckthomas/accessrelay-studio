@@ -7,8 +7,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\*.cs" />
-    <Compile Include="..\..\Core\ControllerState.cs" />
-    <Compile Include="..\..\Core\CoPilotInput.cs" />
+    <ProjectReference Include="../../../AccessRelayStudio.Runtime/AccessRelayStudio.Runtime.csproj" />
   </ItemGroup>
 </Project>

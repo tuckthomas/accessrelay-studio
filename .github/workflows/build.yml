@@ -30,6 +30,31 @@ jobs:
         run: ./scripts/Build-DesktopUi.ps1
       - name: Publish the base app
         run: dotnet publish ./src/AccessRelayStudio/AccessRelayStudio.csproj -c Release -o ./artifacts/Run
+      - name: Check compiled engine, runtime and desktop boundaries
+        run: dotnet run --project ./tools/architecture/Verification/ProjectBoundaryVerification.csproj -c Release -- ./artifacts/Run/AccessRelayStudio.Engine.dll ./artifacts/Run/AccessRelayStudio.Runtime.dll ./artifacts/Run/AccessRelayStudio.dll
+      - name: Check published desktop and worker assets
+        shell: pwsh
+        run: |
+          $required = @('AccessRelayStudio.exe', 'AccessRelayStudio.Engine.dll', 'AccessRelayStudio.Runtime.dll',
+            'Microsoft.ML.OnnxRuntime.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_providers_cuda.dll',
+            'NAudio.Wasapi.dll', 'System.Speech.dll', 'DesktopUi/index.html', 'Scene/Viewer/index.html',
+            'Scene/Viewer/viewer.bundle.js', 'Scene/Model/XboxOne.glb', 'GamePacks/nba2k27/pack.json', 'GamePacks/switch-demo/pack.json')
+          foreach ($relative in $required) {
+            if (-not (Test-Path -LiteralPath (Join-Path ./artifacts/Run $relative) -PathType Leaf)) {
+              throw "Published asset is missing: $relative"
+            }
+          }
+          foreach ($entry in @(
+            @{ Source = './src/AccessRelayStudio/Audio/VirtualMicHost/AccessRelay.VirtualMicHost.exe'; Target = 'VirtualMicrophone/AccessRelay.VirtualMicHost.exe' },
+            @{ Source = './src/AccessRelayStudio/Audio/VirtualMicHost/AccessRelay.VirtualXboxHost.exe'; Target = 'VirtualController/AccessRelay.VirtualXboxHost.exe' }
+          )) {
+            if (Test-Path -LiteralPath $entry.Source -PathType Leaf) {
+              $copied = Join-Path ./artifacts/Run $entry.Target
+              if (-not (Test-Path -LiteralPath $copied -PathType Leaf) -or (Get-FileHash $entry.Source).Hash -ne (Get-FileHash $copied).Hash) {
+                throw "Staged helper was not preserved: $($entry.Target)"
+              }
+            }
+          }
       - name: Check controller logic and profiles
         run: dotnet run --project ./src/AccessRelayStudio/Verification/Verification.csproj -c Release
       - name: Check offline dataset provenance guards

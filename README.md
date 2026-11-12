@@ -2,6 +2,10 @@
 
 AccessRelay Studio is an installable Windows accessibility app for adaptive controller input, gameplay capture and local voice processing. Its interface uses bundled React/TypeScript/CSS inside WebView2. Controller polling, release scheduling, capture, inference and audio processing stay in the C# engine. The installed app needs no web server, Node.js, pnpm or cloud hosting.
 
+The [desktop architecture](docs/desktop-architecture.md) separates the portable engine,
+Windows workers and React/WinUI presentation into projects with enforced dependency
+boundaries. WinUI supplies the small native shell; React owns the application screens.
+
 The interface is organized around **Workspace**, **Controller**, **Remote Play**, **Voice** and **Settings**. A shared visual system uses muted sage and ivory surfaces, navy text and mint accents derived from the application icon.
 
 - **Adaptive input** supports Windows gamepads over USB or Bluetooth, live control feedback, configurable bindings, and a recorder that can include or ignore individual controls and axes. Optional [sticky buttons and tremor smoothing](docs/controller-accessibility.md) are saved with each controller setup.

@@ -331,11 +331,11 @@ internal static class DatasetChecks
 
     private static void EnrichedTraceLifetime(string directory, Nba2K27ShotProfile profile, VisionSettings settings)
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         var physical = new ControllerState((ushort)ControlId.X, 11, 219, 4000, -5000, 17000, -21000);
         input.SetState(physical, PaddleButtons.LargeLeft);
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
-        runtime.Attach(new UsbipXboxOutput()); runtime.SetVisionTrainingRecording(true);
+        runtime.Attach(new FakeControllerOutput()); runtime.SetVisionTrainingRecording(true);
         var trace = new VisionTrainingTrace();
         runtime.SetVisionTrainingTrace(trace);
         int detached = 0;

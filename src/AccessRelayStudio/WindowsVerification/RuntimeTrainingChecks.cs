@@ -8,10 +8,10 @@ internal static class RuntimeTrainingChecks
 {
     internal static void Run()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         var profile = StudioProfile.CreateDefault() with { ScriptsEnabled = false };
         using var runtime = new StudioRuntime(input, profile, new StickDeadzone(0, 0));
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         WaitUntil(() => runtime.Latest?.Input.IsConnected == true, "Simulated controller did not reach the runtime.");
 
         runtime.SetScriptsEnabled(true);
@@ -31,7 +31,7 @@ internal static class RuntimeTrainingChecks
         runtime.SetScriptsEnabled(false); runtime.StopRecording(); runtime.DiscardRecording();
         runtime.StopOutput(stopScripts: true);
         Check(runtime.IsVisionTrainingRecording, "Stopping output silently ended the training guard.");
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         var physical = new ControllerState((ushort)(ControlId.X | ControlId.A), 80, 95, 11000, -12000, 13000, -14000);
         input.SetState(physical, PaddleButtons.LargeRight);
         WaitUntil(() => runtime.Latest is { } sample && sample.Input.State == physical && sample.Output == physical,
@@ -63,11 +63,11 @@ internal static class RuntimeTrainingChecks
 
     private static void TraceCaptureChecks()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         var profile = StudioProfile.CreateDefault() with { ScriptsEnabled = false };
         var deadzone = new StickDeadzone(20, 20);
         using var runtime = new StudioRuntime(input, profile, deadzone);
-        var output = new UsbipXboxOutput();
+        var output = new FakeControllerOutput();
         runtime.Attach(output);
         runtime.SetVisionTrainingRecording(true);
         var trace = new VisionTrainingTrace();

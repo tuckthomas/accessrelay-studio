@@ -64,11 +64,11 @@ internal static class PreviewSessionChecks
             Native.UpdateWindow(window);
             Check(Native.SetTimer(window, 1, 16, 0) != 0, "Preview fixture animation timer failed.");
 
-            using var input = new EliteInputMonitor();
+            using var input = new FakeControllerInput();
             var physical = new ControllerState((ushort)(ControlId.X | ControlId.A), 40, 60, 10000, -11000, 12000, -13000);
             input.SetState(physical);
             using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
-            runtime.Attach(new UsbipXboxOutput());
+            runtime.Attach(new FakeControllerOutput());
             using var session = new VisionSession(runtime);
             var profile = new Nba2K27ShotProfile(Guid.NewGuid(), "Preview regression fixture", 78, 80,
                 "Fixture base", "Fixture upper one", "Fixture upper two");

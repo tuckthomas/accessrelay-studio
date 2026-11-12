@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RootNamespace>EliteScriptStudio</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AccessRelayStudio.Engine/AccessRelayStudio.Engine.csproj" />
+    <Compile Include="../AccessRelayStudio/StudioRuntime.cs;../AccessRelayStudio/PrecisionTimer.cs;../AccessRelayStudio/HighResolutionReleaseTimer.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../AccessRelayStudio/Input/*.cs" Link="Input/%(Filename)%(Extension)" />
+    <Compile Include="../AccessRelayStudio/Output/*.cs" Link="Output/%(Filename)%(Extension)" />
+    <Compile Include="../AccessRelayStudio/Audio/*.cs;../AccessRelayStudio/Audio/VirtualMicDriver/VirtualMicDriver.cs" Link="Audio/%(Filename)%(Extension)" />
+    <Compile Include="../AccessRelayStudio/Vision/*.cs" Link="Vision/%(Filename)%(Extension)" />
+    <Compile Include="../../games/nba2k27/src/*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.31.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="System.Speech" Version="10.0.0" />
+    <InternalsVisibleTo Include="AccessRelayStudio" />
+    <InternalsVisibleTo Include="WindowsVerification" />
+    <InternalsVisibleTo Include="EliteInputProbe" />
+  </ItemGroup>
+</Project>

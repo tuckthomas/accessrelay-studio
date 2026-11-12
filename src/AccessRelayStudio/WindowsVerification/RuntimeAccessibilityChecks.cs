@@ -9,10 +9,10 @@ internal static class RuntimeAccessibilityChecks
 {
     internal static void Run()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         var profile = StudioProfile.CreateDefault() with { StickyControls = ImmutableHashSet.Create(ControlId.A) };
         using var runtime = new StudioRuntime(input, profile, new StickDeadzone(0, 0));
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Input/output did not connect.");
         var down = default(ControllerState) with { Buttons = (ushort)ControlId.A };
         input.SetState(down);
@@ -21,7 +21,7 @@ internal static class RuntimeAccessibilityChecks
         Wait(() => runtime.Latest is { } sample && sample.Input.State.Buttons == 0 && sample.Output.Buttons == down.Buttons,
             "Sticky release was not retained.");
         runtime.StopOutput(stopScripts: true);
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Output.Buttons == 0, "Stop/restart resumed a sticky hold.");
         input.SetState(down);
         Wait(() => runtime.Latest?.Output.Buttons == down.Buttons, "New sticky press was ignored.");
@@ -62,9 +62,9 @@ internal static class RuntimeAccessibilityChecks
 
     private static void DelayedDeadlineClock()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest?.Input.IsConnected == true && runtime.Latest?.OutputActive == true, "Deadline test did not connect.");
         runtime.ConfigureVision(VisionSettings.Default with { MaximumFrameAgeMs = 1000, MaximumLatenessMs = 2 });
         runtime.BeginVisionSession();
@@ -93,7 +93,7 @@ internal static class RuntimeAccessibilityChecks
 
     private static void LockMeasurements()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
         long first = runtime.BeginLockMeasurements();
         Wait(() => runtime.LockMeasurements(first)?.InputPoll.Samples > 0, "Runtime poll lock measurements were not recorded.");
@@ -110,9 +110,9 @@ internal static class RuntimeAccessibilityChecks
 
     private static void VoiceCommands()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest?.OutputActive == true && runtime.Latest?.Input.IsConnected == true, "Voice input/output did not connect.");
         var binding = new VoiceCommandBinding { Control = ControlId.A, DurationMs = 100, RefractoryMs = 200 };
         var settings = new VoiceCommandSettings { Bindings = [binding] };
@@ -127,7 +127,7 @@ internal static class RuntimeAccessibilityChecks
         input.SetState(default); Wait(() => runtime.Latest?.Output.Buttons == 0, "Voice pulse exceeded its duration.");
         try { runtime.StartRecording(RecordingChannels.All); throw new Exception("Voice-contaminated recording was allowed."); }
         catch (InvalidOperationException) { }
-        runtime.StopOutput(true); runtime.Attach(new UsbipXboxOutput());
+        runtime.StopOutput(true); runtime.Attach(new FakeControllerOutput());
         now = Stopwatch.GetTimestamp();
         if (runtime.EnqueueVoiceCommand(generation, new(binding.Id, .99, now, now, now))) throw new Exception("Stop accepted a stale recognizer.");
         runtime.SetScriptsEnabled(true);
@@ -144,9 +144,9 @@ internal static class RuntimeAccessibilityChecks
 
     private static void CoPilot()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest?.OutputActive == true, "Co-pilot output did not connect.");
         var held = default(ControllerState) with { Buttons = (ushort)ControlId.A, RightX = 21000 };
         input.SetCompanion(held);
@@ -163,7 +163,7 @@ internal static class RuntimeAccessibilityChecks
         runtime.StartRecording(RecordingChannels.All);
         input.SetCompanion(held); Wait(() => runtime.Latest?.Output == held, "Recording changed merged physical input.");
         runtime.StopRecording(); runtime.DiscardRecording();
-        runtime.StopOutput(true); runtime.Attach(new UsbipXboxOutput());
+        runtime.StopOutput(true); runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest?.OutputActive == true && runtime.Latest?.Output == default(ControllerState), "Stop replayed co-pilot holds.");
         input.SetCompanion(default); Wait(() => runtime.Latest?.Input.State == default(ControllerState), "Stop neutral was not seen.");
         Thread.Sleep(10);
@@ -181,10 +181,10 @@ internal static class RuntimeAccessibilityChecks
 
     private static void Smoothing()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         var profile = StudioProfile.CreateDefault() with { Smoothing = new(100, 100) };
         using var runtime = new StudioRuntime(input, profile, new StickDeadzone(5, 5));
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Smoothing input/output did not connect.");
         var step = default(ControllerState) with { RightX = short.MaxValue };
         input.SetState(step);
@@ -211,16 +211,16 @@ internal static class RuntimeAccessibilityChecks
             "Smoothing altered the timed sequence output.");
         runtime.SetScriptsEnabled(false);
         input.SetState(default); Wait(() => runtime.Latest?.Output == default(ControllerState), "Disabling scripts retained output.");
-        runtime.StopOutput(stopScripts: true); runtime.Attach(new UsbipXboxOutput());
+        runtime.StopOutput(stopScripts: true); runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest?.Output == default(ControllerState), "Output restart retained smoothing history.");
         Console.WriteLine("SUCCESS: real runtime smoothing, immediate deadzone neutralization, raw recording/training and unsmoothed sequences with simulated devices.");
     }
 
     private static void Navigation()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(5, 5));
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Navigation input/output did not connect.");
         var config = new SwitchNavigationSettings(true, ControlId.DPadRight, ControlId.A, 50);
         runtime.ConfigureNavigation(config);
@@ -264,13 +264,13 @@ internal static class RuntimeAccessibilityChecks
 
     private static void Feedback()
     {
-        using var input = new EliteInputMonitor();
+        using var input = new FakeControllerInput();
         var output = new CueOutput();
         var feedback = new FeedbackDispatcher(output);
         feedback.Configure(new(AudioEnabled: true));
         var profile = StudioProfile.CreateDefault();
         using var runtime = new StudioRuntime(input, profile, new StickDeadzone(0, 0), feedback);
-        runtime.Attach(new UsbipXboxOutput());
+        runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Feedback runtime did not connect.");
         runtime.Apply(StudioProfile.CreateDefault("Another setup"));
         Wait(() => output.Cues.Contains(FeedbackCueKind.ProfileChanged), "Profile change did not emit feedback.");

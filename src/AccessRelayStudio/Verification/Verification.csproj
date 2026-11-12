@@ -8,7 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../games/nba2k27/src/Nba*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />
-    <PackageReference Include="MoonSharp" Version="2.0.0" />
-    <Compile Include="..\Core\*.cs" Link="Core\%(Filename)%(Extension)" />
+    <ProjectReference Include="../../AccessRelayStudio.Engine/AccessRelayStudio.Engine.csproj" />
   </ItemGroup>
 </Project>

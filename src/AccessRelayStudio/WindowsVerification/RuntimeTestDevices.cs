@@ -1,20 +1,10 @@
 using EliteScriptStudio.Core;
 
-// These stand-ins are compiled only by this isolated verification project. The actual
-// StudioRuntime and its engine/arbiter/timers run unchanged; no controller APIs or drivers load.
+// These fake devices implement the actual runtime library contracts. Tests use the
+// same compiled StudioRuntime, engine, arbiter and timers as the application.
 namespace EliteScriptStudio.Input
 {
-    internal readonly record struct ControllerSample(bool IsConnected, ControllerState State,
-        PaddleButtons HeldPaddles, PaddleButtons PressedPaddles, long ConnectionVersion)
-    {
-        internal bool SupportsBackgroundInput => true;
-        internal bool PrimaryConnected { get; init; } = true;
-        internal bool CompanionConnected { get; init; }
-        internal ControllerState NavigationState { get; init; }
-        internal bool NavigationConnected { get; init; } = true;
-    }
-
-    internal sealed class EliteInputMonitor : IControllerInput
+    internal sealed class FakeControllerInput : IControllerInput
     {
         private readonly object _gate = new();
         private ControllerState _state;
@@ -35,8 +25,9 @@ namespace EliteScriptStudio.Input
         public ControllerSample Poll()
         {
             lock (_gate) return new(_connected || (_coPilot.Enabled && _companionConnected),
-                CoPilotInput.Merge(_state, _connected, _companion, _companionConnected, _coPilot), _connected ? _paddles : PaddleButtons.None,
-                PaddleButtons.None, _connectionVersion) { PrimaryConnected = _connected, CompanionConnected = _coPilot.Enabled && _companionConnected,
+                CoPilotInput.Merge(_state, _connected, _companion, _companionConnected, _coPilot), "Simulated device", "verification", false, "",
+                _connected ? _paddles : PaddleButtons.None,
+                PaddleButtons.None, _connectionVersion) { SupportsBackgroundInput = true, PrimaryConnected = _connected, CompanionConnected = _coPilot.Enabled && _companionConnected,
                     NavigationState = _state, NavigationConnected = _connected };
         }
         public void SelectDevice(string? id) { }
@@ -47,15 +38,7 @@ namespace EliteScriptStudio.Input
 
 namespace EliteScriptStudio.Output
 {
-    internal interface IControllerOutput : IDisposable
-    {
-        string Status { get; }
-        bool IsAvailable { get; }
-        bool TryWrite(ControllerState state);
-        void Neutralize();
-    }
-
-    internal sealed class UsbipXboxOutput : IControllerOutput
+    internal sealed class FakeControllerOutput : IControllerOutput
     {
         private int _rejectWrites;
         internal bool RejectWrites

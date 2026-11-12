@@ -18,6 +18,7 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\AccessRelayStudio.ico</ApplicationIcon>
     <DefaultItemExcludes>$(DefaultItemExcludes);Verification\**;WindowsVerification\**;Input\Probe\**;Viewer\node_modules\**;DesktopUi\node_modules\**;Audio\VirtualMicHost\target\**;Audio\NeuralHost\**;Run\**;docs\**</DefaultItemExcludes>
@@ -27,19 +28,18 @@
     <RequireVirtualMicrophone Condition="'$(RequireVirtualMicrophone)' == '' And Exists('$(_VirtualMicSourceDirectory)$(_VirtualMicIdentityFile)')">true</RequireVirtualMicrophone>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../AccessRelayStudio.Engine/AccessRelayStudio.Engine.csproj" />
+    <ProjectReference Include="../AccessRelayStudio.Runtime/AccessRelayStudio.Runtime.csproj" />
+    <Compile Include="App.xaml.cs;DesktopWindow.xaml.cs;BuildInfo.cs;Desktop/*.cs;Diagnostics/*.cs" />
     <Content Include="../../games/nba2k27/pack.json" TargetPath="GamePacks/nba2k27/pack.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../games/nba2k27/scripts/*.lua" TargetPath="GamePacks/nba2k27/scripts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../games/switch-demo/pack.json" TargetPath="GamePacks/switch-demo/pack.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../games/switch-demo/scripts/*.lua" TargetPath="GamePacks/switch-demo/scripts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="DesktopUi\dist\**\*" TargetPath="DesktopUi\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Compile Include="../../games/nba2k27/src/*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />
-    <PackageReference Include="MoonSharp" Version="2.0.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" Version="1.31.1" GeneratePathProperty="true" />
-    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
-    <PackageReference Include="System.Speech" Version="10.0.0" />
     <None Update="Audio\DialogueSeparation\*.md;Audio\DialogueSeparation\*.txt">
       <TargetPath>DialogueSeparation\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
