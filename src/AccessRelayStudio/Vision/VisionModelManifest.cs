@@ -8,6 +8,7 @@ namespace EliteScriptStudio.Vision;
 internal sealed record VisionModelManifest
 {
     public string OutputContract { get; init; } = "temporal-release-v1";
+    public string UncertaintySemantics { get; init; } = "absolute-error-estimate-v1";
     public int SchemaVersion { get; init; } = 1;
     public string DisplayName { get; init; } = "";
     public string ModelVersion { get; init; } = "";
@@ -49,6 +50,7 @@ internal sealed record VisionModelManifest
     internal void Validate()
     {
         if (OutputContract != "temporal-release-v1") throw new InvalidDataException("Unsupported typed vision output contract. This adapter requires temporal-release-v1.");
+        if (UncertaintySemantics is not ("absolute-error-estimate-v1" or "gaussian-95-half-width-v1")) throw new InvalidDataException("Unsupported uncertainty semantics. Re-export/revalidate the model with a supported contract.");
         if (SchemaVersion != 1 || string.IsNullOrWhiteSpace(DisplayName) || DisplayName.Length > 120 ||
             string.IsNullOrWhiteSpace(ModelVersion) || ModelVersion.Length > 80 ||
             string.IsNullOrWhiteSpace(AnimationProfile) || AnimationProfile.Length > 120 ||

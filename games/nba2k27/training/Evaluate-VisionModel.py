@@ -13,9 +13,12 @@ import json
 import math
 from pathlib import Path
 import sys
+import time
 
 from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
 from footage_integrity import footage_index, validate_evaluation_footage
+from experiment_metrics import summarize
+from dataset_provenance import source_files
 
 EXECUTION_PROVIDERS = ("CPUExecutionProvider", "CUDAExecutionProvider")
 
@@ -59,9 +62,11 @@ def main() -> int:
     parser.add_argument("--target-provider", choices=EXECUTION_PROVIDERS, default="CUDAExecutionProvider",
                         help="Declared live hardware target bound to locked thresholds; offline numerical inference still uses CPU")
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--cpu-threads", type=int, default=1)
     args = parser.parse_args()
-    if (args.out / "accuracy-report.json").exists() or (args.out / "predictions.jsonl").exists():
+    if any((args.out / name).exists() for name in ("accuracy-report.json", "predictions.jsonl", "experiment-metrics.json")):
         raise ValueError("Choose a fresh evaluation directory to preserve prior reports")
+    if not 1 <= args.cpu_threads <= 64: raise ValueError("CPU threads must be 1–64")
     import numpy as np
     import onnxruntime as ort
 
@@ -71,6 +76,9 @@ def main() -> int:
     manifest = training.read_json(args.manifest)
     if manifest.get("preprocessing") != PREPROCESSING_ID:
         raise ValueError("Evaluation requires the same canonical v2 preprocessing contract as the runtime")
+    semantics = manifest.get("uncertaintySemantics", "absolute-error-estimate-v1")
+    if semantics not in ("absolute-error-estimate-v1", "gaussian-95-half-width-v1") or manifest.get("outputContract", "temporal-release-v1") != "temporal-release-v1":
+        raise ValueError("Unsupported versioned observation/uncertainty semantics")
     thresholds = training.read_json(args.locked_thresholds)
     target_provider = select_target_provider(args.target_provider, thresholds)
     confidence = training.finite(thresholds.get("minimumConfidence"), "minimumConfidence")
@@ -100,11 +108,16 @@ def main() -> int:
     if manifest["animationProfile"] != "nba2k27:" + fingerprint:
         raise ValueError("Evaluation sessions use a different shot profile")
     validate_evaluation_sessions(args.split, session_ids, run)
-    validate_evaluation_footage(args.split, footage_index(sessions, min(4, manifest["historyLength"])), run)
-    session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+    evaluation_footage = footage_index(sessions, min(4, manifest["historyLength"]))
+    validate_evaluation_footage(args.split, evaluation_footage, run)
+    evaluation_sources = source_files(loaded)
+    options = ort.SessionOptions(); options.intra_op_num_threads = args.cpu_threads; options.inter_op_num_threads = 1
+    session = ort.InferenceSession(str(model_path), sess_options=options, providers=["CPUExecutionProvider"])
     expected = [1, manifest["historyLength"], 3, manifest["inputHeight"], manifest["inputWidth"]]
     if len(session.get_inputs()) != 1 or session.get_inputs()[0].shape != expected or session.get_outputs()[0].shape != [1, 5]:
         raise ValueError("Exported ONNX shapes differ from the fixed runtime contract")
+    for _ in range(8): session.run([manifest["outputName"]], {manifest["inputName"]: np.zeros(expected, dtype=np.float32)})
+    window_errors, window_widths, cpu_inference_ms = [], [], []
     accepted, last_times, identity_correct, observation_count = {}, {}, 0, 0
     for session_index, indices, target in samples:
         directory, recording = sessions[session_index]
@@ -117,9 +130,14 @@ def main() -> int:
             bgra = np.frombuffer(raw, dtype=np.uint8).reshape(recording["storedHeight"], recording["storedWidth"], 4)
             frames.append(resize_stored_bgra(bgra, manifest["inputHeight"], manifest["inputWidth"],
                                             manifest["rgbMean"], manifest["rgbStandardDeviation"]))
-        output = session.run([manifest["outputName"]], {manifest["inputName"]: np.stack(frames)[None]})[0].reshape(-1)
+        input_tensor = np.stack(frames)[None]
+        began = time.perf_counter_ns()
+        output = session.run([manifest["outputName"]], {manifest["inputName"]: input_tensor})[0].reshape(-1)
+        cpu_inference_ms.append((time.perf_counter_ns() - began) / 1e6)
         if output.shape != (5,) or not np.isfinite(output).all() or np.any(output[[0, 1, 4]] < 0) or np.any(output[[0, 1, 4]] > 1) or np.any(output[2:4] < 0) or np.any(output[2:4] > manifest["maximumPredictionHorizonMs"]):
             raise ValueError("Model returned invalid observation values")
+        if target[1] > .5:
+            window_errors.append(float(output[2] - target[2])); window_widths.append(float(output[3]))
         observation_count += 1
         identity_correct += int((output[0] >= confidence) == (target[0] > .5))
         last = recording["frames"][indices[-1]]["captureTicks"]
@@ -158,6 +176,8 @@ def main() -> int:
     if not target_shots or not negative_shots or not observation_count:
         raise ValueError("Evaluation requires target and negative intervals with usable temporal samples")
     errors.sort()
+    if source_files(loaded) != evaluation_sources or footage_index(sessions, min(4, manifest["historyLength"])) != evaluation_footage:
+        raise ValueError("Evaluation source files changed during inference; no report is saved")
     report = {
         "schemaVersion": 1, "datasetId": thresholds["datasetId"], "split": args.split,
         "executionProvider": target_provider,
@@ -179,10 +199,17 @@ def main() -> int:
     (args.out / "accuracy-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     provenance = {"schemaVersion": 1, "datasetId": thresholds["datasetId"], "cameraConfiguration": recorded_camera,
                   "targetExecutionProvider": target_provider, "referenceExecutionProvider": "CPUExecutionProvider",
-                  "sessionIds": sorted(session_ids), "legacyCameraAssumptionSessionIds": sorted(
+                  "sessionIds": sorted(session_ids), "sourceFiles": evaluation_sources, "legacyCameraAssumptionSessionIds": sorted(
                       session["sessionId"] for _, session in sessions
                       if "shotProfile" not in session or "cameraView" not in session["shotProfile"])}
     (args.out / "evaluation-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+    metrics = {"schemaVersion": 1, "split": args.split, "modelSha256": actual_hash,
+               "modelVersion": manifest["modelVersion"], "cpuThreads": args.cpu_threads, "warmupInferences": 8,
+               "modelBytes": model_path.stat().st_size, **summarize(window_errors, window_widths, cpu_inference_ms, semantics),
+               "targetShotCoverage": report["targetCoverage"], "falseReleaseRate": report["falseReleaseRate"],
+               "hardwareValidated": False, "promotionApproved": False,
+               "limitations": "Overlapping windows are descriptive samples, not independent confidence intervals. CPU timing excludes preprocessing/capture/transfers and does not certify Windows GPU or console delivery."}
+    (args.out / "experiment-metrics.json").write_text(json.dumps(metrics, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     with (args.out / "predictions.jsonl").open("w", encoding="utf-8") as output:
         for prediction in accepted.values():
             output.write(json.dumps(prediction) + "\n")

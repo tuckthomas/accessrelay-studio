@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import random
 import sys
@@ -22,6 +23,8 @@ import sys
 from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
 from footage_integrity import footage_index, validate_independent
 from evidence_conversion import verify_conversion
+from temporal_experiments import HEADS, UNCERTAINTIES, build_model, experiment_loss, uncertainty_semantics
+from dataset_provenance import source_files, corpus_sha
 
 CAMERA_VIEWS = ("2K", "2K Low", "2K Legacy")
 
@@ -221,6 +224,10 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=20261111)
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda"))
+    parser.add_argument("--head", choices=HEADS, default="global-pool")
+    parser.add_argument("--uncertainty", choices=UNCERTAINTIES, default="residual")
+    parser.add_argument("--uncertainty-warmup-epochs", type=int, default=5)
+    parser.add_argument("--cpu-threads", type=int, default=1)
     args = parser.parse_args()
     if any((args.out / name).exists() for name in ("animation-model.onnx", "manifest.json", "training-run.json")):
         raise ValueError("Choose a fresh output directory; existing model/provenance files are never overwritten")
@@ -228,40 +235,30 @@ def main() -> int:
         raise ValueError("Unsupported model shape/history interval")
     if not 1 <= args.epochs <= 1000 or not 1 <= args.batch_size <= 128:
         raise ValueError("Epoch/batch limits exceeded")
+    if not 1 <= args.cpu_threads <= 64 or not 0 <= args.uncertainty_warmup_epochs <= 1000:
+        raise ValueError("CPU-thread/warm-up limits exceeded")
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     import numpy as np
     import torch
-    from torch import nn
-    from torch.nn import functional as functional
     import onnx
 
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    torch.set_num_threads(args.cpu_threads)
+    torch.use_deterministic_algorithms(True)
     if args.device == "cuda" and not torch.cuda.is_available():
         raise ValueError("This offline PyTorch installation has no available CUDA device; choose cpu or install a matching offline training environment")
 
-    class TemporalReleaseModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.features = nn.Sequential(
-                nn.Conv3d(3, 8, 3, stride=(1, 2, 2), padding=1), nn.ReLU(),
-                nn.Conv3d(8, 16, 3, stride=(1, 2, 2), padding=1), nn.ReLU(),
-                nn.Conv3d(16, 24, 3, stride=(1, 2, 2), padding=1), nn.ReLU())
-            self.head = nn.Linear(24, 5)
-
-        def forward(self, frames):
-            features = self.features(frames.permute(0, 2, 1, 3, 4)).mean(dim=(2, 3, 4))
-            output = self.head(features).sigmoid()
-            # Fixed NTCHW float32 input; [player, shot, horizon-ms, uncertainty-ms, phase].
-            return torch.cat((output[:, :2], output[:, 2:4] * 2000.0, output[:, 4:5]), dim=1)
-
-    model = TemporalReleaseModel().to(args.device)
+    model = build_model(args.history, args.head, args.uncertainty).to(args.device)
     training_log = []
     dataset_fingerprint = None
     training_session_ids, validation_session_ids = [], []
     training_footage, validation_footage = None, None
+    training_sources, validation_sources = [], []
     legacy_camera_session_ids = []
     resolved_camera = args.camera or "2K"
+    resolved_game_version = args.game_version
     if not args.diagnostic_fixture:
         if not args.train or not args.validation:
             raise ValueError("Training requires distinct --train and --validation session directories")
@@ -276,6 +273,13 @@ def main() -> int:
             raise ValueError("Train/validation sessions use different shot-profile configurations")
         dataset_fingerprint = train[3]
         training_session_ids, validation_session_ids = sorted(train[2]), sorted(validation[2])
+        training_sources, validation_sources = source_files(train), source_files(validation)
+        builds = [session.get("captureEvidence", {}).get("layout", {}).get("gameBuild") for _, session in train[0] + validation[0]]
+        if any(builds):
+            if any(not isinstance(build, str) or not build for build in builds) or len(set(builds)) != 1:
+                raise ValueError("Training/validation require one explicit recorded game build; do not mix unknown legacy build provenance")
+            if args.game_version != "unvalidated" and args.game_version != builds[0]: raise ValueError("--game-version cannot relabel recorded data")
+            resolved_game_version = builds[0]
         legacy_camera_session_ids = sorted(session["sessionId"] for _, session in train[0] + validation[0]
                                            if "shotProfile" not in session or "cameraView" not in session["shotProfile"])
         args.animation_profile = "nba2k27:" + dataset_fingerprint
@@ -310,13 +314,7 @@ def main() -> int:
             for frames, target in loader:
                 frames, target = frames.to(args.device), target.to(args.device)
                 output = model(frames)
-                positive = target[:, 1]
-                confidence_loss = functional.binary_cross_entropy(output[:, :2], target[:, :2])
-                timing = functional.smooth_l1_loss(output[:, 2] / 1000, target[:, 2] / 1000, reduction="none")
-                uncertainty_target = (output[:, 2].detach() - target[:, 2]).abs()
-                uncertainty = functional.smooth_l1_loss(output[:, 3] / 1000, uncertainty_target / 1000, reduction="none")
-                phase = functional.smooth_l1_loss(output[:, 4], target[:, 4], reduction="none")
-                loss = confidence_loss + ((timing * 4 + uncertainty + phase) * positive).sum() / positive.sum().clamp_min(1)
+                loss = experiment_loss(output, target, args.uncertainty, epoch, args.uncertainty_warmup_epochs)
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
@@ -333,6 +331,11 @@ def main() -> int:
             training_log.append(entry)
             print(json.dumps(entry), flush=True)
 
+        if (source_files(train) != training_sources or source_files(validation) != validation_sources
+                or footage_index(train[0], min(4, args.history)) != training_footage
+                or footage_index(validation[0], min(4, args.history)) != validation_footage):
+            raise ValueError("Dataset files changed during training; no model is exported")
+
     args.out.mkdir(parents=True, exist_ok=True)
     model = model.cpu().eval()
     model_path = args.out / "animation-model.onnx"
@@ -344,19 +347,26 @@ def main() -> int:
     model_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
     manifest = {
         "schemaVersion": 1, "displayName": "UNTRAINED diagnostic fixture" if args.diagnostic_fixture else "Experimental temporal release candidate",
-        "modelVersion": "diagnostic-untrained-v1" if args.diagnostic_fixture else "experimental-candidate-v1",
+        "modelVersion": ("diagnostic-" if args.diagnostic_fixture else "experimental-") + args.head + "-" + args.uncertainty + "-v2",
+        "outputContract": "temporal-release-v1", "uncertaintySemantics": uncertainty_semantics(args.uncertainty),
         "modelFile": model_path.name, "modelSha256": model_hash, "inputName": "frames", "outputName": "observation",
         "preprocessing": PREPROCESSING_ID, "inputWidth": args.width, "inputHeight": args.height,
         "historyLength": args.history, "historyIntervalMs": args.interval_ms, "maximumPredictionHorizonMs": 2000,
         "rgbMean": [0, 0, 0], "rgbStandardDeviation": [1, 1, 1], "animationProfile": args.animation_profile,
-        "gameVersion": args.game_version, "cameraConfiguration": resolved_camera, "license": "0BSD (architecture code); recorded-data and trained-weight rights must be reviewed",
+        "gameVersion": resolved_game_version, "cameraConfiguration": resolved_camera, "license": "0BSD (architecture code); recorded-data and trained-weight rights must be reviewed",
         "validation": None
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (args.out / "training-run.json").write_text(json.dumps({"schemaVersion": 1, "seed": args.seed,
         "diagnosticFixture": args.diagnostic_fixture, "validationPassed": False, "datasetFingerprint": dataset_fingerprint,
+        "architecture": args.head, "uncertaintyLoss": args.uncertainty, "uncertaintySemantics": uncertainty_semantics(args.uncertainty),
+        "uncertaintyWarmupEpochs": args.uncertainty_warmup_epochs, "cpuThreads": args.cpu_threads,
+        "deterministicAlgorithms": True, "torchVersion": torch.__version__, "numpyVersion": np.__version__,
+        "parameterCount": sum(parameter.numel() for parameter in model.parameters()),
         "trainingSessionIds": training_session_ids, "validationSessionIds": validation_session_ids,
         "trainingFootage": training_footage, "validationFootage": validation_footage,
+        "trainingSources": training_sources, "validationSources": validation_sources,
+        "sourceCorpusSha256": corpus_sha(training_sources, validation_sources, training_footage, validation_footage) if not args.diagnostic_fixture else None,
         "labelTimeBasis": "captured-target-game-phase",
         "cameraConfiguration": resolved_camera, "legacyCameraAssumptionSessionIds": legacy_camera_session_ids,
         "training": training_log, "modelSha256": model_hash,
