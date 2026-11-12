@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
 import { CoPilotInput } from '../CoPilotInput';
 import { GamePacks } from '../GamePacks';
+import { currentTheme, themeChanged } from '../theme';
 import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
 
 const INITIAL_TIMING = { startDelay: 0, downSweep: 0, downHold: 512, upSweep: 80, upHold: 48, centerHold: 120, flick: 64, settle: 240, flickX: 0, flickY: -32767 };
@@ -201,6 +202,13 @@ function MappingEditor({ state, status, command, openSequences }: PageProps & { 
 
 function ControllerVisual({ state, status, selected, onSelect }: { state: any; status: any; selected: string; onSelect: (value: string) => void }) {
   const iframe = useRef<HTMLIFrameElement>(null), [model, setModel] = useState(() => suggestedModel(state, status)), [ready, setReady] = useState(false);
+  const initialTheme = useRef(currentTheme());
+  useEffect(() => {
+    if (!ready) return;
+    const syncTheme = () => iframe.current?.contentWindow?.postMessage({ channel: 'accessrelay-controller', payload: { type: 'theme', theme: currentTheme() } }, 'https://scene.accessrelay.test');
+    syncTheme(); window.addEventListener(themeChanged, syncTheme);
+    return () => window.removeEventListener(themeChanged, syncTheme);
+  }, [ready]);
   const deviceId = status.selectedDeviceId || state.selectedDeviceId;
   useEffect(() => { setReady(false); setModel(suggestedModel(state, status)); }, [deviceId]);
   const bindings = state.activeProfile?.bindings || [];
@@ -214,7 +222,7 @@ function ControllerVisual({ state, status, selected, onSelect }: { state: any; s
   }, [ready, status, selected, state.controls, bindings]);
   return <Card className="controller-visual" title="A closer look" description="Select a control to change its mapping."
     actions={<select className="model-select" aria-label="Controller model" value={model} onChange={event => { setReady(false); setModel(event.target.value); }}><option value="elite-series-2">Elite Series 2</option><option value="xbox-one">Xbox One</option><option value="dualsense">DualSense</option><option value="dualshock-4">DualShock 4</option><option value="switch-pro">Switch Pro</option></select>}>
-    {!isDesignPreview ? <iframe ref={iframe} className="controller-scene" key={model} src={'https://scene.accessrelay.test/Viewer/index.html?model=' + model + '&theme=sage'} title="Interactive 3D controller. Select a control to edit its mapping." onLoad={() => setReady(true)} /> : <div className="controller-design-preview">
+    {!isDesignPreview ? <iframe ref={iframe} className="controller-scene" key={model} src={'https://scene.accessrelay.test/Viewer/index.html?model=' + model + '&theme=' + initialTheme.current} title="Interactive 3D controller. Select a control to edit its mapping." onLoad={() => setReady(true)} /> : <div className="controller-design-preview">
       <svg viewBox="0 0 600 310" role="img" aria-label="Controller design illustration"><defs><linearGradient id="controller-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#49695f" /><stop offset="1" stopColor="#253f3d" /></linearGradient></defs>
         <ellipse cx="300" cy="272" rx="190" ry="18" fill="#b5c8b6" opacity=".45" /><path d="M160 55C122 60 100 113 86 190C74 250 99 278 128 258L192 207H408L472 258C501 278 526 250 514 190C500 113 478 60 440 55C393 43 355 55 300 55S207 43 160 55Z" fill="url(#controller-body)" stroke="#57786b" strokeWidth="3" />
         <path d="M180 58L205 40H263L275 57M325 57L337 40H395L420 58" fill="#718c7c" stroke="#49675b" strokeWidth="4" />
@@ -308,12 +316,12 @@ export function TrajectoryChart({data,recording}:{data?:any;recording?:any}){
   const normalized=!recording&&(data?.normalized===true||(!!data?.points&&!data?.frames));
   const path=(axis:string)=>points.map((frame:any,index:number)=>{const state=frame.state||frame;let value=Number(state[axis]??(normalized?(axis==='rightY'?state.y:state.x):0)??0);if(!normalized)value/=32767;
     return(index?'L':'M')+(20+Number(frame.timeMs||0)/duration*(width-40)).toFixed(1)+','+(height/2-value*(height/2-16)).toFixed(1);}).join(' ');
-  return <div className="trajectory"><div className="chart-legend"><span><i className="legend-dot" style={{background:'#367456'}}/>Vertical</span><span><i className="legend-dot" style={{background:'#6c99a3'}}/>Horizontal</span></div>
+  return <div className="trajectory"><div className="chart-legend"><span><i className="legend-dot" style={{background:'var(--accent)'}}/>Vertical</span><span><i className="legend-dot" style={{background:'var(--chart-secondary)'}}/>Horizontal</span></div>
     <svg viewBox={'0 0 '+width+' '+height} role="img" aria-label="Right-stick vertical and horizontal trajectory over time">
-      {[16,height/2,height-16].map(y=><line key={y} x1="20" x2={width-20} y1={y} y2={y} stroke="#cad9c3" strokeWidth="1" strokeDasharray={y===height/2?undefined:'4 5'}/>)}
-      {[0,.25,.5,.75,1].map(x=><line key={x} x1={20+x*(width-40)} x2={20+x*(width-40)} y1="12" y2={height-12} stroke="#dce5d5"/>)}
-      {count>0?<><path d={path('rightX')} fill="none" stroke="#6c99a3" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/><path d={path('rightY')} fill="none" stroke="#367456" strokeWidth="3" vectorEffect="non-scaling-stroke"/></>:
-        <text x={width/2} y={height/2+5} fill="#56685b" textAnchor="middle" fontSize="18">Choose a saved sequence to see its movement</text>}
+      {[16,height/2,height-16].map(y=><line key={y} x1="20" x2={width-20} y1={y} y2={y} stroke="var(--line)" strokeWidth="1" strokeDasharray={y===height/2?undefined:'4 5'}/>)}
+      {[0,.25,.5,.75,1].map(x=><line key={x} x1={20+x*(width-40)} x2={20+x*(width-40)} y1="12" y2={height-12} stroke="var(--line)"/>)}
+      {count>0?<><path d={path('rightX')} fill="none" stroke="var(--chart-secondary)" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/><path d={path('rightY')} fill="none" stroke="var(--accent)" strokeWidth="3" vectorEffect="non-scaling-stroke"/></>:
+        <text x={width/2} y={height/2+5} fill="var(--muted)" textAnchor="middle" fontSize="18">Choose a saved sequence to see its movement</text>}
     </svg><div className="chart-labels"><span>0 ms</span><span>{formatDuration(duration)}</span></div></div>;
 }
 

@@ -102,6 +102,7 @@ async function previewCommand(method: string, args: any): Promise<any> {
   if (method === 'app.bootstrap') return structuredClone(previewState);
   if (method === 'app.page') return null;
   if (method === 'app.draftState') return null;
+  if (method === 'app.themeSet') return null;
   if (method === 'app.resourceMonitoringSet') { previewState.settings.resourceMonitoringEnabled = args.enabled === true; return null; }
   if (method.startsWith('app.assistant')) {
     const assistant = previewState.settings.assistant ||= { access: { enabled: false, drafts: false, offline: false }, bridgeAvailable: false,

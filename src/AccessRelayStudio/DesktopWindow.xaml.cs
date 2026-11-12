@@ -12,6 +12,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using Windows.Graphics;
 using Windows.Storage.Streams;
@@ -58,12 +59,7 @@ public sealed partial class DesktopWindow : Window
         AppWindow.Resize(new SizeInt32(Math.Min(1536, display.Width - 24), Math.Min(960, display.Height - 24)));
         if (AppWindow.Presenter is OverlappedPresenter sizing)
         { sizing.PreferredMinimumWidth = 800; sizing.PreferredMinimumHeight = 600; }
-        var title = AppWindow.TitleBar;
-        title.ButtonBackgroundColor = title.ButtonInactiveBackgroundColor = Colors.Transparent;
-        title.ButtonForegroundColor = title.ForegroundColor = ColorHelper.FromArgb(255, 23, 59, 84);
-        title.ButtonHoverBackgroundColor = ColorHelper.FromArgb(255, 207, 224, 211);
-        title.ButtonPressedBackgroundColor = ColorHelper.FromArgb(255, 185, 211, 196);
-        title.ButtonInactiveForegroundColor = title.InactiveForegroundColor = ColorHelper.FromArgb(255, 92, 112, 108);
+        ApplyTheme("light");
         _statusTimer = DispatcherQueue.CreateTimer(); _statusTimer.Interval = TimeSpan.FromMilliseconds(250);
         _statusTimer.Tick += (_, _) => PublishStatus();
         DesktopRoot.Loaded += async (_, _) => await InitializeAsync();
@@ -213,7 +209,7 @@ public sealed partial class DesktopWindow : Window
             else if (method.StartsWith("voice.", StringComparison.Ordinal)) result = await _voice!.InvokeAsync(method[6..], parameters);
             else result = await AppCommandAsync(method, parameters);
             Post(new { type = "response", id, ok = true, result });
-            if (method is not ("app.page" or "app.bootstrap" or "app.draftState")) PublishSnapshot();
+            if (method is not ("app.page" or "app.bootstrap" or "app.draftState" or "app.themeSet")) PublishSnapshot();
         }
         catch (Exception error)
         {
@@ -236,6 +232,10 @@ public sealed partial class DesktopWindow : Window
                 if (page is not ("workspace" or "controller" or "vision" or "voice" or "settings")) throw new InvalidDataException("Choose an available workspace.");
                 _page = page; _clientVisible = args.Flag("visible", true); UpdatePresentation(); return null;
             case "app.draftState": _hasUnsavedChanges = args.Flag("dirty"); return null;
+            case "app.themeSet":
+                string theme = args.Text("theme");
+                if (theme is not ("light" or "dark")) throw new InvalidDataException("Choose light or dark mode.");
+                ApplyTheme(theme); return null;
             case "app.resourceMonitoringSet":
                 bool monitorEnabled = args.GetProperty("enabled").GetBoolean();
                 _preferences.SaveResourceMonitoring(monitorEnabled);
@@ -257,6 +257,24 @@ public sealed partial class DesktopWindow : Window
             }
             default: throw new InvalidOperationException("The interface action is not supported: " + method);
         }
+    }
+
+    private void ApplyTheme(string theme)
+    {
+        bool dark = theme == "dark";
+        DesktopRoot.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
+        var background = dark ? ColorHelper.FromArgb(255, 17, 23, 29) : Colors.White;
+        DesktopRoot.Background = DesktopTitleBar.Background = DesktopLoading.Background = new SolidColorBrush(background);
+        var title = AppWindow.TitleBar;
+        title.ButtonBackgroundColor = title.ButtonInactiveBackgroundColor = Colors.Transparent;
+        title.ButtonForegroundColor = title.ForegroundColor = dark
+            ? ColorHelper.FromArgb(255, 237, 243, 248) : ColorHelper.FromArgb(255, 33, 52, 65);
+        title.ButtonHoverBackgroundColor = dark
+            ? ColorHelper.FromArgb(255, 43, 59, 72) : ColorHelper.FromArgb(255, 224, 232, 236);
+        title.ButtonPressedBackgroundColor = dark
+            ? ColorHelper.FromArgb(255, 51, 68, 81) : ColorHelper.FromArgb(255, 204, 214, 221);
+        title.ButtonInactiveForegroundColor = title.InactiveForegroundColor = dark
+            ? ColorHelper.FromArgb(255, 179, 190, 200) : ColorHelper.FromArgb(255, 80, 97, 106);
     }
 
     private object Snapshot() => new

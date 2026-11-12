@@ -8,6 +8,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { VoicePage } from './pages/VoicePage';
 import { VisionPage } from './pages/VisionPage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
+import { currentTheme, saveTheme, type Theme } from './theme';
 
 type Page = 'workspace' | 'controller' | 'vision' | 'voice' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
@@ -17,6 +18,8 @@ const navigation: { id: Page; label: string; icon: string }[] = [
   { id: 'voice', label: 'Voice', icon: 'audio' }
 ];
 export function App() {
+  const [theme, setTheme] = useState<Theme>(currentTheme);
+  useEffect(() => { void desktop.command('app.themeSet', { theme }).catch(() => {}); }, [theme]);
   const [page, setPage] = useState<Page>('workspace');
   const [pendingPage, setPendingPage] = useState<Page | null>(null);
   const [state, setState] = useState<StudioState | null>(null);
@@ -89,6 +92,10 @@ export function App() {
         <div className="topbar-actions">
           {(voiceStatus.isRunning || voiceStatus.commands?.recognition?.running) && <Badge tone="success"><Icon name="mic" size={15} />Mic live</Badge>}
           <Badge>Beta</Badge>
+          <Button className="theme-toggle" onClick={() => { const next = theme === 'light' ? 'dark' : 'light'; saveTheme(next); setTheme(next); }}
+            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}>
+            <Icon name={theme === 'light' ? 'moon' : 'sun'} size={18} />{theme === 'light' ? 'Dark mode' : 'Light mode'}
+          </Button>
         </div>
       </header>
       <main className="app-main" id="main-content"><div className="content-width">

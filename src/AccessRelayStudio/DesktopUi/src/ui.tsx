@@ -6,9 +6,9 @@ import {
   Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, AudioLines, BookOpen, Camera, Check,
   ChevronDown, ChevronLeft, ChevronRight, Circle, CircleHelp, CirclePause, CirclePlay, Copy,
   Download, Ellipsis, Eye, FileCode2, FilePlus2, FolderOpen, Gamepad2, Gauge, Headphones,
-  Info, LayoutDashboard, List, LoaderCircle, Mic, Monitor, MoreHorizontal, Pencil, Plus,
+  Info, LayoutDashboard, List, LoaderCircle, Mic, Monitor, Moon, MoreHorizontal, Pencil, Plus,
   Power, Radio, RefreshCw, Save, Search, Settings2, ShieldCheck, SlidersHorizontal, Square,
-  Trash2, Upload, Volume2, Waves, X, Zap
+  Sun, Trash2, Upload, Volume2, Waves, X, Zap
 } from 'lucide-react';
 
 export interface PageProps { state: any; status: any; command: (action: string, args?: any) => Promise<any> }
@@ -54,7 +54,7 @@ const icons: Record<string, any> = {
   help: CircleHelp, pause: CirclePause, play: CirclePlay, copy: Copy, download: Download,
   more: MoreHorizontal, eye: Eye, code: FileCode2, filePlus: FilePlus2, folder: FolderOpen,
   gamepad: Gamepad2, gauge: Gauge, headphones: Headphones, info: Info, dashboard: LayoutDashboard,
-  list: List, loader: LoaderCircle, mic: Mic, monitor: Monitor, pencil: Pencil, plus: Plus,
+  list: List, loader: LoaderCircle, mic: Mic, monitor: Monitor, moon: Moon, sun: Sun, pencil: Pencil, plus: Plus,
   power: Power, radio: Radio, refresh: RefreshCw, save: Save, search: Search, settings: Settings2,
   shield: ShieldCheck, sliders: SlidersHorizontal, stop: Square, trash: Trash2, upload: Upload,
   volume: Volume2, waves: Waves, x: X, zap: Zap

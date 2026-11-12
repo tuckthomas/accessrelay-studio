@@ -2,17 +2,17 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AccessRelay Studio Beta">
-    <Grid x:Name="DesktopRoot" RequestedTheme="Light" Background="#EDF1EA" RowDefinitions="36,*">
-        <Grid x:Name="DesktopTitleBar" Background="#E6ECE4" Padding="15,0,150,0" ColumnDefinitions="Auto,*">
+    <Grid x:Name="DesktopRoot" RequestedTheme="Light" Background="#FFFFFF" RowDefinitions="36,*">
+        <Grid x:Name="DesktopTitleBar" Background="#FFFFFF" Padding="15,0,150,0" ColumnDefinitions="Auto,*">
             <Image Source="ms-appx:///Assets/AccessRelayStudio.png" Width="23" Height="23" Margin="0,0,10,0" />
-            <TextBlock x:Name="DesktopBrand" Grid.Column="1" Text="AccessRelay Studio" Foreground="#173B54" FontSize="14" VerticalAlignment="Center" />
+            <TextBlock x:Name="DesktopBrand" Grid.Column="1" Text="AccessRelay Studio" Foreground="{ThemeResource TextFillColorPrimaryBrush}" FontSize="14" VerticalAlignment="Center" />
         </Grid>
         <WebView2 x:Name="DesktopWeb" Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
-        <Border x:Name="DesktopLoading" Grid.Row="1" Background="#EDF1EA" Padding="40">
+        <Border x:Name="DesktopLoading" Grid.Row="1" Background="#FFFFFF" Padding="40">
             <StackPanel Spacing="18" MaxWidth="580" VerticalAlignment="Center" HorizontalAlignment="Center">
                 <Image Source="ms-appx:///Assets/AccessRelayStudio.png" Width="72" Height="72" HorizontalAlignment="Left" />
-                <TextBlock Text="AccessRelay Studio" FontSize="30" FontWeight="SemiBold" Foreground="#173B54" />
-                <TextBlock x:Name="DesktopLoadingText" Text="Opening your workspace…" FontSize="16" Foreground="#526A66" TextWrapping="Wrap" />
+                <TextBlock Text="AccessRelay Studio" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="DesktopLoadingText" Text="Opening your workspace…" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 <Button x:Name="DesktopRetry" Content="Try opening the interface again" FontSize="14" Visibility="Collapsed" />
                 <Button x:Name="DesktopEmergencyStop" Content="Stop all processing" FontSize="14" Visibility="Collapsed" />
             </StackPanel>

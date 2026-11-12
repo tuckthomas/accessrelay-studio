@@ -74,7 +74,8 @@ const bridge = embeddedDesktop ? {
     });
   }
 } : location.origin === "https://studio.local" && location.pathname === "/Viewer/index.html" ? window.chrome?.webview : null;
-if (new URLSearchParams(location.search).get("theme") === "sage") document.documentElement.dataset.theme = "sage";
+const requestedTheme = new URLSearchParams(location.search).get("theme");
+document.documentElement.dataset.theme = requestedTheme === "light" || requestedTheme === "sage" ? "light" : "dark";
 const scene = new Scene();
 const parts = new Map();
 const pickable = new Map();
@@ -83,10 +84,15 @@ const defaultPitch = 0.07;
 const raycaster = new Raycaster();
 const cursor = new Vector2();
 const projected = new Vector3();
-const sageTheme = document.documentElement.dataset.theme === "sage";
-const focusGlow = new Color(sageTheme ? "#367456" : "#0087e9");
-const activeGlow = new Color(sageTheme ? "#98f9c3" : "#28bdff");
-const dimGlow = new Color(sageTheme ? "#4b8070" : "#027ec2");
+const focusGlow = new Color();
+const activeGlow = new Color("#98f9c3");
+const dimGlow = new Color();
+function syncTheme() {
+  const palette = getComputedStyle(document.documentElement);
+  focusGlow.set(palette.getPropertyValue("--viewer-glow").trim());
+  dimGlow.set(palette.getPropertyValue("--accent").trim());
+}
+syncTheme();
 const poseRotation = new Quaternion();
 const poseEuler = new Euler(0, 0, 0, "YXZ");
 const screenDirection = new Vector3();
@@ -198,7 +204,10 @@ function axis(value) {
 function onHostMessage(data) {
   if (!data || typeof data !== "object")
     return;
-  if (data.type === "bindings" && data.bindings && typeof data.bindings === "object") {
+  if (data.type === "theme" && (data.theme === "light" || data.theme === "dark")) {
+    document.documentElement.dataset.theme = data.theme;
+    syncTheme();
+  } else if (data.type === "bindings" && data.bindings && typeof data.bindings === "object") {
     bindings = Object.fromEntries(controlNames
       .filter(id => typeof data.bindings[id] === "string")
       .map(id => [id, data.bindings[id]]));
