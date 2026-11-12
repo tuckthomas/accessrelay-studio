@@ -16,6 +16,8 @@ profile interface, while the NBA adapter still validates the supported camera an
 shot choices. Generic camera configuration text is bounded in Core; NBA profile
 validation retains the exact 2K/2K Low/2K Legacy choices.
 
-This extraction is the first game-pack migration step. It does not introduce a
-marketplace, make native plugins loadable, distribute model weights, or declare
-the existing five-value temporal-release model suitable for every game.
+`pack.json` and `scripts/` add an optional declarative rhythm sequence using the
+[game-pack API](../../docs/game-packs.md). Its tuning is separate from saved player
+shot profiles and does not certify vision accuracy. The migration does not introduce
+a marketplace, load native plugins, distribute model weights, or declare the existing
+five-value temporal-release model suitable for every game.

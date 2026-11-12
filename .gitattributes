@@ -1,5 +1,9 @@
 * text=auto
 
+# Bundled game-pack resource hashes cover exact bytes on every checkout.
+/games/**/scripts/*.lua text eol=lf
+/games/**/pack.json text eol=lf
+
 # Keep the signed USB/IP package byte-for-byte identical to upstream.
 /src/AccessRelayStudio/Audio/VirtualMicDriver/Package/usbip2_ude.inf binary
 /src/AccessRelayStudio/Audio/VirtualMicDriver/Package/usbip2_ude.sys binary

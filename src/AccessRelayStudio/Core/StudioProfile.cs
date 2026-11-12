@@ -52,6 +52,7 @@ public sealed record StudioProfile
     public Guid Id { get; init; }
     public string Name { get; init; } = "";
     public bool ScriptsEnabled { get; init; }
+    public GamePackReference? GamePack { get; init; }
     public ImmutableHashSet<ControlId> StickyControls { get; init; } = ImmutableHashSet<ControlId>.Empty;
     public StickSmoothing Smoothing { get; init; } = StickSmoothing.Off;
     public ImmutableDictionary<ControlId, ScriptBinding> Bindings { get; init; } =
@@ -127,6 +128,7 @@ public sealed record StudioProfile
 
     public void Validate()
     {
+        GamePack?.Validate();
         if (StickyControls is null || StickyControls.Any(control => !StickyButtons.Supports(control)))
             throw new InvalidDataException("Sticky controls must be gamepad buttons or triggers.");
         if (Smoothing is null) throw new InvalidDataException("Stick smoothing settings are missing.");

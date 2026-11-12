@@ -1,15 +1,18 @@
 using System.IO;
+using System.Collections.Immutable;
 using MoonSharp.Interpreter;
 
 namespace EliteScriptStudio.Core;
 
 public sealed record LuaControllerScript(Guid Id, string Name, string Source)
 {
+    public ImmutableDictionary<string, double> Tuning { get; init; } = ImmutableDictionary<string, double>.Empty;
     public const int MaxScripts = 32;
     public const int MaxSourceLength = 32768;
 
     public void Validate()
     {
+        GamePackManifest.ValidateNumbers(Tuning);
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 80 || Name.Any(char.IsControl))
             throw new InvalidDataException("A Lua script needs an ID and a name of up to 80 characters.");
         if (string.IsNullOrWhiteSpace(Source) || Source.Length > MaxSourceLength)
@@ -51,6 +54,14 @@ internal sealed class LuaControllerProgram
         source.Validate();
         Name = source.Name;
         _vm = new Script(CoreModules.Math | CoreModules.TableIterators | CoreModules.Bit32);
+        var tuning = new Table(_vm);
+        tuning["get"] = Callback(args =>
+        {
+            string key = Text(args, 0);
+            if (!source.Tuning.TryGetValue(key, out double value)) throw new ScriptRuntimeException("Unknown tuning control: " + key);
+            return DynValue.NewNumber(value);
+        });
+        _vm.Globals["tuning"] = tuning;
         var input = new Table(_vm);
         input["down"] = Callback(args => DynValue.NewBoolean(ControlMap.IsPressed(Control(args, 0), _input, _paddles)));
         input["axis"] = Callback(args => DynValue.NewNumber(ReadAxis(Text(args, 0))));

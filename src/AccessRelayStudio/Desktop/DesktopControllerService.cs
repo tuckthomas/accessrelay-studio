@@ -26,19 +26,26 @@ internal sealed class DesktopControllerService : IDesktopModule
     private string _notice = "Ready. Controller output and scripts start only when you turn them on.";
     private bool _disposed;
     private int _revision;
+    private readonly GamePackLibrary _packLibrary = new(DesktopEnvironment.DataDirectory("GamePacks"), Path.Combine(AppContext.BaseDirectory, "GamePacks"));
+    private readonly Func<string, Task>? _importPackModel;
+    private IReadOnlyList<GamePackDefinition> _packs = [];
+    private string[] _packErrors = [];
+    private CancellationTokenSource? _packOperation;
 
     internal StudioProfile ActiveProfile => _active;
     internal StickDeadzone Deadzone => _deadzone;
     internal FeedbackSettings FeedbackSettings => _feedbackSettings;
     internal string ProfileDirectory => _store.DirectoryPath;
 
-    internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll)
+    internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll, Func<string, Task>? importPackModel = null)
     {
-        _owner = owner; _runtime = runtime; _stopAll = stopAll;
+        _owner = owner; _runtime = runtime; _stopAll = stopAll; _importPackModel = importPackModel;
         _store = new ProfileStore(DesktopEnvironment.DataDirectory("ControllerProfiles"));
         _deadzone = _store.LoadStickDeadzone();
         _feedbackSettings = _store.LoadFeedbackSettings();
         _coPilotSettings = _store.LoadCoPilotSettings();
+        try { _packs = _packLibrary.LoadAll(out _packErrors); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException) { _packErrors = [error.Message]; }
         try
         {
             _profiles = _store.LoadAll();
@@ -59,6 +66,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         activeProfile = new
         {
             _active.Id, _active.Name,
+            _active.GamePack,
             stickyControls = _active.StickyControls.OrderBy(control => (uint)control),
             _active.Smoothing,
             bindings = ControlMap.All.Select(control =>
@@ -74,6 +82,9 @@ internal sealed class DesktopControllerService : IDesktopModule
         devices = _runtime()?.Latest?.Input.Devices ?? [], selectedDeviceId = _runtime()?.Latest?.Input.DeviceId,
         deadzone = _deadzone, feedback = _feedbackSettings,
         coPilot = _coPilotSettings with { Enabled = _runtime()?.CoPilotSettings.Enabled == true },
+        gamePacks = _packs.Select(pack => new { key = pack.Manifest.Id + "@" + pack.Manifest.Version, manifest = pack.Manifest,
+            pack.ManifestSha256, models = pack.Manifest.Assets.Where(asset => asset.Kind == GamePackAssetKind.VisionManifest).Select(asset => asset.Path) }),
+        gamePackErrors = _packErrors,
         controls = ControlMap.All.Select(control => new { id = EnumName(control), label = ControlLabel(control), mask = (uint)control }),
         scripts = Enum.GetValues<ScriptKind>().Select(script => new { id = EnumName(script), label = ScriptLabel(script) }),
         recordingChannels = Enum.GetValues<RecordingChannels>().Where(value => value != RecordingChannels.None)
@@ -160,6 +171,67 @@ internal sealed class DesktopControllerService : IDesktopModule
                 break;
             }
             case "deviceSelect": Runtime.SelectController(args.Text("id")); _notice = "Input controller selected."; break;
+            case "packImport":
+            {
+                RequireEditable(); if (_packOperation is not null) throw new InvalidOperationException("A game pack is already being imported.");
+                using var packCancellation = new CancellationTokenSource(); _packOperation = packCancellation; int packRevision = _revision;
+                try
+                {
+                    var picker = new FileOpenPicker(_owner); picker.FileTypeFilter.Add(".json");
+                    var chosen = await picker.PickSingleFileAsync(); CheckRevision(packRevision); packCancellation.Token.ThrowIfCancellationRequested();
+                    if (chosen is null) break;
+                    var importedPack = await Task.Run(() =>
+                    {
+                        var validated = GamePackDefinition.Read(chosen.Path);
+                        var installed = _packs.FirstOrDefault(pack => pack.Manifest.Id == validated.Manifest.Id && pack.Manifest.Version == validated.Manifest.Version);
+                        if (installed is not null)
+                        {
+                            if (installed.ManifestSha256 != validated.ManifestSha256) throw new InvalidDataException("This pack/version already exists with another hash. Use a new version.");
+                            return installed;
+                        }
+                        foreach (var asset in validated.Manifest.Assets.Where(asset => asset.Kind == GamePackAssetKind.VisionManifest))
+                            _ = EliteScriptStudio.Vision.VisionModelManifest.Read(validated.ResourcePath(asset));
+                        return _packLibrary.Import(chosen.Path, packCancellation.Token);
+                    }, packCancellation.Token);
+                    CheckRevision(packRevision); packCancellation.Token.ThrowIfCancellationRequested();
+                    _packs = [.. _packs.Where(pack => pack.Manifest.Id != importedPack.Manifest.Id || pack.Manifest.Version != importedPack.Manifest.Version), importedPack];
+                    _notice = "Game pack imported. Review its resources and tuning before creating a setup. Nothing was activated.";
+                }
+                finally { _packOperation = null; }
+                break;
+            }
+            case "packCreateSetup":
+            {
+                RequireEditable(); var pack = FindPack(args.Text("key"));
+                var values = args.GetProperty("values").Read<Dictionary<string, double>>();
+                var setup = pack.CreateProfile(values); _store.Save(setup); Runtime.SetScriptsEnabled(false); SelectProfile(setup);
+                _notice = "Pack setup created. Sequences, vision and voice commands remain off until explicitly enabled."; break;
+            }
+            case "packTune":
+            {
+                RequireEditable(); var pack = FindPack(args.Text("key"));
+                var values = args.GetProperty("values").Read<Dictionary<string, double>>();
+                Runtime.SetScriptsEnabled(false); Save(pack.Retune(_active, values));
+                _notice = "Pack tuning saved. Sequences are paused; enable them explicitly when ready."; break;
+            }
+            case "packModelImport":
+            {
+                RequireEditable(); if (_packOperation is not null) throw new InvalidOperationException("Another game-pack operation is finishing.");
+                using var packCancellation = new CancellationTokenSource(); _packOperation = packCancellation; int packRevision = _revision;
+                try
+                {
+                    var selectedPack = FindPack(args.Text("key"));
+                    var pack = await Task.Run(() => GamePackDefinition.Read(Path.Combine(selectedPack.DirectoryPath, "pack.json")), packCancellation.Token);
+                    CheckRevision(packRevision); packCancellation.Token.ThrowIfCancellationRequested();
+                    if (pack.ManifestSha256 != selectedPack.ManifestSha256) throw new InvalidDataException("The pack manifest changed. Re-import a new version before using its models.");
+                    var asset = pack.Manifest.Assets.FirstOrDefault(asset => asset.Path == args.Text("path") && asset.Kind == GamePackAssetKind.VisionManifest)
+                        ?? throw new InvalidDataException("Choose a declared model manifest from the pack.");
+                    if (_importPackModel is null) throw new InvalidOperationException("Vision model import is unavailable.");
+                    await _importPackModel(pack.ResourcePath(asset)); _notice = "Pack model imported into Remote Play. Existing validation/calibration gates still apply.";
+                }
+                finally { _packOperation = null; }
+                break;
+            }
             case "outputStart": await StartOutputAsync(); break;
             case "outputStop": StopOutput(); break;
             case "stopAll": await _stopAll(); break;
@@ -387,12 +459,15 @@ internal sealed class DesktopControllerService : IDesktopModule
 
     internal void StopOutput()
     {
+        _packOperation?.Cancel();
         _outputStart?.Cancel(); _runtime()?.StopOutput(stopScripts: true);
         _notice = "Controller output stopped.";
     }
 
     internal Task WaitForOutputAsync() => _outputTask ?? Task.CompletedTask;
     private StudioRuntime Runtime => _runtime() ?? throw new InvalidOperationException("The controller engine is not available.");
+    private GamePackDefinition FindPack(string key) => _packs.FirstOrDefault(pack => pack.Manifest.Id + "@" + pack.Manifest.Version == key)
+        ?? throw new InvalidOperationException("Choose an installed game pack.");
     private MacroRecording Recording(Guid id) => _active.Recordings.TryGetValue(id, out var recording) ? recording
         : throw new InvalidOperationException("That sequence no longer exists in the selected setup.");
     private static object RecordingSummary(MacroRecording recording) => new
@@ -463,5 +538,5 @@ internal sealed class DesktopControllerService : IDesktopModule
     private static string SplitLabel(string value) => System.Text.RegularExpressions.Regex.Replace(value, "(?<=[a-z])(?=[A-Z])", " ");
     public void SetVisible(bool visible) { }
     public DesktopMedia? ReadMedia(string path) => null;
-    public void Dispose() { _disposed = true; _outputStart?.Cancel(); }
+    public void Dispose() { _disposed = true; _outputStart?.Cancel(); _packOperation?.Cancel(); }
 }

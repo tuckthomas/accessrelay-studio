@@ -445,6 +445,20 @@ internal sealed class DesktopVisionService : IDesktopModule
             throw new InvalidDataException("Choose the model for this player and camera first.");
         return (source.Value, manifest, hash);
     }
+    internal async Task ImportGamePackModelAsync(string path)
+    {
+        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) throw new InvalidOperationException("Another vision action is finishing. Try again shortly.");
+        int version = _version; CancellationToken cancellation = _operation.Token;
+        try
+        {
+            RequireStopped(); var context = _settings;
+            var model = await Task.Run(() => _library.Import(path, context, cancellation), cancellation);
+            CheckOperation(version, cancellation); await RefreshModelsAsync();
+            _settings = _settings with { ModelManifestPath = model.ManifestPath, CorrectionMs = 0 }; SaveSettings(); _calibration = null;
+            _notice = "Pack model imported. " + model.Status;
+        }
+        finally { Volatile.Write(ref _busy, 0); }
+    }
     private async Task<object?> ExportCalibrationAsync(int version, CancellationToken cancellation)
     {
         var (source, manifest, hash) = CalibrationContext();

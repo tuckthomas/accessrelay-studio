@@ -120,6 +120,15 @@ async function previewCommand(method: string, args: any): Promise<any> {
     else if (action === 'smoothingSave') controller.activeProfile.smoothing = args.settings;
     else if (action === 'feedbackSave') controller.feedback = args.settings;
     else if (action === 'coPilotSave') controller.coPilot = args.settings;
+    else if (action === 'packCreateSetup') {
+      const pack = controller.gamePacks?.find((item: any) => item.key === args.key);
+      if (!pack) throw new Error('Choose a preview pack.');
+      const id = crypto.randomUUID(); controller.profiles.push({ id, name: pack.manifest.name });
+      controller.activeProfile = { ...controller.activeProfile, id, name: pack.manifest.name, gamePack: { id: pack.manifest.id, version: pack.manifest.version, manifestSha256: pack.manifestSha256, tuning: args.values } };
+      return { message: 'Preview setup created. No scripts or devices are running.' };
+    }
+    else if (action === 'packTune') controller.activeProfile.gamePack.tuning = args.values;
+    else if (action === 'packImport' || action === 'packModelImport') throw new Error('Import game packs and models in the installed desktop app.');
     else if (action === 'feedbackTest') return { queued: false, message: 'Design preview only. Run the installed app to hear or feel feedback.' };
     else if (action === 'deadzoneSave') controller.deadzone = args;
     else if (action === 'luaValidate') return { valid: true, message: 'Design preview only. Run the desktop app to validate Lua.' };

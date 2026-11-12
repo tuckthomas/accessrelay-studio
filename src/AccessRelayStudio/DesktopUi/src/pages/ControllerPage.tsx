@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
 import { CoPilotInput } from '../CoPilotInput';
+import { GamePacks } from '../GamePacks';
 import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
 
 const INITIAL_TIMING = { startDelay: 0, downSweep: 0, downHold: 512, upSweep: 80, upHold: 48, centerHold: 120, flick: 64, settle: 240, flickX: 0, flickY: -32767 };
@@ -53,7 +54,8 @@ export function ControllerPage({ state, status, command }: PageProps) {
     </div>
     {!state.driverAvailable && <Notice tone="warning" title="One-time device setup">Open Settings to install the virtual device driver before connecting output.</Notice>}
     {live.training && <Notice tone="warning">Gameplay training is recording manual input. Finish that clip before changing controller setups or sequences.</Notice>}
-    <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Controller workspace" items={[{ id: 'mapping', label: 'Button mapping' }, { id: 'sequences', label: 'Sequences', count: profile.recordings?.length || 0 }, { id: 'lua', label: 'Lua scripts', count: profile.luaScripts?.length || 0 }, { id: 'input', label: 'Input & response' }, { id: 'accessibility', label: 'Accessibility' }]} />
+    <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Controller workspace" items={[{ id: 'mapping', label: 'Button mapping' }, { id: 'sequences', label: 'Sequences', count: profile.recordings?.length || 0 }, { id: 'lua', label: 'Lua scripts', count: profile.luaScripts?.length || 0 }, { id: 'packs', label: 'Game packs' }, { id: 'input', label: 'Input & response' }, { id: 'accessibility', label: 'Accessibility' }]} />
+    {tab === 'packs' && <GamePacks state={state} status={live} command={command} />}
     {tab === 'mapping' && <MappingEditor state={state} status={live} command={command} openSequences={() => transition(() => setTab('sequences'))} />}
     {tab === 'sequences' && <Sequences state={state} status={live} command={command} />}
     {tab === 'lua' && <LuaEditor state={state} status={live} command={command} />}

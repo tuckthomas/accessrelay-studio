@@ -27,6 +27,10 @@
     <RequireVirtualMicrophone Condition="'$(RequireVirtualMicrophone)' == '' And Exists('$(_VirtualMicSourceDirectory)$(_VirtualMicIdentityFile)')">true</RequireVirtualMicrophone>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="../../games/nba2k27/pack.json" TargetPath="GamePacks/nba2k27/pack.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../games/nba2k27/scripts/*.lua" TargetPath="GamePacks/nba2k27/scripts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../games/switch-demo/pack.json" TargetPath="GamePacks/switch-demo/pack.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../games/switch-demo/scripts/*.lua" TargetPath="GamePacks/switch-demo/scripts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="DesktopUi\dist\**\*" TargetPath="DesktopUi\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Compile Include="../../games/nba2k27/src/*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />

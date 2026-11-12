@@ -11,6 +11,7 @@ public sealed class ProfileStore
     private const int RecordingVersion = 2;
     private const int LuaVersion = 3;
     private const int AccessibilityVersion = 4;
+    private const int GamePackVersion = 5;
     private const int MaxFileBytes = 12 * 1024 * 1024;
     private const string SelectionFile = "active-macro-profile.txt";
     private const string StickDeadzoneFile = "stick-deadzones.json";
@@ -202,7 +203,7 @@ public sealed class ProfileStore
         {
             throw new InvalidDataException("The profile file is invalid.", error);
         }
-        if (document is null || document.Version is not (OriginalVersion or RecordingVersion or LuaVersion or AccessibilityVersion) || document.Profile is null)
+        if (document is null || document.Version is not (OriginalVersion or RecordingVersion or LuaVersion or AccessibilityVersion or GamePackVersion) || document.Profile is null)
             throw new InvalidDataException("The profile file format is unsupported.");
         document.Profile.Validate();
         return document.Profile;
@@ -213,7 +214,8 @@ public sealed class ProfileStore
         profile.Validate();
         WriteAtomically(path, stream =>
         {
-            int version = profile.StickyControls.Count != 0 || profile.Smoothing != StickSmoothing.Off ? AccessibilityVersion
+            int version = profile.GamePack is not null || profile.LuaScripts.Values.Any(script => script.Tuning.Count != 0) ? GamePackVersion
+                : profile.StickyControls.Count != 0 || profile.Smoothing != StickSmoothing.Off ? AccessibilityVersion
                 : profile.LuaScripts.Count != 0 ? LuaVersion : profile.Recordings.Count == 0 ? OriginalVersion : RecordingVersion;
             JsonSerializer.Serialize(stream, new ProfileDocument(version, profile), Format);
             if (stream.Length > MaxFileBytes)

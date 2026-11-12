@@ -80,7 +80,8 @@ public sealed partial class DesktopWindow : Window
         {
             if (!_started)
             {
-                _controller ??= new DesktopControllerService(AppWindow.Id, () => _runtime, StopAllAsync);
+                _controller ??= new DesktopControllerService(AppWindow.Id, () => _runtime, StopAllAsync,
+                    path => _vision?.ImportGamePackModelAsync(path) ?? throw new InvalidOperationException("Vision is unavailable."));
                 try
                 {
                     if (_runtime is null)
