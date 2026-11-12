@@ -14,7 +14,8 @@ Sections 5–7 are implemented and passed Windows CI with simulated inputs. Sect
 has local phrase/template recognition and bounded host arbitration implemented;
 Windows native CI and real microphone evaluation remain to be recorded.
 Section 10 has the session-provenance guard implemented; its conversion/data work
-remains open. Sections 9 and 11–12 are queued, not implemented.
+remains open. Section 9 now has the NBA source/training extraction implemented; its pack SDK
+and host UI are next. Sections 11–12 are queued, not implemented.
 
 ## Delivery and evidence
 
@@ -203,7 +204,7 @@ physical delivery latency remain open; no such measurement is claimed.
       declarative tuning controls, compatibility rules, and resource/trust restrictions.
 - [ ] Keep scheduling, freshness checks, generation tokens, cancellation, and final
       controller ownership in the host. Never expose unrestricted output writes to Lua.
-- [ ] Extract NBA-specific code/training into an in-repository pack incrementally,
+- [x] Extract NBA-specific code/training into an in-repository pack incrementally,
       updating build/test paths and preserving existing saved profiles and model imports.
 - [ ] Add pack loading/import, tuning UI, bounded Lua behavior, and a second minimal
       pack proving the contract is not tied to NBA; reject unsupported native plugins.
@@ -213,7 +214,12 @@ physical delivery latency remain open; no such measurement is claimed.
       do not create/publish a marketplace or distribute third-party weights prematurely.
 - [ ] Push migration features separately and record section commit SHAs here.
 
-Implementation commits: pending. Marketplace split: deferred until the contract is proven.
+Implementation commits: NBA source/training extraction `ce2eee28aa3831ea8bb0e31488afbf797d26261f`. Validation: portable controller/profile/Lua tests,
+26 dataset tests, existing trainer/evaluator entry points, desktop evidence tests
+and Windows/vision verification compilation passed. Core contains no NBA-specific
+type references. Legacy profile JSON/fingerprints and model contracts are retained;
+release scheduling stays host-owned. Pack SDK/import/tuning is still in progress.
+Marketplace split: deferred until the contract is proven.
 
 ## 10. Dataset provenance and training interoperability
 
