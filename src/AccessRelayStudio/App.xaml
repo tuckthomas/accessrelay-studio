@@ -6,16 +6,6 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources />
             </ResourceDictionary.MergedDictionaries>
-            <SolidColorBrush x:Key="StudioWindowBrush" Color="#EDF1EA" />
-            <SolidColorBrush x:Key="StudioVoiceSurfaceBrush" Color="#F7F5ED" />
-            <SolidColorBrush x:Key="StudioVoiceOutlineBrush" Color="#BFCEC3" />
-            <SolidColorBrush x:Key="StudioControlBrush" Color="#F7F5ED" />
-            <SolidColorBrush x:Key="StudioControlHoverBrush" Color="#DCEADE" />
-            <SolidColorBrush x:Key="StudioControlOutlineBrush" Color="#A9BDB2" />
-            <SolidColorBrush x:Key="StudioAccentBrush" Color="#225E50" />
-            <SolidColorBrush x:Key="StudioAccentHoverBrush" Color="#2B7561" />
-            <SolidColorBrush x:Key="StudioAccentPressedBrush" Color="#174B40" />
-            <SolidColorBrush x:Key="StudioOnAccentBrush" Color="#FBF7EE" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>
