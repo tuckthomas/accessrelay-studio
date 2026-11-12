@@ -332,3 +332,29 @@ The callback now reads QPC after acquiring controller ownership. The complete
 simulated runtime/evidence suite failed at that regression before the fix and passed
 after it on Linux with the managed timer fallback. Windows CI also exercises the
 platform high-resolution timer; no physical output device was used by these tests.
+Windows publish, the standalone vision/performance suite, probe compilation and
+the simulated runtime checks passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43297515217.
+
+## 13. Physical and data acceptance journal
+
+- [x] Provide a fresh local Windows journal tied to the supplied executable hash/version,
+      with optional read-only input discovery and available hardware/model inventories.
+- [x] Give each remaining physical/data check a concrete procedure, expected behavior,
+      Pending status, measurement, evidence and notes fields; never infer a pass from CI,
+      API discovery or a diagnostic exit code.
+- [x] Support template-only generation, refuse overwrites, avoid automatic app/device
+      actuation or evidence publication, and keep all physical acceptance incomplete.
+- [ ] Run the 20 cases with intended Windows devices/users and reviewed gameplay data;
+      attach measurements and review evidence before completing the corresponding items.
+- [x] Push the tooling separately and record its implementation commit here.
+
+Implementation commit: `34adbda143249cc7ce4e98cfa0068174aab50816`.
+Validation: PowerShell template generation on Linux produced 20 Pending cases,
+an explicitly incomplete metadata record and overwrite rejection; the real input
+probe compiled without warnings. Windows CI also checks template generation against
+the published app. See `docs/physical-acceptance.md` and
+`scripts/Start-AccessibilityAcceptance.ps1`. This creates a runnable acceptance
+procedure, not device, screen-reader, microphone or gameplay/model evidence.
+The remaining prerequisites are actual Windows hardware/user access and reviewed
+independent gameplay sessions; no unavailable measurement is marked complete.
