@@ -100,6 +100,7 @@ if (-not $ActivateOnly -and $legacy -and (Test-Path -LiteralPath $legacy) -and -
 $bin = (Join-Path $build 'app-bin').Replace('\', '/') + '/'
 $obj = (Join-Path $build 'app-obj').Replace('\', '/') + '/'
 if (-not $ActivateOnly) {
+    & (Join-Path $PSScriptRoot 'Build-DesktopUi.ps1')
     & dotnet publish $project -c Release "-p:OutputPath=$bin" "-p:IntermediateOutputPath=$obj" -o $install -v:minimal
     if ($LASTEXITCODE -ne 0) { throw "Beta publication failed with exit code $LASTEXITCODE. The existing Run path was not changed." }
 }
@@ -140,7 +141,27 @@ if ($legacy -and -not $DeferRunActivation) {
     $parent = [IO.Path]::GetFullPath((Split-Path -Parent $legacy)).TrimEnd('\', '/')
     $legacyItem = Get-Item -LiteralPath $legacy -ErrorAction SilentlyContinue
     if ($legacyItem -and $legacyItem.LinkType) {
-        if (@($legacyItem.Target)[0] -ne $install) { throw 'The existing Run link points elsewhere; it was left unchanged.' }
+        if (@($legacyItem.Target)[0] -ne $install) {
+            # Versioned installations can replace the launch link without touching the old
+            # installation or its running process. Retain the old junction as a rollback path.
+            if ($legacyItem.LinkType -ne 'Junction' -or @($legacyItem.Target).Count -ne 1) {
+                throw 'The existing Run path is not a supported directory junction; it was left unchanged.'
+            }
+            $backup = [IO.Path]::GetFullPath((Join-Path $parent ('Run-Previous-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))))
+            if ((Split-Path -Parent $legacy) -ne $parent -or (Split-Path -Parent $backup) -ne $parent -or
+                $legacyItem.FullName -ne $legacy -or (Test-Path -LiteralPath $backup)) {
+                throw 'The launch-junction backup failed its workspace containment check.'
+            }
+            # Rename only the verified junction entry. Never enumerate, move or delete its target.
+            Rename-Item -LiteralPath $legacy -NewName (Split-Path -Leaf $backup)
+            try { New-Item -ItemType Junction -Path $legacy -Target $install | Out-Null }
+            catch {
+                if (-not (Test-Path -LiteralPath $legacy)) {
+                    Rename-Item -LiteralPath $backup -NewName (Split-Path -Leaf $legacy)
+                }
+                throw
+            }
+        }
     }
     else {
         if ($legacyItem) {

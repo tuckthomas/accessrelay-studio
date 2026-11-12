@@ -10,7 +10,7 @@
     <AssemblyTitle>AccessRelay Studio Beta</AssemblyTitle>
     <Description>Assistive controller input and voice access for Windows</Description>
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
-    <Version>1.9.0-beta.4</Version>
+    <Version>1.9.0-beta.5</Version>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -20,13 +20,15 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\AccessRelayStudio.ico</ApplicationIcon>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Verification\**;WindowsVerification\**;Input\Probe\**;Viewer\node_modules\**;Audio\VirtualMicHost\target\**;Audio\NeuralHost\**;Run\**;docs\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Verification\**;WindowsVerification\**;Input\Probe\**;Viewer\node_modules\**;DesktopUi\node_modules\**;Audio\VirtualMicHost\target\**;Audio\NeuralHost\**;Run\**;docs\**</DefaultItemExcludes>
     <_VirtualMicIdentityFile>AccessRelay.VirtualMicUsbId.txt</_VirtualMicIdentityFile>
     <_VirtualMicHostFile>AccessRelay.VirtualMicHost.exe</_VirtualMicHostFile>
     <_VirtualMicSourceDirectory>$(MSBuildProjectDirectory)\Audio\VirtualMicHost\</_VirtualMicSourceDirectory>
     <RequireVirtualMicrophone Condition="'$(RequireVirtualMicrophone)' == '' And Exists('$(_VirtualMicSourceDirectory)$(_VirtualMicIdentityFile)')">true</RequireVirtualMicrophone>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="DesktopUi\dist\**\*" TargetPath="DesktopUi\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="MoonSharp" Version="2.0.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
@@ -75,6 +77,10 @@
     <!-- WinUI appends resource names to OutputPath when compiling XAML. -->
     <Error Condition="'$(OutputPath)' != '' And !HasTrailingSlash('$(OutputPath)')"
            Text="WinUI requires a trailing slash on a custom build output path. Add a trailing slash or use dotnet publish for the runnable folder." />
+  </Target>
+  <Target Name="ValidateDesktopInterface" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/DesktopUi/dist/index.html')"
+           Text="Build the bundled desktop interface with scripts/Build-DesktopUi.ps1 before building the Windows app." />
   </Target>
   <Target Name="ValidateVirtualMicrophoneInputs" BeforeTargets="PrepareForBuild;PrepareForPublish" Condition="'$(RequireVirtualMicrophone)' == 'true'">
     <Error Condition="!Exists('$(_VirtualMicSourceDirectory)$(_VirtualMicIdentityFile)') Or !Exists('$(_VirtualMicSourceDirectory)$(_VirtualMicHostFile)')"

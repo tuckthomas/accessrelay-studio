@@ -63,8 +63,18 @@ const layoutButtons = [...document.querySelectorAll("[data-layout]")];
 document.title = modelInfo.name;
 document.querySelector(".viewer-name").textContent = modelInfo.name;
 stage.setAttribute("aria-label", `Interactive ${modelInfo.name}`);
-const bridge = location.origin === "https://studio.local" && location.pathname === "/Viewer/index.html"
-  ? window.chrome?.webview : null;
+const embeddedDesktop = window.parent !== window && location.origin === "https://scene.accessrelay.test";
+const bridge = embeddedDesktop ? {
+  postMessage(payload) { window.parent.postMessage({ channel: "accessrelay-controller", payload }, "https://studio.local"); },
+  addEventListener(type, callback) {
+    if (type !== "message") return;
+    window.addEventListener("message", event => {
+      if (event.source === window.parent && event.origin === "https://studio.local" && event.data?.channel === "accessrelay-controller")
+        callback({ data: event.data.payload });
+    });
+  }
+} : location.origin === "https://studio.local" && location.pathname === "/Viewer/index.html" ? window.chrome?.webview : null;
+if (new URLSearchParams(location.search).get("theme") === "sage") document.documentElement.dataset.theme = "sage";
 const scene = new Scene();
 const parts = new Map();
 const pickable = new Map();
@@ -73,9 +83,10 @@ const defaultPitch = 0.07;
 const raycaster = new Raycaster();
 const cursor = new Vector2();
 const projected = new Vector3();
-const focusGlow = new Color("#0087e9");
-const activeGlow = new Color("#28bdff");
-const dimGlow = new Color("#027ec2");
+const sageTheme = document.documentElement.dataset.theme === "sage";
+const focusGlow = new Color(sageTheme ? "#367456" : "#0087e9");
+const activeGlow = new Color(sageTheme ? "#98f9c3" : "#28bdff");
+const dimGlow = new Color(sageTheme ? "#4b8070" : "#027ec2");
 const poseRotation = new Quaternion();
 const poseEuler = new Euler(0, 0, 0, "YXZ");
 const screenDirection = new Vector3();

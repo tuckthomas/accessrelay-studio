@@ -6,16 +6,16 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources />
             </ResourceDictionary.MergedDictionaries>
-            <SolidColorBrush x:Key="StudioWindowBrush" Color="#10151E" />
-            <SolidColorBrush x:Key="StudioVoiceSurfaceBrush" Color="#19212D" />
-            <SolidColorBrush x:Key="StudioVoiceOutlineBrush" Color="#354154" />
-            <SolidColorBrush x:Key="StudioControlBrush" Color="#242C38" />
-            <SolidColorBrush x:Key="StudioControlHoverBrush" Color="#2F3D4E" />
-            <SolidColorBrush x:Key="StudioControlOutlineBrush" Color="#414D5D" />
-            <SolidColorBrush x:Key="StudioAccentBrush" Color="#0078E9" />
-            <SolidColorBrush x:Key="StudioAccentHoverBrush" Color="#1688F0" />
-            <SolidColorBrush x:Key="StudioAccentPressedBrush" Color="#0068C7" />
-            <SolidColorBrush x:Key="StudioOnAccentBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="StudioWindowBrush" Color="#EDF1EA" />
+            <SolidColorBrush x:Key="StudioVoiceSurfaceBrush" Color="#F7F5ED" />
+            <SolidColorBrush x:Key="StudioVoiceOutlineBrush" Color="#BFCEC3" />
+            <SolidColorBrush x:Key="StudioControlBrush" Color="#F7F5ED" />
+            <SolidColorBrush x:Key="StudioControlHoverBrush" Color="#DCEADE" />
+            <SolidColorBrush x:Key="StudioControlOutlineBrush" Color="#A9BDB2" />
+            <SolidColorBrush x:Key="StudioAccentBrush" Color="#225E50" />
+            <SolidColorBrush x:Key="StudioAccentHoverBrush" Color="#2B7561" />
+            <SolidColorBrush x:Key="StudioAccentPressedBrush" Color="#174B40" />
+            <SolidColorBrush x:Key="StudioOnAccentBrush" Color="#FBF7EE" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

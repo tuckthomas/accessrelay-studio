@@ -1,6 +1,24 @@
 # Remote Play vision implementation verification
 
-Date: 2026-11-11. Branch: `codex/remote-play-vision`. Application version: `1.9.0-beta.4`.
+Updated: 2026-11-12. Branch: `codex/remote-play-vision`. Application version: `1.9.0-beta.5`.
+
+## Beta.5 desktop interface
+
+The active application now opens a bundled React/TypeScript interface in a thin WinUI/WebView2 window. It loads installed files through local virtual origins and intercepts binary preview resources; it creates no HTTP listener or Python/Node worker. Existing native C# input, controller scheduling, Windows Graphics Capture, ONNX and audio processing remain outside the interface. The former custom WinUI pages and dialogs are no longer reachable from the active window. Windows file/folder pickers remain native.
+
+The new navigation starts from tasks: Workspace, Controller, Remote Play, Voice and Settings. Sage/ivory surfaces, navy text and mint accents derive from the application icon. Controller mapping, sequence recording/editing, Lua, raw input, voice routing/reference creation, shot profiles, capture layout, training clips/review, models and diagnostics have dedicated workflows. Live preview and **Record training clip** appear together; viewing, recording, saving and saved states are distinct. Preview rendering pauses when its workspace is hidden while explicitly started processing continues. Source enumeration refreshes while Remote Play is visible and stopped; closed sources invalidate their layout. Navigation and native window close protect unsaved edits and unfinished recordings.
+
+Verification for this migration:
+
+- 44 React workflow tests and three Microsoft Edge end-to-end checks passed. The browser checks cover navigation, keyboard setup creation, viewport widths 1100/1440/1700, overflow and initially visible mapping save controls.
+- C# Release compilation/publication passed. Existing 25 portable controller/profile groups and ten vision/model/performance groups passed.
+- The new portable desktop evidence checks exercise actual binary BMP encoding (including 1440p downscaling and padded strides), supported evidence streams/offsets, labels/splits, concurrent-write rejection and malformed/future/path-invalid/incomplete datasets.
+- An isolated native verification session passed real bridge persistence for setups, Lua validation, mappings, trajectory normalization, sequence feedback/edit/retime atomicity, shot attributes, CPU provider selection and rejection of arming without a compatible model.
+- The same native session captured a visible synthetic window through WGC, fetched and decoded the intercepted binary preview inside WebView2, froze/saved the capture layout and cleared the selected source/layout after its window closed. Native visual checks covered the workspace, interactive 3D controller, Remote Play and Voice. A real unsaved mapping edit blocked native window close, and **Keep editing** preserved it.
+
+The UI tests do not establish live microphone quality, virtual-controller delivery, trained-model accuracy or gameplay timing. One WebView browser crash during verification faulted inside injected `RTSSHooks64.dll` (RivaTuner); another isolated run completed the native checks without changing overlay settings. The host now distinguishes automatically recovered GPU/utility process failures and recreates a closed WebView on retry after browser-process failure. This recovery was exercised by terminating only the isolated host's own browser process, then reopening the interface through its native retry button. Recovery retains the native processing services but cannot restore unsaved browser-only drafts after a process crash.
+
+Build the interface with `scripts/Build-DesktopUi.ps1`; run its tests with `pnpm --dir src/AccessRelayStudio/DesktopUi test` and `test:e2e`. Run `dotnet run --project tools/desktop/Verification/DesktopEvidenceVerification.csproj -c Release` for evidence checks. `tools/desktop/Verify-DesktopBridge.cjs` requires an explicitly isolated native host started with `--ui-verification-data <folder> --ui-debug-port 9339`; it refuses ordinary sessions before any mutation. Its optional `--source-helper <WindowsVerification.exe>` uses the current Windows verification project's `--preview-source` mode and only captures that synthetic window.
 
 ## Implemented software
 
@@ -12,9 +30,9 @@ Training controls record bounded local evidence clips with timestamps and full s
 
 The performance panel displays local capture/processing/decision and inference-with-transfers timing distributions, bounded recent sample counts, allocation/collection diagnostics and the latest helper pipe handoff estimate. Saved JSON runs carry configuration context; comparisons require at least 100 decisions each and matching context while permitting a backend change. Live inputs are uncontrolled, so this is an observation tool rather than a controlled benchmark. It does not measure original Xbox frame age, Xbox input receipt or gameplay release accuracy. Capture-only model metrics remain unavailable.
 
-Configuration and Live Capture are cached tabs with one session. Observation status, start/stop and arming stay above the independently scrolling contents. Preview production/upload and detailed percentile presentation pause when Live Capture is hidden, the page is elsewhere or the beta is minimized. Capture, inference, training recording and controller processing remain independent of presentation.
+Remote Play presents setup, live capture, recording/review and advanced analysis in one task workspace. Preview production and detailed percentile presentation pause when its workspace is hidden or the app is minimized. Capture, inference, training recording and controller processing remain independent of presentation.
 
-The source picker refreshes on opening and at a two-second interval while Configuration is visible and observation is stopped. HWND/process identity preserves the selection through title/order changes without resetting calibration. Closed sources clear the selection rather than choosing an unrelated window. The picker lists top-level windows and explains that browser entries represent their active tab, not background tabs. This refresh change was compiled and independently source-reviewed; its native dropdown behavior was not rechecked after computer control was stopped by the user.
+The source picker refreshes on opening and at a two-second interval while Remote Play is visible and observation is stopped. HWND/process identity preserves the selection through title/order changes without resetting calibration. Closed sources clear the selection rather than choosing an unrelated window. The picker lists top-level windows and explains that browser entries represent their active tab, not background tabs. Beta.5 native verification exercised source appearance and closure using an isolated synthetic window.
 
 The model library contains only explicitly imported packages and starts empty. It copies declared ONNX/evidence files, checks hashes and bounded paths, preserves manifest bytes and atomically publishes completed imports. The user selects models by name; ordinary recording does not require a model or a JSON filename. Recording state comes from an immutable recorder snapshot: writing, finalizing, complete and incomplete are distinct; saved counts and the take directory are exposed only as actual recorded data. Viewing-only frame counts are not represented as saved footage.
 

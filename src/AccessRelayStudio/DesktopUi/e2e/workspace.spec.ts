@@ -1,0 +1,38 @@
+import { expect, test } from '@playwright/test';
+test('task navigation remains usable at desktop widths without horizontal overflow', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Your workspace', exact: true })).toBeVisible();
+  await expect(page.getByText('Design preview — no hardware, capture or audio sessions are connected.')).toBeVisible();
+  for (const width of [1100, 1440, 1700]) {
+    await page.setViewportSize({ width, height: 930 });
+    for (const name of ['Workspace', 'Controller', 'Remote Play', 'Voice', 'Settings']) {
+      await page.getByRole('complementary', { name: 'Main navigation' }).getByRole('button', { name, exact: true }).click();
+      await expect(page.locator('main h1')).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
+      expect(overflow, name + ' overflows at ' + width).toBe(false);
+    }
+  }
+  expect(errors).toEqual([]);
+});
+test('setup dialog works with keyboard and keeps the UI local in preview', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('button', { name: 'Create a controller setup' }).click();
+  const dialog = page.getByRole('dialog', { name: 'A setup of your own' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Setup name').fill('Keyboard setup');
+  await dialog.getByLabel('Setup name').press('Enter');
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByLabel('Controller setup', { exact: true })).toHaveValue(/.+/);
+  await page.getByRole('tab', { name: 'Lua scripts 0' }).click();
+  await expect(page.getByRole('heading', { name: 'Your script editor' })).toBeVisible();
+});
+test('mapping primary action stays visible on a desktop window', async ({ page }) => {
+  await page.setViewportSize({ width: 1536, height: 960 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Save mapping' })).toBeInViewport();
+  await expect(page.getByText('Use the sequence timing saved in this setup.')).toBeVisible();
+  await page.screenshot({ path: 'D:/AccessRelayStudio/DesignReview/controller-final.png', fullPage: false });
+});

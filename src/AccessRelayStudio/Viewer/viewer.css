@@ -105,3 +105,28 @@ button:disabled { cursor: default; opacity: .54; }
 @media (max-width: 320px) {
   .viewer-name { display: none; }
 }
+
+/* The desktop redesign uses the renderer as a capability, with its own visual system. */
+:root[data-theme="sage"] { color-scheme: light; color: #173b54; background: #e7eee6; font-size: 14px; }
+[data-theme="sage"] .viewer-toolbar { padding: 10px 12px; gap: 12px; min-height: 48px; }
+[data-theme="sage"] .viewer-name { color: #173b54; font-size: 14px; }
+[data-theme="sage"] .viewer-hint { color: #526a66; font-size: 14px; }
+[data-theme="sage"] .view-buttons { background: #f5f4eb; border-color: #b9cec4; border-radius: 9px; }
+[data-theme="sage"] .view-buttons button, [data-theme="sage"] .reset-view { font-size: 14px; min-height: 32px; padding: 5px 10px; }
+[data-theme="sage"] .view-buttons button[aria-pressed="true"] { background: #d2ecdf; border-color: #91c7ae; }
+[data-theme="sage"] .view-buttons button:hover, [data-theme="sage"] .reset-view:hover:enabled { background: #dbe7df; }
+[data-theme="sage"] .reset-view { border-color: #b9cec4; }
+[data-theme="sage"] .callout { color: #173b54; background: #f8f6ed; border-color: #b7cbc0; font-size: 14px; }
+[data-theme="sage"] .callout.selected { background: #d2ecdf; border-color: #4c9676; }
+[data-theme="sage"] .callout.active { background: #98f9c3; border-color: #4c9676; }
+[data-theme="sage"] .callout:hover, [data-theme="sage"] .callout[aria-pressed="true"], [data-theme="sage"] .callout.preview { background: #d2ecdf; border-color: #4c9676; }
+[data-theme="sage"] .callout small { font-size: 14px; }
+[data-theme="sage"] .message { color: #526a66; }
+[data-theme="sage"] .leaders { stroke: #3f816a; }
+[data-theme="sage"] .leader.active { stroke: #1f6b51; }
+[data-theme="sage"] .endpoint.assigned { fill: #35785c; }
+[data-theme="sage"] .endpoint.active { fill: #98f9c3; }
+[data-theme="sage"] .callout[data-control="A"] b { color: #317548; }
+[data-theme="sage"] .callout[data-control="B"] b { color: #b3463d; }
+[data-theme="sage"] .callout[data-control="X"] b { color: #2b6fa3; }
+[data-theme="sage"] .callout[data-control="Y"] b { color: #8b6d1b; }
