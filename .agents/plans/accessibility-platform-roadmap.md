@@ -50,9 +50,15 @@ Real-device/WebView2 interaction and screen-reader listening remain separate che
 - [x] Add browser regression assertions for existing Radix Home, End, typeahead,
       `aria-controls`, and `aria-labelledby`; do not replace working menu behavior.
 - [x] Run frontend unit tests, browser tests, and production build.
-- [ ] Push implementation and record its commit SHA and validation here.
+- [x] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: pending.
+Implementation commit: `5484226d7e0fc39929b65a9865b82fbf7302bf1f`.
+Validation: 49 unit tests, 9 Chromium browser tests, TypeScript/Vite build, and
+isolated compilation of the real audio sources passed. Browser tests cover live
+regions inside a modal and the existing menu keyboard/ARIA contract. The host now
+reports asynchronous voice failures explicitly instead of masking them with old
+service text. Windows CI and real screen-reader/audio-device validation are tracked
+separately; no listening or microphone hardware test is claimed.
 
 ## 3. Sticky button accessibility
 
