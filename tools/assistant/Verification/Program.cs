@@ -17,6 +17,7 @@ var pending = service.ReadStatusAsync(default); access.Configure(new()); host.Pe
 try { await pending; throw new Exception("Revoked read succeeded"); } catch (AssistantException error) { Check(error.Code == "accessRevoked", "Wrong read error"); }
 Check(StudioAssistantService.LuaContract().Contains("output.button") && !StudioAssistantService.LuaContract().Contains("press_button"), "Wrong Lua contract.");
 Console.WriteLine("PASS shared diagnostic projection, monotonic expiry, permission scopes, revocation and actual Lua contract.");
+await AssistantIntegrationChecks.Run(args);
 
 static void Check(bool value, string message) { if (!value) throw new Exception(message); }
 static void Reject(Action call, string code) { try { call(); } catch (AssistantException error) when (error.Code == code) { return; } throw new Exception("Expected " + code); }
@@ -30,9 +31,12 @@ sealed class TestClock : TimeProvider
 sealed class FakeContext : IStudioApplicationContext
 {
     public StudioProfile Profile = StudioProfile.CreateDefault("Test");
+    public long Revision = 1;
+    public Guid Instance = Guid.NewGuid();
     public TaskCompletionSource<StudioApplicationContext>? PendingRead;
-    public StudioApplicationContext State => new(new(Guid.Empty, Profile.Id, 1, AssistantJson.ProfileDigest(Profile), 0), Profile,
+    public StudioApplicationContext State => new(new(Instance, Profile.Id, Revision, AssistantJson.ProfileDigest(Profile), 0), Profile,
         new(false, false, false, false, false, false, false, false, false, false, false, false, 5, 5, false, false, false));
     public Task<StudioApplicationContext> ReadAsync(CancellationToken cancellation) => PendingRead?.Task ?? Task.FromResult(State);
-    public Task ApplyAsync(StudioContextToken expected, StudioProfile profile, CancellationToken cancellation) { Profile = profile; return Task.CompletedTask; }
+    public Task<StudioApplicationContext> ApplyAsync(StudioContextToken expected, StudioProfile profile, CancellationToken cancellation)
+    { cancellation.ThrowIfCancellationRequested(); StudioAssistantService.RequireMatch(expected, State.Token); Profile = profile; Revision++; return Task.FromResult(State); }
 }

@@ -10,6 +10,7 @@
     <Compile Include="../AccessRelayStudio/Core/*.cs" Link="Core/%(Filename)%(Extension)" />
     <PackageReference Include="MoonSharp" Version="2.0.0" />
     <InternalsVisibleTo Include="AccessRelayStudio.Runtime" />
+    <InternalsVisibleTo Include="AccessRelayStudio.Application" />
     <InternalsVisibleTo Include="AccessRelayStudio" />
     <InternalsVisibleTo Include="Verification" />
     <InternalsVisibleTo Include="WindowsVerification" />

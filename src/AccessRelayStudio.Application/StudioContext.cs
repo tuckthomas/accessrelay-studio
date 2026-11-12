@@ -17,7 +17,7 @@ public sealed record StudioApplicationContext(StudioContextToken Token, StudioPr
 public interface IStudioApplicationContext
 {
     Task<StudioApplicationContext> ReadAsync(CancellationToken cancellation);
-    Task ApplyAsync(StudioContextToken expected, StudioProfile profile, CancellationToken cancellation);
+    Task<StudioApplicationContext> ApplyAsync(StudioContextToken expected, StudioProfile profile, CancellationToken cancellation);
 }
 
 public sealed class AssistantException(string code, string message) : Exception(message)
@@ -29,6 +29,7 @@ public static class AssistantJson
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = false,
         MaxDepth = 32, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) }
     };
     public static string ProfileDigest(StudioProfile profile)
