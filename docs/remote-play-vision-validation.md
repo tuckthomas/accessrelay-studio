@@ -31,6 +31,8 @@ The performance panel displays local capture/processing/decision and inference-w
 
 Build outputs, synthetic fixtures, NVIDIA runtime redistributables and Python dependencies were placed outside the repository on C: and D:. The beta installation is on D:, with optional CUDA redistributables in its local `CudaRuntime` folder. Raw frames, trained weights, runtime dependencies and per-user shortcuts are excluded from Git. Existing live application files are not overwritten while that installation is running; switching the legacy Run path is a separate, guarded activation step.
 
+After the saved stable application was closed, the usual `AccessRelayStudio/Run` path was activated as a junction to the beta installation. Its prior contents were retained in a timestamped `Run-Stable-*` sibling. The beta executable identifies itself as `1.9.0-beta.1` with the source commit in its informational version; rebuilding source alone does not update a separately published stable installation.
+
 ## Remaining acceptance gates
 
 No real gameplay training footage or trained no-meter NBA 2K27 model was supplied. Actual gameplay collection, justified target-phase annotation, model training, disjoint held-out evaluation, live calibration and Xbox Remote Play virtual-controller/release trials remain pending. The starter model architecture and manually selected player crop do not establish full-court player tracking or reliable shot timing.
