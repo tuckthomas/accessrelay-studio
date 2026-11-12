@@ -168,6 +168,40 @@ class DatasetValidationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Top-level camera metadata differs"):
                     self.load([self.target, self.negative], assume_legacy_camera_2k=True)
 
+    def test_training_split_guard_rejects_shared_sessions_and_empty_groups(self):
+        training.validate_session_splits({"train-a"}, {"validation-a"})
+        for train, validation in (({"same"}, {"same"}), (set(), {"validation-a"}), ({"train-a"}, set())):
+            with self.subTest(train=train, validation=validation), self.assertRaises(ValueError):
+                training.validate_session_splits(train, validation)
+
+    def test_validation_evaluation_cannot_relabel_training_sessions(self):
+        run = {"trainingSessionIds": ["train-a"], "validationSessionIds": ["validation-a"]}
+        evaluation.validate_evaluation_sessions("validation", {"validation-a"}, run)
+        with self.assertRaisesRegex(ValueError, "Validation evaluation sessions overlap training"):
+            evaluation.validate_evaluation_sessions("validation", {"train-a"}, run)
+
+    def test_final_held_out_excludes_both_training_and_validation_sessions(self):
+        run = {"trainingSessionIds": ["train-a"], "validationSessionIds": ["validation-a"]}
+        evaluation.validate_evaluation_sessions("held-out", {"final-a"}, run)
+        for reused in ("train-a", "validation-a"):
+            with self.subTest(reused=reused), self.assertRaisesRegex(ValueError, "held-out sessions overlap"):
+                evaluation.validate_evaluation_sessions("held-out", {reused}, run)
+
+    def test_evaluation_rejects_missing_malformed_or_contradictory_provenance(self):
+        for run in ({}, {"trainingSessionIds": "train-a", "validationSessionIds": ["validation-a"]},
+                    {"trainingSessionIds": ["train-a", "train-a"], "validationSessionIds": ["validation-a"]},
+                    {"trainingSessionIds": ["train-a"], "validationSessionIds": []},
+                    {"trainingSessionIds": ["train-a"], "validationSessionIds": ["train-a"]},
+                    {"trainingSessionIds": [None], "validationSessionIds": ["validation-a"]}):
+            with self.subTest(run=run), self.assertRaises(ValueError):
+                evaluation.validate_evaluation_sessions("held-out", {"final-a"}, run)
+
+    def test_evaluation_rejects_empty_groups_and_unsupported_split_names(self):
+        run = {"trainingSessionIds": ["train-a"], "validationSessionIds": ["validation-a"]}
+        for split, sessions in (("train", {"final-a"}), ("held-out", set())):
+            with self.subTest(split=split, sessions=sessions), self.assertRaises(ValueError):
+                evaluation.validate_evaluation_sessions(split, sessions, run)
+
     def test_both_live_provider_targets_must_match_locked_thresholds(self):
         for provider in ("CPUExecutionProvider", "CUDAExecutionProvider"):
             with self.subTest(provider=provider):

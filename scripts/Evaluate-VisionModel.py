@@ -19,6 +19,26 @@ from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
 EXECUTION_PROVIDERS = ("CPUExecutionProvider", "CUDAExecutionProvider")
 
 
+def validate_evaluation_sessions(split: str, session_ids: set[str], run: dict) -> None:
+    if split not in ("validation", "held-out") or not session_ids:
+        raise ValueError("Evaluation requires nonempty validation or held-out capture session groups")
+    groups = []
+    for key in ("trainingSessionIds", "validationSessionIds"):
+        values = run.get(key)
+        if (not isinstance(values, list) or not values
+                or any(not isinstance(value, str) or not value for value in values)
+                or len(set(values)) != len(values)):
+            raise ValueError("Training provenance needs nonempty unique trainingSessionIds and validationSessionIds")
+        groups.append(set(values))
+    training_ids, validation_ids = groups
+    if training_ids & validation_ids:
+        raise ValueError("Training provenance has overlapping training and validation sessions")
+    excluded = training_ids | validation_ids if split == "held-out" else training_ids
+    if session_ids & excluded:
+        raise ValueError("Final held-out sessions overlap training or validation" if split == "held-out"
+                         else "Validation evaluation sessions overlap training")
+
+
 def select_target_provider(requested: str, thresholds: dict) -> str:
     if requested not in EXECUTION_PROVIDERS:
         raise ValueError("Target provider must be CPUExecutionProvider or CUDAExecutionProvider")
@@ -78,8 +98,7 @@ def main() -> int:
         raise ValueError("Evaluation shotProfile.cameraView differs from the model cameraConfiguration")
     if manifest["animationProfile"] != "nba2k27:" + fingerprint:
         raise ValueError("Evaluation sessions use a different shot profile")
-    if args.split == "held-out" and session_ids & set(run.get("trainingSessionIds", []) + run.get("validationSessionIds", [])):
-        raise ValueError("Final held-out sessions overlap training or validation")
+    validate_evaluation_sessions(args.split, session_ids, run)
     session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     expected = [1, manifest["historyLength"], 3, manifest["inputHeight"], manifest["inputWidth"]]
     if len(session.get_inputs()) != 1 or session.get_inputs()[0].shape != expected or session.get_outputs()[0].shape != [1, 5]:

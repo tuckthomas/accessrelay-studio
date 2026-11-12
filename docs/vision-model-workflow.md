@@ -2,6 +2,15 @@
 
 The application has a C# capture/inference integration. It does **not** include a trained NBA 2K no-meter release model. A model, reviewed gameplay labels, independent accuracy evidence and Remote Play hardware trials remain required. Capture-only observation and dataset recording are useful before those artifacts exist.
 
+Training groups must have disjoint capture session IDs. Evaluation also checks the
+model's `training-run.json`: validation may reuse its recorded validation sessions,
+but cannot use training sessions; final held-out evaluation excludes both groups.
+Both provenance lists must be nonempty, unique, and mutually disjoint. Changing a
+labels file's split cannot turn a training session into validation evidence. These
+identity checks do not detect duplicated footage assigned a different session ID.
+Run their dependency-free regression suite with
+`python -m unittest discover -s tools/vision -p test_dataset_validation.py -v`.
+
 The live application uses ONNX Runtime in C# with an explicit **CPU** or **CUDA** provider selection. CUDA is the default. Python below is an **offline** training/export/evaluation tool, not a running service used by AccessRelay.
 
 The current evidence recorder adds meter-on supervision and distinct meter-off validation collection, including multiple synchronized image regions and controller trajectories. **These new enriched clips cannot yet be passed directly to the starter trainer/evaluator.** They require reviewed label conversion, leakage-safe preprocessing and explicit teacher/student profile mapping; the loader rejects `captureEvidence` sessions rather than silently discarding those requirements. See [training evidence design](vision-training-evidence-design.md) for the capture format and unfinished learning workflow.

@@ -24,6 +24,13 @@ from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
 CAMERA_VIEWS = ("2K", "2K Low", "2K Legacy")
 
 
+def validate_session_splits(training_ids: set[str], validation_ids: set[str]) -> None:
+    if not training_ids or not validation_ids:
+        raise ValueError("Training and validation require nonempty capture session groups")
+    if training_ids & validation_ids:
+        raise ValueError("Train/validation capture sessions overlap")
+
+
 def read_json(path: Path) -> dict:
     if path.stat().st_size > 16 * 1024 * 1024:
         raise ValueError(f"JSON metadata is too large: {path}")
@@ -257,8 +264,9 @@ def main() -> int:
         train = load_sessions(args.train, "train", args.history, args.interval_ms, args.assume_legacy_camera_2k)
         validation = load_sessions(args.validation, "validation", args.history, args.interval_ms, args.assume_legacy_camera_2k)
         resolved_camera = select_training_camera(train[4], validation[4], args.camera)
-        if train[2] & validation[2] or train[3] != validation[3]:
-            raise ValueError("Train/validation sessions overlap or use different shot-profile configurations")
+        validate_session_splits(train[2], validation[2])
+        if train[3] != validation[3]:
+            raise ValueError("Train/validation sessions use different shot-profile configurations")
         dataset_fingerprint = train[3]
         training_session_ids, validation_session_ids = sorted(train[2]), sorted(validation[2])
         legacy_camera_session_ids = sorted(session["sessionId"] for _, session in train[0] + validation[0]

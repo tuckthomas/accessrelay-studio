@@ -88,13 +88,15 @@ Real physical device validation remains open. See
       define prompt neutralization without residual stick output.
 - [x] Test varying sample rates, neutral input, bounds, independent sticks, and resets.
 - [ ] Measure latency and validate the native input path before completion.
-- [ ] Push implementation and record its commit SHA and validation here.
+- [x] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending push. Portable filter/controller checks, 52 frontend
+Implementation commit: `0d621148bb225dea2e6966ea35f612d4bfe46e26`. Portable filter/controller checks, 52 frontend
 unit tests, TypeScript/Vite build, browser suite and smoothing workflow, and Windows
 verification cross-compilation passed. Deterministic response checks verify the
 20 ms time constant and sample-rate invariance; these are not device latency measurements.
-Windows runtime and physical comfort/latency validation remain open.
+Windows CI, including the native runtime checks with simulated devices, passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43255997488.
+Real physical comfort/latency validation remains open.
 
 ## 5. Switch and controller navigation
 
@@ -174,8 +176,10 @@ Implementation commits: pending. Marketplace split: deferred until the contract 
 
 ## 10. Dataset provenance and training interoperability
 
-- [ ] Add direct regression coverage for existing train/validation/held-out session
-      separation and evaluate duplicate footage under distinct session IDs.
+- [x] Add direct regression coverage for existing train/validation/held-out session
+      separation. Validation evaluation now rejects training IDs even if labels are relabeled.
+- [ ] Evaluate duplicate footage under distinct session IDs; identity checks alone
+      do not establish footage independence.
 - [ ] Complete reviewed conversion of enriched recorded evidence, preserving source
       identity, teacher/student mapping, camera/profile provenance, and meter exclusion.
 - [ ] Prove meter-on supervision cannot leak into meter-off evaluation and preserve
@@ -184,7 +188,10 @@ Implementation commits: pending. Marketplace split: deferred until the contract 
       reviewed clips before claiming usable gameplay training.
 - [ ] Push independent improvements and record section commit SHAs here.
 
-Implementation commits: pending. Prerequisites: reviewed source clips for functional training validation.
+Implementation commits: provenance guard pending push. Validation: 26 dependency-free
+dataset/provenance regression tests passed; Windows CI now runs the suite. Enriched
+conversion and footage deduplication remain unimplemented. Prerequisites: reviewed
+source clips for functional training validation.
 
 ## 11. Measured model experiments
 
