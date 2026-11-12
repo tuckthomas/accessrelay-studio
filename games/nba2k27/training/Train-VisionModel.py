@@ -5,9 +5,9 @@ No Python process is used by AccessRelay's production capture/inference loop.
 An exported model always has validation=null and cannot arm automatic release.
 targetReleaseTicks labels the captured target GAME PHASE, never physical button-up
 or virtual-controller send time: production compensates video/input delays separately.
-Enriched captureEvidence sessions are acquisition artifacts, not supported training
-inputs: their teacher labels, leakage-safe crops and teacher/student profile mapping
-must be reviewed and converted by a future explicit workflow.
+Raw enriched captureEvidence sessions are acquisition artifacts. Only the explicit
+reviewed conversion workflow admits overlay-disjoint player crops and recorded
+teacher/student configuration mapping; original evidence remains integrity-bound.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ import sys
 
 from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
 from footage_integrity import footage_index, validate_independent
+from evidence_conversion import verify_conversion
 
 CAMERA_VIEWS = ("2K", "2K Low", "2K Legacy")
 
@@ -101,12 +102,13 @@ def load_sessions(directories: list[Path], split: str, history: int, interval_ms
     camera = None
     for directory in directories:
         session = read_json(directory / "session.json")
-        # Fail closed on the marker, even if malformed or null. Silently reading only
-        # frames.bgra would discard teacher/validation provenance and could train a
-        # purported meter-off predictor on visible meter pixels or the wrong profile.
-        # Evaluation imports this same loader, so the restriction also covers held-out
-        # evidence. Do not remove captureEvidence to bypass this compatibility gate.
-        if "captureEvidence" in session:
+        # Conversion keeps the marker and verifies original bytes, purpose, review,
+        # overlay exclusion and configuration mapping. Raw evidence still fails closed.
+        if "trainingConversion" in session:
+            verify_conversion(directory, session)
+        elif any((directory / name).exists() for name in ("source-session.json", "conversion-review.json")):
+            raise ValueError("Converted proof files exist but conversion provenance markers were removed")
+        elif "captureEvidence" in session:
             raise ValueError(
                 "Enriched captureEvidence sessions are not supported by the current trainer/evaluator: "
                 "they need reviewed label conversion, meter-leakage-safe preprocessing and explicit "
