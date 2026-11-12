@@ -68,7 +68,7 @@ sealed class WorkerJob : SafeHandleZeroOrMinusOneIsInvalid
     [StructLayout(LayoutKind.Sequential)] struct Basic { public long ProcessTime, JobTime; public uint Flags; public nuint Minimum, Maximum; public uint ActiveProcessLimit; public nuint Affinity; public uint Priority, Scheduling; }
     [StructLayout(LayoutKind.Sequential)] struct Io { public ulong ReadOps, WriteOps, OtherOps, ReadBytes, WriteBytes, OtherBytes; }
     [StructLayout(LayoutKind.Sequential)] struct Extended { public Basic Basic; public Io Io; public nuint ProcessMemoryLimit, JobMemoryLimit, PeakProcess, PeakJob; }
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern WorkerJob CreateJobObjectW(nint attributes, string? name);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)] static extern WorkerJob CreateJobObjectW(nint attributes, string? name);
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] static extern bool SetInformationJobObject(WorkerJob job, int kind, ref Extended info, int size);
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] static extern bool AssignProcessToJobObject(WorkerJob job, nint process);
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] static extern bool CloseHandle(nint handle);

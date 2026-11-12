@@ -2,7 +2,7 @@ using Microsoft.UI.Xaml;
 
 namespace EliteScriptStudio;
 
-public partial class App : Application
+public partial class App : Microsoft.UI.Xaml.Application
 {
     private DesktopWindow? _window;
 

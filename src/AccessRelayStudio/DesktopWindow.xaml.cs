@@ -348,6 +348,7 @@ public sealed partial class DesktopWindow : Window
         if (_ready && (_hasUnsavedChanges || unfinishedRecording || _vision?.HasActiveTrainingRecording == true) && !_discardClose)
         { Post(new { type = "closeRequested" }); return; }
         _closing = true; _statusTimer.Stop();
+        _assistant?.BeginClosing();
         try
         {
             _assistant?.Stop();

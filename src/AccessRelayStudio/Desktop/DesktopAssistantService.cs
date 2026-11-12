@@ -21,6 +21,7 @@ internal sealed class DesktopAssistantService : IStudioApplicationContext, IAsyn
     private readonly AssistantSession _access = new();
     private readonly OfflineJobManager _offline;
     private AssistantPipeServer? _pipe;
+    private bool _closing;
     private readonly string _bridgePath = Path.Combine(AppContext.BaseDirectory, "Mcp", "AccessRelayStudio.Mcp.exe");
     internal StudioAssistantService Service { get; }
     internal DesktopAssistantService(WindowId owner, DispatcherQueue dispatcher, DesktopControllerService controller,
@@ -76,6 +77,7 @@ internal sealed class DesktopAssistantService : IStudioApplicationContext, IAsyn
         }
     }
     internal void Stop() { _access.Configure(new()); _offline.CancelAll(); }
+    internal void BeginClosing() { _closing = true; Stop(); }
     internal void ForegroundCommand() => _offline.CancelAll();
     private sealed record Captured(StudioProfile Profile, long Revision, long InputGeneration, StudioRuntimeFacts Facts);
     private Captured Capture()
@@ -113,15 +115,17 @@ internal sealed class DesktopAssistantService : IStudioApplicationContext, IAsyn
     }
     private Task<T> OnUi<T>(Func<T> action, CancellationToken cancellation)
     {
+        if (_closing) throw new AssistantException("studioClosing", "Studio is closing.");
         if (_dispatcher.HasThreadAccess) { cancellation.ThrowIfCancellationRequested(); return Task.FromResult(action()); }
         var result = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_dispatcher.TryEnqueue(() =>
         {
+            if (_closing) { result.TrySetException(new AssistantException("studioClosing", "Studio is closing.")); return; }
             if (cancellation.IsCancellationRequested) { result.TrySetCanceled(cancellation); return; }
             try { result.TrySetResult(action()); } catch (Exception error) { result.TrySetException(error); }
         })) result.TrySetException(new AssistantException("studioClosing", "Studio is closing."));
         return result.Task;
     }
     public async ValueTask DisposeAsync()
-    { Stop(); if (_pipe is not null) await _pipe.DisposeAsync(); await _offline.DisposeAsync(); _access.Dispose(); }
+    { BeginClosing(); if (_pipe is not null) await _pipe.DisposeAsync(); await _offline.DisposeAsync(); _access.Dispose(); }
 }
