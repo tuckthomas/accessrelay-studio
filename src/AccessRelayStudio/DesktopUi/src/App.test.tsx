@@ -77,6 +77,13 @@ describe('workspace draft and capture visibility', () => {
 describe('semantic hardware and model announcements', () => {
   const updates = () => screen.getByRole('status', { name: 'Studio status updates' });
   const errors = () => screen.getByRole('alert', { name: 'Studio errors' });
+  it('announces feedback device failures without reading cue statistics', async () => {
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    emit({ type: 'status', status: { controller: { feedback: { error: 'Audio cue unavailable: endpoint closed.', played: 0, dropped: 0 } } } });
+    await waitFor(() => expect(errors().textContent).toBe('Audio cue unavailable: endpoint closed.'));
+    emit({ type: 'status', status: { controller: { feedback: { error: 'Audio cue unavailable: endpoint closed.', played: 10, dropped: 2 } } } });
+    expect(errors().textContent).toBe('Audio cue unavailable: endpoint closed.');
+  });
   it('announces an existing failure on bootstrap without reading ordinary initial state', async () => {
     state.voice.status.error = 'The microphone is unavailable.';
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });

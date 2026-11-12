@@ -13,11 +13,12 @@ export function useStatusAnnouncements(ready: boolean, controller: any, voice: a
     const current = observe(controller, voice, vision, commandError), before = previous.current;
     previous.current = current;
     if (!before) {
-      const alert = [...new Set([current.voiceError, current.visionError, commandError].filter(Boolean))].join(' ');
+      const alert = [...new Set([current.feedbackError, current.voiceError, current.visionError, commandError].filter(Boolean))].join(' ');
       if (alert) setAnnouncement(value => ({ polite: '', alert, commandError, sequence: value.sequence + 1 }));
       return;
     }
     const polite: string[] = [], alerts: string[] = [];
+    if (current.feedbackError && current.feedbackError !== before.feedbackError) alerts.push(current.feedbackError);
     if (current.connected !== before.connected) polite.push(current.connected ? 'Controller connected.' : 'Controller disconnected.');
     if (current.voiceError && current.voiceError !== before.voiceError) alerts.push(current.voiceError);
     else if (current.voicePhase !== before.voicePhase) polite.push(current.voicePhase === 'starting' ? 'Starting voice processing.'
@@ -42,6 +43,7 @@ function observe(controller: any, voice: any, vision: any, commandError: string)
   const session = vision.session || {};
   return {
     connected: !!controller.connected,
+    feedbackError: String(controller.feedback?.error || ''),
     voicePhase: voice.isStarting ? (voice.operation === 'switch' ? 'switching' : 'starting') : voice.isRunning ? 'running' : 'stopped',
     voiceMessage: String(voice.message || ''), voiceError: String(voice.error || voice.clipError || ''),
     running: !!(vision.running || session.running), modelReady: !!session.modelReady,

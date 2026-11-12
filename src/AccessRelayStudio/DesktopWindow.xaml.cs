@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using EliteScriptStudio.Audio;
+using EliteScriptStudio.Core;
 using EliteScriptStudio.Desktop;
 using EliteScriptStudio.Diagnostics;
 using EliteScriptStudio.Input;
@@ -84,7 +85,14 @@ public sealed partial class DesktopWindow : Window
                 {
                     if (_runtime is null)
                     {
-                        _runtime = new StudioRuntime(new EliteInputMonitor(WindowNative.GetWindowHandle(this)), _controller.ActiveProfile, _controller.Deadzone);
+                        var input = new EliteInputMonitor(WindowNative.GetWindowHandle(this));
+                        var feedback = new FeedbackDispatcher(new WindowsFeedbackOutput(input));
+                        try
+                        {
+                            feedback.Configure(_controller.FeedbackSettings);
+                            _runtime = new StudioRuntime(input, _controller.ActiveProfile, _controller.Deadzone, feedback);
+                        }
+                        catch { feedback.Dispose(); input.Dispose(); throw; }
                         _runtime.SetScriptsEnabled(false);
                     }
                 }

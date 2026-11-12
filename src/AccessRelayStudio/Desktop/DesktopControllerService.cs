@@ -18,6 +18,7 @@ internal sealed class DesktopControllerService : IDesktopModule
     private IReadOnlyList<StudioProfile> _profiles = [];
     private StudioProfile _active = StudioProfile.CreateDefault(), _persisted;
     private StickDeadzone _deadzone;
+    private FeedbackSettings _feedbackSettings;
     private CancellationTokenSource? _outputStart;
     private Task? _outputTask;
     private string _notice = "Ready. Controller output and scripts start only when you turn them on.";
@@ -26,6 +27,7 @@ internal sealed class DesktopControllerService : IDesktopModule
 
     internal StudioProfile ActiveProfile => _active;
     internal StickDeadzone Deadzone => _deadzone;
+    internal FeedbackSettings FeedbackSettings => _feedbackSettings;
     internal string ProfileDirectory => _store.DirectoryPath;
 
     internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll)
@@ -33,6 +35,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         _owner = owner; _runtime = runtime; _stopAll = stopAll;
         _store = new ProfileStore(DesktopEnvironment.DataDirectory("ControllerProfiles"));
         _deadzone = _store.LoadStickDeadzone();
+        _feedbackSettings = _store.LoadFeedbackSettings();
         try
         {
             _profiles = _store.LoadAll();
@@ -66,7 +69,8 @@ internal sealed class DesktopControllerService : IDesktopModule
             luaScripts = _active.LuaScripts.Values.OrderBy(script => script.Name).Select(script => new { script.Id, script.Name })
         },
         devices = _runtime()?.Latest?.Input.Devices ?? [], selectedDeviceId = _runtime()?.Latest?.Input.DeviceId,
-        deadzone = _deadzone, controls = ControlMap.All.Select(control => new { id = EnumName(control), label = ControlLabel(control), mask = (uint)control }),
+        deadzone = _deadzone, feedback = _feedbackSettings,
+        controls = ControlMap.All.Select(control => new { id = EnumName(control), label = ControlLabel(control), mask = (uint)control }),
         scripts = Enum.GetValues<ScriptKind>().Select(script => new { id = EnumName(script), label = ScriptLabel(script) }),
         recordingChannels = Enum.GetValues<RecordingChannels>().Where(value => value != RecordingChannels.None)
             .Select(value => new { id = EnumName(value), label = ChannelLabel(value) }),
@@ -94,6 +98,7 @@ internal sealed class DesktopControllerService : IDesktopModule
             supportsBackgroundInput = sample?.Input.SupportsBackgroundInput == true,
             training = runtime?.IsVisionTrainingRecording == true,
             navigation = runtime?.NavigationStatus,
+            feedback = runtime?.FeedbackStatus,
             recording = new { isRecording = recording?.IsRecording == true, hasInput = recording?.HasInput == true,
                 elapsedMs = recording?.ElapsedMs ?? 0, pending = recording?.Pending is { } pending ? RecordingSummary(pending) : null,
                 note = recording?.Note }, message = _notice
@@ -112,6 +117,16 @@ internal sealed class DesktopControllerService : IDesktopModule
                     args.EnumValue<ControlId>("activate"), args.GetProperty("debounceMs").GetInt32()));
                 _notice = args.Flag("enabled") ? "Controller input is navigating Studio; gameplay output is neutral." : "Controller navigation is off. Release controls before returning to the game.";
                 return Runtime.NavigationStatus;
+            case "feedbackSave":
+            {
+                var settings = args.GetProperty("settings").Read<FeedbackSettings>(); settings.Validate();
+                var runtime = Runtime;
+                if (runtime.FeedbackStatus is null) throw new InvalidOperationException("Feedback devices are unavailable.");
+                _store.SaveFeedbackSettings(settings); runtime.ConfigureFeedback(settings); _feedbackSettings = settings;
+                _notice = "Feedback preferences saved."; break;
+            }
+            case "feedbackTest":
+                return new { queued = Runtime.TestFeedback(), status = Runtime.FeedbackStatus };
             case "deviceSelect": Runtime.SelectController(args.Text("id")); _notice = "Input controller selected."; break;
             case "outputStart": await StartOutputAsync(); break;
             case "outputStop": StopOutput(); break;

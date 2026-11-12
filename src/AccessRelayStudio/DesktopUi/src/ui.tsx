@@ -124,9 +124,11 @@ export function Field({ label, hint, children, className = '' }: { label: ReactN
 export function Toggle({ label, description, checked, onChange, disabled = false }: {
   label: ReactNode; description?: ReactNode; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean;
 }) {
-  return <label className={'toggle-row' + (disabled ? ' is-disabled' : '')}><span><span className="toggle-label">{label}</span>
-    {description && <span className="field-hint">{description}</span>}</span>
-    <span className="switch"><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} disabled={disabled} />
+  const id = useId();
+  return <label className={'toggle-row' + (disabled ? ' is-disabled' : '')}><span><span id={id + '-label'} className="toggle-label">{label}</span>
+    {description && <span id={id + '-description'} className="field-hint">{description}</span>}</span>
+    <span className="switch"><input type="checkbox" aria-labelledby={id + '-label'} aria-describedby={description ? id + '-description' : undefined}
+      checked={checked} onChange={event => onChange(event.target.checked)} disabled={disabled} />
       <span className="switch-track" aria-hidden="true" /></span></label>;
 }
 export function Badge({ tone = 'neutral', children }: { tone?: 'success' | 'warning' | 'neutral' | 'danger' | 'mint'; children: ReactNode }) {

@@ -53,6 +53,7 @@ internal static class RuntimeAccessibilityChecks
         Console.WriteLine("SUCCESS: real runtime sticky composition, Stop, profile/device changes, disconnect and raw recording with simulated devices.");
         Smoothing();
         Navigation();
+        Feedback();
     }
 
     private static void Smoothing()
@@ -136,6 +137,47 @@ internal static class RuntimeAccessibilityChecks
         if (runtime.NavigationStatus.Enabled || runtime.NavigationStatus.Events.Length != 0)
             throw new InvalidOperationException("Stop retained controller navigation.");
         Console.WriteLine("SUCCESS: runtime switch navigation, neutral gameplay output, ordered bridge history, release gate, profile/disconnect resets and Stop.");
+    }
+
+    private static void Feedback()
+    {
+        using var input = new EliteInputMonitor();
+        var output = new CueOutput();
+        var feedback = new FeedbackDispatcher(output);
+        feedback.Configure(new(AudioEnabled: true));
+        var profile = StudioProfile.CreateDefault();
+        using var runtime = new StudioRuntime(input, profile, new StickDeadzone(0, 0), feedback);
+        runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Feedback runtime did not connect.");
+        runtime.Apply(StudioProfile.CreateDefault("Another setup"));
+        Wait(() => output.Cues.Contains(FeedbackCueKind.ProfileChanged), "Profile change did not emit feedback.");
+        if (!runtime.TestFeedback()) throw new InvalidOperationException("Explicit feedback test was not queued.");
+        Wait(() => output.Cues.Contains(FeedbackCueKind.Test), "Explicit test cue was not delivered.");
+        runtime.ConfigureVision(VisionSettings.Default with { MaximumFrameAgeMs = 500, MaximumLatenessMs = 100 });
+        runtime.BeginVisionSession();
+        if (!runtime.SetVisionArmed(true)) throw new InvalidOperationException("Synthetic feedback vision session did not arm.");
+        input.SetState(default(ControllerState) with { Buttons = (ushort)ControlId.X });
+        Wait(() => runtime.VisionStatus.ShotToken != 0, "Synthetic feedback shot did not begin.");
+        var shot = runtime.VisionStatus;
+        long now = Stopwatch.GetTimestamp();
+        if (!runtime.SubmitVisionPrediction(new(shot.SessionGeneration, shot.ShotToken, 1, now, now, 200, 1, 0, true)))
+            throw new InvalidOperationException("Synthetic feedback prediction was rejected.");
+        Wait(() => output.Cues.Contains(FeedbackCueKind.PlayerLocked), "Accepted player lock did not emit feedback.");
+        Wait(() => runtime.VisionStatus.AutomatedReleases == 1, "Synthetic feedback deadline did not execute.");
+        Wait(() => output.Cues.Contains(FeedbackCueKind.Released), "Completed release did not emit feedback.");
+        if (output.Cues.Count(kind => kind == FeedbackCueKind.Released) != 1)
+            throw new InvalidOperationException("Polling and deadline workers duplicated a release cue.");
+        runtime.StopOutput(stopScripts: true);
+        Console.WriteLine("SUCCESS: actual runtime profile, accepted player lock and completed release feedback with isolated simulated cue output.");
+    }
+
+    private sealed class CueOutput : IFeedbackOutput
+    {
+        internal readonly System.Collections.Concurrent.ConcurrentQueue<FeedbackCueKind> Cues = new();
+        public Task<string?> PlayAsync(FeedbackCue cue, FeedbackSettings settings, CancellationToken cancellation)
+        { cancellation.ThrowIfCancellationRequested(); Cues.Enqueue(cue.Kind); return Task.FromResult<string?>(null); }
+        public void Stop() { }
+        public void Dispose() { }
     }
 
     private static void Wait(Func<bool> condition, string message)

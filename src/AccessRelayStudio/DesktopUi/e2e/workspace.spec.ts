@@ -1,4 +1,23 @@
 import { expect, test } from '@playwright/test';
+test('nonvisual feedback stays opt-in and persists independently of controller setup selection', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('tab', { name: 'Accessibility' }).click();
+  await expect(page.getByRole('checkbox', { name: 'Audio cues', exact: true })).not.toBeChecked();
+  await expect(page.getByRole('button', { name: 'Test feedback', exact: true })).toBeDisabled();
+  await page.getByRole('checkbox', { name: 'Audio cues', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Controller pulses', exact: true }).check();
+  await page.getByLabel('Cue volume', { exact: true }).fill('30');
+  await page.getByRole('button', { name: 'Save feedback preferences', exact: true }).click();
+  await expect(page.getByText('Feedback preferences saved.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Test feedback', exact: true }).click();
+  await expect(page.getByText('Design preview only. Run the installed app to hear or feel feedback.')).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('tab', { name: 'Accessibility' }).click();
+  await expect(page.getByRole('checkbox', { name: 'Audio cues', exact: true })).toBeChecked();
+  await expect(page.getByLabel('Cue volume', { exact: true })).toHaveValue('30');
+});
 test('smoothing saves independently per stick and persists across workspace navigation', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Controller', exact: true }).click();

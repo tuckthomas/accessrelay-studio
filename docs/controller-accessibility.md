@@ -1,5 +1,31 @@
 # Controller accessibility
 
+## Nonvisual feedback
+
+In **Controller → Accessibility → Nonvisual feedback**, enable audio cues,
+controller pulses, or both. Both are off by default. Save preferences before using
+**Test feedback**. These preferences apply to all setups and are stored separately
+from exported controller profiles.
+
+Profile changes use a low ascending tone pair and a 120 ms pulse, the first accepted
+player lock in a physical shot uses a short tone/40 ms pulse, and an accepted release
+output uses a higher tone pair/80 ms pulse. A cue reports a host event, not proof of
+an in-game outcome or calibrated end-to-end latency. Volume and pulse intensity are
+independent; rumble intensity is limited to 50%.
+
+Sounds use the Windows default playback endpoint. Pulses use the selected physical
+WinRT gamepad's vibration interface, never the virtual output. Unsupported or
+disconnected devices are reported through status announcements. Some drivers expose
+the interface without working motors, so test the physical response before relying
+on it. The browser preview saves synthetic preferences but does not play native cues.
+
+The input and release threads only publish to an eight-item queue. One background
+worker performs device I/O, suppresses repeated observations, limits cue frequency,
+and discards events older than 500 ms. Stop, context changes, lost tracking, disconnect
+and configuration changes cancel active/queued feedback. Queue delay/error counters
+are reported separately from controller output; a feedback device failure does not
+stop input. Device timing and comfort still require real hardware validation.
+
 ## Switch navigation
 
 Choose **Switch navigation** in the top bar. One-switch mode advances focus at the

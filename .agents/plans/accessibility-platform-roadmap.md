@@ -10,9 +10,10 @@ operator activation must remain compatible.
 
 Current checkpoint: sections 1–2 are complete. Sections 3–4 have shipped code and
 passing Windows CI with simulated devices; physical-device acceptance remains open.
-Section 5 implementation is being validated and pushed before continuing section 6.
+Section 5 is implemented and passed Windows CI with simulated inputs. Section 6
+implementation is being validated and pushed before continuing section 7.
 Section 10 has the session-provenance guard implemented; its conversion/data work
-remains open. Sections 6–9 and 11–12 are queued, not implemented.
+remains open. Sections 7–9 and 11–12 are queued, not implemented.
 
 ## Delivery and evidence
 
@@ -116,27 +117,35 @@ Real physical comfort/latency validation remains open.
       navigation does not accidentally activate gameplay. Keep browser preview useful.
 - [x] Test dynamic controls, dialogs, repeat edges, Stop, disconnect, and profile changes.
 - [ ] Validate native gamepad/adaptive-switch behavior on Windows before completion.
-- [ ] Push implementation and record its commit SHA and validation here.
+- [x] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending push. Validation: 54 frontend unit tests, 16 Chromium
+Implementation commit: `0b27dc0f67d65c3a50efbb5713cef249be421cce`. Validation: 54 frontend unit tests, 16 Chromium
 browser tests, portable controller checks, and Windows verification cross-compilation
 passed. Tests exercise keyboard scanning, native bridge ordering, stale pre-activation
 snapshots, lost history, sliders/selects, nested scope, repeat suppression and exits.
 New Windows runtime tests verify physical edges and neutral gameplay with simulated
-devices. Windows CI and real adaptive-switch/gamepad acceptance remain pending.
+devices. Windows CI passed: https://github.com/tuckthomas/accessrelay-studio/actions/runs/43272516594.
+Real adaptive-switch/gamepad acceptance remains pending.
 
 ## 6. Nonvisual feedback
 
-- [ ] Add independently configurable earcons and haptic cues for meaningful profile and
+- [x] Add independently configurable earcons and haptic cues for meaningful profile and
       vision events, with rate limiting, volume/intensity controls, and a test action.
-- [ ] Detect device capabilities and handle unavailable audio/rumble without changing
+- [x] Handle missing selected gamepads and unavailable audio/rumble APIs without changing
       controller output or blocking capture, audio callbacks, or deadline processing.
-- [ ] Keep visual physical-input feedback separate from the new event feedback service.
-- [ ] Test deduplication, cancellation, disabled behavior, and unsupported devices.
+- [ ] Verify motor capability and actual actuation on physical target devices; exposing
+      the WinRT vibration interface does not prove a driver has working motors.
+- [x] Keep visual physical-input feedback separate from the new event feedback service.
+- [x] Test deduplication, cancellation, disabled behavior, and unsupported devices.
 - [ ] Validate audio/rumble timing and comfort on real Windows devices.
 - [ ] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: pending.
+Implementation commit: pending. Validation: portable feedback/controller tests,
+56 frontend unit tests, the existing 16 browser workflows plus the new feedback
+workflow, Windows verification cross-compilation, and compilation of real audio
+sources against NAudio passed. The bounded worker is tested with fake blocked/failing
+devices; Windows runtime event-hook tests use simulated cue outputs. Actual sound,
+rumble capability, timing and comfort require real Windows devices.
 
 ## 7. Co-pilot input merging
 

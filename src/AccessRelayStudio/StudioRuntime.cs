@@ -19,6 +19,9 @@ internal sealed class StudioRuntime : IDisposable
     private readonly StickyButtons _sticky = new();
     private readonly StickSmoother _smoother = new();
     private readonly SwitchNavigationInput _navigation = new();
+    private readonly FeedbackDispatcher? _feedback;
+    private FeedbackIdentity? _lockedFeedback;
+    private long _profileFeedbackToken, _testFeedbackToken, _lastReleaseFeedback;
     private bool _navigationNeedsNeutral;
     private readonly object _sync = new();
     private readonly CancellationTokenSource _stop = new();
@@ -48,6 +51,10 @@ internal sealed class StudioRuntime : IDisposable
     public double? RecentOutputHandoffMs { get { lock (_sync) return (_output as UsbipXboxOutput)?.RecentHandoffMs; } }
     public VisionStatusSnapshot VisionStatus { get { lock (_sync) return _vision.Status; } }
     internal SwitchNavigationSnapshot NavigationStatus { get { lock (_sync) return _navigation.Snapshot(_clock.ElapsedMilliseconds); } }
+    internal FeedbackStatus? FeedbackStatus => _feedback?.Status;
+    internal void ConfigureFeedback(FeedbackSettings settings) => (_feedback ?? throw new InvalidOperationException("Feedback devices are unavailable.")).Configure(settings);
+    internal bool TestFeedback() => _feedback?.TryPublish(FeedbackCueKind.Test, new(-1, Interlocked.Increment(ref _testFeedbackToken)),
+        _latest?.Input.ConnectionVersion ?? 0) == true;
 
     internal void ConfigureNavigation(SwitchNavigationSettings settings)
     {
@@ -70,21 +77,21 @@ internal sealed class StudioRuntime : IDisposable
 
     public void ConfigureVision(VisionSettings settings)
     {
-        lock (_sync) _vision.Configure(settings);
+        lock (_sync) { _feedback?.Stop(); _vision.Configure(settings); }
         _releaseScheduler.Signal();
     }
 
     public long BeginVisionSession()
     {
         long generation;
-        lock (_sync) generation = _vision.BeginSession();
+        lock (_sync) { _feedback?.Stop(); generation = _vision.BeginSession(); }
         _releaseScheduler.Signal();
         return generation;
     }
 
     public void InvalidateVisionSession(string reason)
     {
-        lock (_sync) _vision.Invalidate(reason, sourceLost: true, disarm: true);
+        lock (_sync) { _feedback?.Stop(); _vision.Invalidate(reason, sourceLost: true, disarm: true); }
         _releaseScheduler.Signal();
     }
 
@@ -99,7 +106,7 @@ internal sealed class StudioRuntime : IDisposable
                 InvalidateVisionLocked("Arming requires available input/output and no recording or conflicting macro.");
                 return false;
             }
-            accepted = _vision.SetArmed(armed);
+            _feedback?.Stop(); accepted = _vision.SetArmed(armed);
         }
         _releaseScheduler.Signal();
         return accepted;
@@ -108,7 +115,18 @@ internal sealed class StudioRuntime : IDisposable
     public bool SubmitVisionPrediction(VisionPrediction prediction)
     {
         bool accepted;
-        lock (_sync) accepted = _vision.Submit(prediction, Stopwatch.GetTimestamp());
+        lock (_sync)
+        {
+            var before = _vision.Status;
+            accepted = _vision.Submit(prediction, Stopwatch.GetTimestamp());
+            CancelLostLockFeedbackLocked(before);
+            var identity = new FeedbackIdentity(prediction.SessionGeneration, prediction.ShotToken);
+            if (accepted && _lockedFeedback != identity)
+            {
+                _lockedFeedback = identity;
+                _feedback?.TryPublish(FeedbackCueKind.PlayerLocked, identity, _latest?.Input.ConnectionVersion ?? 0);
+            }
+        }
         _releaseScheduler.Signal();
         return accepted;
     }
@@ -124,6 +142,7 @@ internal sealed class StudioRuntime : IDisposable
             _visionTrainingRecording = recording;
             _sticky.Reset();
             _smoother.Reset();
+            _feedback?.Stop();
             _vision.SetTrainingRecording(recording);
         }
         _releaseScheduler.Signal();
@@ -151,9 +170,10 @@ internal sealed class StudioRuntime : IDisposable
         }
     }
 
-    public StudioRuntime(EliteInputMonitor input, StudioProfile initial, StickDeadzone stickDeadzone)
+    public StudioRuntime(EliteInputMonitor input, StudioProfile initial, StickDeadzone stickDeadzone, FeedbackDispatcher? feedback = null)
     {
         _input = input;
+        _feedback = feedback;
         _stickDeadzone = stickDeadzone;
         _visionProfile = initial;
         _engine.Apply(initial);
@@ -169,12 +189,14 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             RequireTrainingStoppedLocked("applying or changing a macro profile");
+            bool changed = _visionProfile.Id != profile.Id;
             _engine.Apply(profile);
             _sticky.Configure(profile.StickyControls);
             _smoother.Configure(profile.Smoothing);
             _visionProfile = profile;
             _navigation.ResetInput();
             InvalidateVisionLocked("Macro profile changed. Arm vision again after releasing the shoot button.");
+            if (changed) _feedback?.TryPublish(FeedbackCueKind.ProfileChanged, new(0, ++_profileFeedbackToken), _latest?.Input.ConnectionVersion ?? 0);
         }
     }
 
@@ -314,6 +336,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void DisconnectOutput(string status = "Virtual output off")
     {
+        _lastReleaseFeedback = _vision.Status.AutomatedReleases;
         if (_navigation.Enabled) { _navigation.Stop(); _navigationNeedsNeutral = true; }
         _sticky.Reset();
         _smoother.Reset();
@@ -417,10 +440,13 @@ internal sealed class StudioRuntime : IDisposable
                             manual);
                     }
                     state = _stickDeadzone.Apply(state);
+                    var beforeVision = _vision.Status;
                     state = _vision.Sample(input.State, state, input.IsConnected, _output?.IsAvailable == true,
                         _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp());
+                    CancelLostLockFeedbackLocked(beforeVision);
                     _latestInputSampleTicks = sampleTicks;
                     WriteTracedOutputLocked(state, VisionTrainingTraceKind.Poll, sampleTicks, input);
+                    PublishReleaseFeedbackLocked();
                     Volatile.Write(ref _latest, new(input, state, _output is not null, _outputStatus,
                         _engine.Status, mean, p95, p99, paddlePulse, lastPaddles, visible));
                 }
@@ -461,7 +487,7 @@ internal sealed class StudioRuntime : IDisposable
         try { StopOutput(stopScripts: true); }
         finally
         {
-            _input.Dispose();
+            try { _feedback?.Dispose(); } finally { _input.Dispose(); }
             _stop.Dispose();
         }
     }
@@ -483,6 +509,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void InvalidateVisionLocked(string reason)
     {
+        _feedback?.Stop();
         _vision.Invalidate(reason, disarm: true);
         _releaseScheduler.Signal();
     }
@@ -496,11 +523,14 @@ internal sealed class StudioRuntime : IDisposable
     {
         lock (_sync)
         {
-            if (_stop.IsCancellationRequested || !_vision.TryAdvanceDeadline(timestamp)) return;
+            if (_stop.IsCancellationRequested) return;
+            var before = _vision.Status;
+            if (!_vision.TryAdvanceDeadline(timestamp)) { CancelLostLockFeedbackLocked(before); return; }
             try
             {
                 WriteTracedOutputLocked(_vision.Output, VisionTrainingTraceKind.DeadlineOutput,
                     _latestInputSampleTicks, _latest?.Input ?? default);
+                PublishReleaseFeedbackLocked();
                 if (_latest is { } previous)
                     Volatile.Write(ref _latest, previous with { Output = _vision.Output, OutputActive = _output is not null });
             }
@@ -510,6 +540,22 @@ internal sealed class StudioRuntime : IDisposable
                 catch { _outputStatus = "Vision release stopped after an output error."; }
             }
         }
+    }
+
+    private void PublishReleaseFeedbackLocked()
+    {
+        var status = _vision.Status;
+        if (status.AutomatedReleases == _lastReleaseFeedback) return;
+        _lastReleaseFeedback = status.AutomatedReleases;
+        if (_output is not null)
+            _feedback?.TryPublish(FeedbackCueKind.Released, new(status.SessionGeneration, status.ShotToken), _latest?.Input.ConnectionVersion ?? 0);
+    }
+
+    private void CancelLostLockFeedbackLocked(VisionStatusSnapshot before)
+    {
+        if (before.ShotToken != 0 && _vision.Status.ShotToken == 0
+            && before.State is VisionRunState.TrackingShot or VisionRunState.ReleaseScheduled)
+            _feedback?.Stop();
     }
 
     private void WriteTracedOutputLocked(ControllerState state, VisionTrainingTraceKind kind,

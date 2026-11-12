@@ -63,6 +63,13 @@ public sealed class EliteInputMonitor : IDisposable
         Interlocked.Exchange(ref _scanRequested, 1);
     }
 
+    internal Action<double>? CreateVibrationSink(long connectionVersion)
+    {
+        var target = Volatile.Read(ref _gamepad);
+        if (target is null || Volatile.Read(ref _connectionVersion) != connectionVersion) return null;
+        return strength => target.Vibration = new GamepadVibration { LeftMotor = strength, RightMotor = strength * .5 };
+    }
+
     // WGI cannot disambiguate a wired Xbox 360 from Studio's matching virtual
     // identity. Reserve that identity before creating an output device.
     public void SetVirtualOutputActive(bool active)

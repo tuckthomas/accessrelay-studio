@@ -6,6 +6,22 @@ afterEach(cleanup);
 const setup = () => structuredClone(previewState.controller);
 
 describe('controller workflows', () => {
+  it('keeps feedback opt-in, saves independent channel levels and requires saving before a test cue', async () => {
+    const state = setup(), command = vi.fn().mockResolvedValue({ queued: true });
+    render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Accessibility' }));
+    expect((screen.getByLabelText('Audio cues') as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole('button', { name: 'Test feedback' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText('Audio cues')); fireEvent.click(screen.getByLabelText('Controller pulses'));
+    fireEvent.change(screen.getByLabelText('Cue volume'), { target: { value: '30' } });
+    fireEvent.change(screen.getByLabelText('Pulse intensity'), { target: { value: '20' } });
+    expect((screen.getByRole('button', { name: 'Test feedback' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Save feedback preferences' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('feedbackSave', { settings: { audioEnabled: true, hapticsEnabled: true, volume: .3, strength: .2 } }));
+    await screen.findByText('Feedback preferences saved.');
+    fireEvent.click(screen.getByRole('button', { name: 'Test feedback' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('feedbackTest'));
+  });
   it('saves independent smoothing settings without losing unsaved sticky choices', async () => {
     const state = setup(), command = vi.fn().mockResolvedValue(null);
     render(<ControllerPage state={state} status={state.status} command={command} />);

@@ -58,7 +58,8 @@ export function ControllerPage({ state, status, command }: PageProps) {
     {tab === 'lua' && <LuaEditor state={state} status={live} command={command} />}
     {tab === 'input' && <InputResponse state={state} status={live} command={command} />}
     {tab === 'accessibility' && <div className="page-stack"><StickyInput key={'sticky-' + profile.id} state={state} status={live} command={command} />
-      <SmoothingInput key={'smoothing-' + profile.id} state={state} status={live} command={command} /></div>}
+      <SmoothingInput key={'smoothing-' + profile.id} state={state} status={live} command={command} />
+      <FeedbackInput state={state} status={live} command={command} /></div>}
     <details className="details-section"><summary>Manage controller setups</summary><div className="row"><Button onClick={() => nameAction('profileRename')}><Icon name="pencil" size={16} />Rename</Button>
       <Button onClick={() => transition(() => nameAction('profileDuplicate'))}><Icon name="copy" size={16} />Duplicate</Button><Button onClick={() => transition(() => perform('profileImport'))}><Icon name="upload" size={16} />Import setup</Button>
       <Button onClick={() => perform('profileExport')}><Icon name="download" size={16} />Export setup</Button><Button variant="ghost" disabled={(state.profiles || []).length < 2} onClick={() => setDeleteProfile(true)}><Icon name="trash" size={16} />Delete setup</Button></div></details>
@@ -121,6 +122,37 @@ function SmoothingInput({ state, status, command }: PageProps) {
         try { await command('smoothingSave', { settings: submitted }); setBaseline(JSON.stringify(submitted)); setMessage('Stick smoothing saved.'); }
         catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
       }}>Save smoothing</Button><Button disabled={!dirty || locked} onClick={() => { setSettings(JSON.parse(saved)); setBaseline(saved); setError(''); }}>Discard smoothing edits</Button></div>
+    </div>
+  </Card>;
+}
+
+function FeedbackInput({ state, status, command }: PageProps) {
+  const saved = JSON.stringify(state.feedback || { audioEnabled: false, hapticsEnabled: false, volume: .2, strength: .15 });
+  const [settings, setSettings] = useState(JSON.parse(saved)), [baseline, setBaseline] = useState(saved);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
+  const dirty = JSON.stringify(settings) !== baseline;
+  useUnsavedChanges(dirty);
+  useEffect(() => { if (!dirty) { setSettings(JSON.parse(saved)); setBaseline(saved); } }, [saved]);
+  return <Card title="Nonvisual feedback" description="Optional sounds and controller pulses for profile changes, player lock and completed vision releases. Preferences apply to all controller setups.">
+    <div className="stack">
+      <Toggle label="Audio cues" description="Play short tones through the Windows default playback device." checked={settings.audioEnabled} disabled={busy} onChange={audioEnabled => setSettings((value: any) => ({ ...value, audioEnabled }))} />
+      <Field label="Cue volume" hint={Math.round(settings.volume * 100) + '%'}><input type="range" min={0} max={100} step={1} disabled={busy} value={settings.volume * 100} onChange={event => setSettings((value: any) => ({ ...value, volume: Number(event.target.value) / 100 }))} /></Field>
+      <Toggle label="Controller pulses" description="Use the selected physical gamepad's supported rumble motors. Test before relying on this cue." checked={settings.hapticsEnabled} disabled={busy} onChange={hapticsEnabled => setSettings((value: any) => ({ ...value, hapticsEnabled }))} />
+      <Field label="Pulse intensity" hint={Math.round(settings.strength * 100) + '%'}><input type="range" min={0} max={50} step={1} disabled={busy} value={settings.strength * 100} onChange={event => setSettings((value: any) => ({ ...value, strength: Number(event.target.value) / 100 }))} /></Field>
+      <p className="subtle">Profile changes use two ascending tones, player lock a short tone, and release a higher pair. Pulses last 40–120 ms. Stop everything, context changes and saving preferences cancel pending cues. Delivery timing depends on the audio/controller device.</p>
+      {status.feedback?.error && <Notice tone="danger" announce={false}>{status.feedback.error}</Notice>}
+      {error && <Notice tone="danger">{error}</Notice>}{message && <Notice>{message}</Notice>}
+      <div className="row"><Button variant="primary" busy={busy} disabled={!dirty} onClick={async () => {
+        const submitted = { ...settings }; setBusy(true); setError('');
+        try { await command('feedbackSave', { settings: submitted }); setBaseline(JSON.stringify(submitted)); setMessage('Feedback preferences saved.'); }
+        catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+      }}>Save feedback preferences</Button>
+      <Button disabled={busy || dirty || (!settings.audioEnabled && !settings.hapticsEnabled)} onClick={async () => {
+        setBusy(true); setError('');
+        try { const result = await command('feedbackTest'); setMessage(result?.message || (result?.queued ? 'Test cue queued. Listen or check the selected controller.' : 'The test cue is disabled or rate-limited.')); }
+        catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+      }}>Test feedback</Button>
+      <Button disabled={!dirty || busy} onClick={() => { setSettings(JSON.parse(saved)); setBaseline(saved); setError(''); }}>Discard feedback edits</Button></div>
     </div>
   </Card>;
 }

@@ -14,6 +14,7 @@ public sealed class ProfileStore
     private const int MaxFileBytes = 12 * 1024 * 1024;
     private const string SelectionFile = "active-macro-profile.txt";
     private const string StickDeadzoneFile = "stick-deadzones.json";
+    private const string FeedbackFile = "accessibility-feedback.json";
     private sealed record ProfileDocument(int Version, StudioProfile Profile);
 
     private static readonly JsonSerializerOptions Format = new()
@@ -36,6 +37,25 @@ public sealed class ProfileStore
     }
 
     public string DirectoryPath { get; }
+
+    internal FeedbackSettings LoadFeedbackSettings()
+    {
+        try
+        {
+            using var stream = File.Open(Path.Combine(DirectoryPath, FeedbackFile), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            if (stream.Length > 4096) return new();
+            var settings = JsonSerializer.Deserialize<FeedbackSettings>(stream, Format);
+            if (settings is null) return new();
+            settings.Validate(); return settings;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return new(); }
+    }
+
+    internal void SaveFeedbackSettings(FeedbackSettings settings)
+    {
+        settings.Validate();
+        WriteAtomically(Path.Combine(DirectoryPath, FeedbackFile), stream => JsonSerializer.Serialize(stream, settings, Format));
+    }
 
     public Guid? LoadSelectedId()
     {
