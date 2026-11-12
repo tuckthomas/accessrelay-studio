@@ -1,0 +1,28 @@
+name: Windows MCP integration
+on:
+  push:
+    paths:
+      - 'src/AccessRelayStudio.Application/**'
+      - 'src/AccessRelayStudio.Mcp/**'
+      - 'tools/assistant/**'
+      - '.github/workflows/mcp.yml'
+  pull_request:
+    paths:
+      - 'src/AccessRelayStudio.Application/**'
+      - 'src/AccessRelayStudio.Mcp/**'
+      - 'tools/assistant/**'
+      - '.github/workflows/mcp.yml'
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify native pipe identity, SDK clients, job quotas and cancellation
+        shell: pwsh
+        run: dotnet run --project ./tools/assistant/Verification/AssistantVerification.csproj -c Release -- --python (Get-Command python).Source

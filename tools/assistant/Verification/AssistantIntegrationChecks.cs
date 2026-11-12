@@ -3,6 +3,7 @@ using System.Text.Json;
 using EliteScriptStudio.Application;
 using EliteScriptStudio.Core;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 
 static class AssistantIntegrationChecks
 {
@@ -48,7 +49,7 @@ static class AssistantIntegrationChecks
         Check(disabled.IsError == true, "Disabled MCP access succeeded.");
         access.Configure(new(true, true));
         var state = await client.CallToolAsync("read_studio_status", cancellationToken: timeout.Token);
-        Check(state.IsError != true && state.StructuredContent is not null, "SDK structured status failed.");
+        Check(state.IsError != true && state.StructuredContent is not null, "SDK structured status failed: " + Describe(state));
         var resources = await client.ListResourcesAsync(cancellationToken: timeout.Token);
         Check(resources.Any(item => item.Uri == "accessrelay://docs/lua-contract"), "Lua resource missing.");
         var prompts = await client.ListPromptsAsync(cancellationToken: timeout.Token); Check(prompts.Count >= 5, "Coaching prompts missing.");
@@ -59,7 +60,8 @@ static class AssistantIntegrationChecks
         await using var legacy = await McpClient.CreateAsync(new StdioClientTransport(new() { Command = command, Arguments = legacyArgs,
             Name = "AccessRelay legacy verification", InheritEnvironmentVariables = true }),
             new McpClientOptions { ProtocolVersion = "2025-11-25" }, cancellationToken: timeout.Token);
-        Check((await legacy.CallToolAsync("read_studio_status", cancellationToken: timeout.Token)).IsError != true, "Legacy client handshake compatibility failed.");
+        var legacyStatus = await legacy.CallToolAsync("read_studio_status", cancellationToken: timeout.Token);
+        Check(legacyStatus.IsError != true, "Legacy client tool-call failed: " + Describe(legacyStatus));
         string cancelPipe = "AccessRelayCancel." + Guid.NewGuid().ToString("N");
         var observedCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var waitingServer = new AssistantPipeServer(async (_, cancellation) =>
@@ -70,4 +72,5 @@ static class AssistantIntegrationChecks
         Console.WriteLine("PASS isolated actual-engine Lua, hold/stop/disconnect/budgets, draft review/undo/staleness, bounded framing, real SDK stdio tools/resources/prompts and current-user IPC.");
     }
     static void Check(bool value, string message) { if (!value) throw new Exception(message); }
+    static string Describe(CallToolResult result) => string.Join(" ", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
 }
