@@ -64,11 +64,14 @@ static class AssistantIntegrationChecks
         Check(legacyStatus.IsError != true, "Legacy client tool-call failed: " + Describe(legacyStatus));
         string cancelPipe = "AccessRelayCancel." + Guid.NewGuid().ToString("N");
         var observedCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var waitingServer = new AssistantPipeServer(async (_, cancellation) =>
-        { try { await Task.Delay(Timeout.Infinite, cancellation); } catch (OperationCanceledException) { observedCancellation.TrySetResult(); throw; } return null; }, cancelPipe);
+        await using var waitingServer = new AssistantPipeServer(async (request, cancellation) =>
+        { if (request.Operation == "ping") return new { ready = true };
+            try { await Task.Delay(Timeout.Infinite, cancellation); } catch (OperationCanceledException) { observedCancellation.TrySetResult(); throw; } return null; }, cancelPipe);
         using var abandon = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
         try { await AssistantWire.CallAsync("wait", new { }, abandon.Token, cancelPipe); } catch (OperationCanceledException) { }
         await observedCancellation.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var recovered = await AssistantWire.CallAsync("ping", new { }, timeout.Token, cancelPipe);
+        Check(recovered.Ok, "The private endpoint did not recover after an abandoned connection.");
         Console.WriteLine("PASS isolated actual-engine Lua, hold/stop/disconnect/budgets, draft review/undo/staleness, bounded framing, real SDK stdio tools/resources/prompts and current-user IPC.");
     }
     static void Check(bool value, string message) { if (!value) throw new Exception(message); }

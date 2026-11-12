@@ -108,7 +108,10 @@ public sealed class AssistantPipeServer : IAsyncDisposable
             finally
             {
                 if (!_stop.IsCancellationRequested)
-                { try { if (_listener.IsConnected) _listener.Disconnect(); } catch (IOException) { } }
+                {
+                    // EOF changes IsConnected to false but leaves a broken instance that still needs Disconnect.
+                    try { _listener.Disconnect(); } catch (Exception error) when (error is IOException or InvalidOperationException) { }
+                }
             }
         }
     }
