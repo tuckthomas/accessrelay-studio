@@ -21,13 +21,18 @@ labels, or apply a draft without the user reviewing it in Studio.
 
 ## 2. Shared application services and diagnostic resources
 
-- [ ] Add a portable application project referencing the engine, with typed host
+- [x] Add a portable application project referencing the engine, with typed host
       context and serialized, UI-independent use cases; no desktop/WinUI dependency.
-- [ ] Expose bounded, redacted effective configuration, connection/runtime status,
+- [x] Expose bounded, redacted effective configuration, connection/runtime status,
       actionable blocker explanations and versioned capability/contract resources.
-- [ ] Add assistant prompts for accommodation planning, diagnosis, dataset coverage,
+- [x] Add assistant prompts for accommodation planning, diagnosis, dataset coverage,
       personal-sound coaching and experimental evidence review, grounded in actual APIs.
 - [ ] Test missing/stale contexts, redaction, bounds and dependency direction.
+
+Shared-service implementation: `a65d0fe55d4bdfdc8b7eb1190ee662484c638350`.
+Portable checks passed for diagnostic projections, monotonic expiry, permissions,
+revocation during reads and the embedded actual Lua contract. Integration and
+compiled dependency checks remain part of the later validation steps.
 
 ## 3. Configuration drafts and real-engine simulation
 
