@@ -72,6 +72,13 @@ static class AssistantIntegrationChecks
         await observedCancellation.Task.WaitAsync(TimeSpan.FromSeconds(3));
         var recovered = await AssistantWire.CallAsync("ping", new { }, timeout.Token, cancelPipe);
         Check(recovered.Ok, "The private endpoint did not recover after an abandoned connection.");
+        string deliveryPipe = "AccessRelayDelivery." + Guid.NewGuid().ToString("N"), payload = new('x', 100_000);
+        await using var deliveryServer = new AssistantPipeServer((_, _) => Task.FromResult<object?>(new { payload }), deliveryPipe);
+        for (int count = 0; count < 12; count++)
+        {
+            var delivered = await AssistantWire.CallAsync("read", new { }, timeout.Token, deliveryPipe);
+            Check(delivered.Ok && delivered.Result?.GetProperty("payload").GetString() == payload, "A reply was truncated across a pipe disconnect.");
+        }
         Console.WriteLine("PASS isolated actual-engine Lua, hold/stop/disconnect/budgets, draft review/undo/staleness, bounded framing, real SDK stdio tools/resources/prompts and current-user IPC.");
     }
     static void Check(bool value, string message) { if (!value) throw new Exception(message); }
