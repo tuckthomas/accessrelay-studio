@@ -8,9 +8,9 @@ services. Native timing, output ownership and model acceptance remain in the run
 ## 1. Delivery and scope
 
 - [x] Create and push this checklist before implementation.
-- [ ] Deliver independent features in separate commits on `main`, updating this
+- [x] Deliver independent features in separate commits on `main`, updating this
       checklist with full implementation SHAs and concrete validation evidence.
-- [ ] Preserve the completed desktop separation and the active accessibility roadmap;
+- [x] Preserve the completed desktop separation and the active accessibility roadmap;
       do not invent hardware, microphone, screen-reader or gameplay validation.
 
 This release uses the official C# MCP SDK with a console stdio bridge to the running
@@ -27,7 +27,7 @@ labels, or apply a draft without the user reviewing it in Studio.
       actionable blocker explanations and versioned capability/contract resources.
 - [x] Add assistant prompts for accommodation planning, diagnosis, dataset coverage,
       personal-sound coaching and experimental evidence review, grounded in actual APIs.
-- [ ] Test missing/stale contexts, redaction, bounds and dependency direction.
+- [x] Test missing/stale contexts, redaction, bounds and dependency direction.
 
 Shared-service implementation: `a65d0fe55d4bdfdc8b7eb1190ee662484c638350`.
 Portable checks passed for diagnostic projections, monotonic expiry, permissions,
@@ -57,30 +57,49 @@ verified separately in the following sections.
 
 ## 4. MCP transport and accessible Studio integration
 
-- [ ] Use a pinned official SDK, publish a separate console bridge and support tools,
+- [x] Use a pinned official SDK, publish a separate console bridge and support tools,
       resources and prompts with schemas, cancellation and actionable errors.
-- [ ] Add bounded, current-user-only IPC to the existing app instance; no duplicate
+- [x] Add bounded, current-user-only IPC to the existing app instance; no duplicate
       hardware monitors, automatic output activation or non-protocol stdout logging.
-- [ ] Add Settings controls for time-limited access, draft/offline permissions,
+- [x] Add Settings controls for time-limited access, draft/offline permissions,
       review/apply/discard/undo, client configuration and immediate revocation.
-- [ ] Serialize requests onto the host context; Stop all/close/revoke cancels jobs,
+- [x] Serialize requests onto the host context; Stop all/close/revoke cancels jobs,
       expires drafts and prevents old requests from changing a new context.
 - [ ] Test real SDK client interoperability, framing/size limits, revocation, context
       changes, UI keyboard/ARIA flows and published bridge/worker availability.
 
+Studio integration: `245fa58da80f5c5332ff3829d85dd39e4424ef7a`.
+Added Settings authorization/review/undo, explicit local input registration, job
+status, current-user-only/remote-rejecting IPC, owner-thread context validation and
+self-contained bridge publishing. Runtime has no Application/MCP dependency.
+57 frontend unit tests, TypeScript/Vite production build and 21 browser workflows
+passed, including permission controls, keyboard-contained draft review/apply/undo
+and revocation. SDK tests cover default and 2025-11-25 clients and disconnect
+cancellation. Full Windows deployment validation is pending CI below.
+
 ## 5. Bounded training workflows
 
-- [ ] Add explicit Studio registration of dataset folders, threshold files, output
+- [x] Add explicit Studio registration of dataset folders, threshold files, output
       workspace and a trusted existing Python interpreter; MCP receives opaque IDs,
       not arbitrary executable paths, filesystem access or shell commands.
-- [ ] Provide stdlib dataset auditing using actual provenance validators and explain
+- [x] Provide stdlib dataset auditing using actual provenance validators and explain
       coverage/gaps without converting guesses into ground truth or changing labels.
-- [ ] Wrap the real experiment runner in asynchronous jobs with presets, bounded
+- [x] Wrap the real experiment runner in asynchronous jobs with presets, bounded
       CPU/time/storage/log output, cancellation and immutable source identities.
-- [ ] Expose job status and bounded metrics/reports. Preserve reviewed train/validation
+- [x] Expose job status and bounded metrics/reports. Preserve reviewed train/validation
       separation, keep held-out data outside tuning, and never promote or arm a model.
-- [ ] Test with synthetic data, a fake bounded worker and real audit/plan-only jobs;
+- [x] Test with synthetic data, a fake bounded worker and real audit/plan-only jobs;
       record that these do not establish gameplay accuracy or hardware timing.
+
+Offline implementation: `e7027074c4e92bc5ccfcdbb00f3fb4727a738975`.
+Actual synthetic stdlib audit and six-job experiment-plan runs passed through the
+job manager. Tests reject unregistered paths, changed labels/thresholds and revoked
+access, and verify termination of a deliberately stalled worker and descendant.
+55 stdlib Python tests run (50 passed, five optional ML checks skipped), including
+audit immutability, held-out exclusion, review requirements and renamed-footage
+leakage. Windows job-object memory/process-family/CPU enforcement is checked in CI;
+portable monitoring is not claimed as an OS hard quota. Neither tests nor reports
+claim real gameplay, model quality or physical timing evidence.
 
 ## 6. Validation and completion
 

@@ -54,12 +54,12 @@ export function AssistantPanel({ initial, command }: { initial: any; command: (a
         <p>Interpreter: {panel?.registration?.interpreterRegistered ? 'registered' : 'not chosen'} · Workspace: {panel?.registration?.workspaceRegistered ? 'registered' : 'not chosen'}</p>
         {panel?.registration?.workspacePath && <p className="subtle">Local output folder: <code>{panel.registration.workspacePath}</code></p>}
         {panel?.registration?.inputs?.map((item: any) => <div className="detail-line" key={item.id}><span>{item.label}{item.path ? ' · ' + item.path : ''}</span><code>{item.id}</code></div>)}
-        {panel?.jobs?.map((job: any) => <div className="stack" key={job.id}><div className="detail-line"><span>{job.kind} · {job.state}{job.errorCode ? ' · ' + job.errorCode : ''}</span>
+        {panel?.jobs?.map((job: any) => <div className="stack" key={job.id}><div className="detail-line"><span role="status">{job.kind} · {job.state}{job.errorCode ? ' · ' + ({ workerRejectedInputs: 'Check reviewed inputs and installed offline dependencies.', offlineWorkerFailed: 'Inspect the local job logs.', jobResourceLimit: 'The resource budget was reached.', cancelledOrExpired: 'Cancelled or access expired.', reportBounds: 'The bounded report could not be read.' } as Record<string, string>)[job.errorCode] || '' : ''}</span>
           {['queued', 'running'].includes(job.state) && <Button onClick={() => void run('assistantCancelJob', { id: job.id })}>Cancel job</Button>}</div>
           {job.report && <pre className="subtle">{JSON.stringify(job.report, null, 2)}</pre>}</div>)}
         <Notice>Jobs use bounded CPU/time/storage budgets. Starting another foreground controller, capture or voice action cancels the offline job. Reviewed labels, held-out data and actual hardware evidence remain separate requirements.</Notice>
       </div></details>
-      {message && <div role="status"><Notice>{message}</Notice></div>}
+      {message && <Notice>{message}</Notice>}
       {error && <Notice tone="danger">{error}</Notice>}
     </div>
     <Modal open={!!review} onClose={() => setReview(null)} title="Review assistant draft" description="Review the exact change. Stop processing and save or discard other edits before applying."
