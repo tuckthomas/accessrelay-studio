@@ -65,7 +65,6 @@ export function App() {
   const voiceStatus = status.voice || state?.voice?.status || {};
   const visionStatus = status.vision || state?.vision?.status || {};
   const announcement = useStatusAnnouncements(!!state, controllerStatus, voiceStatus, visionStatus, error);
-  const anythingRunning = controllerStatus.outputActive || voiceStatus.isRunning || voiceStatus.commands?.recognition?.running || visionStatus.running || visionStatus.session?.running;
   const currentLabel = page === 'settings' ? 'Settings' : navigation.find(item => item.id === page)?.label || 'Workspace';
   if (!state) return <main className="loading-shell"><div className="loading-content">
     <img src="./brand.png" alt="" /><h1>AccessRelay Studio</h1>
@@ -93,7 +92,7 @@ export function App() {
       {isDesignPreview && <div className="preview-banner">Design preview — no hardware, capture or audio sessions are connected.</div>}
       <header className="app-topbar">
         <div className="topbar-breadcrumb"><span>Studio</span><Icon name="chevronRight" size={15} /><strong>{currentLabel}</strong></div>
-        <div className="topbar-actions"><span className="local-indicator"><span className={'status-dot' + (anythingRunning ? ' live' : '')} />{anythingRunning ? 'Session active' : 'All quiet'}</span>
+        <div className="topbar-actions">
           <SwitchNavigation controller={state.controller} status={controllerStatus} command={controllerCommand} />
           {(voiceStatus.isRunning || voiceStatus.commands?.recognition?.running) && <Badge tone="success"><Icon name="mic" size={15} />Mic live</Badge>}
           <Badge>Beta</Badge>
@@ -105,7 +104,7 @@ export function App() {
       </header>
       <main className="app-main" id="main-content"><div className="content-width">
         {page === 'workspace' && <WorkspacePage state={state} status={{ controller: controllerStatus, voice: voiceStatus, vision: visionStatus, system: status.system || state.system }}
-          command={controllerCommand} navigate={navigate} />}
+          command={invoke} navigate={navigate} />}
         {page === 'controller' && <ControllerPage state={state.controller || {}} status={controllerStatus} command={controllerCommand} />}
         {page === 'vision' && <VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} />}
         {page === 'voice' && <VoicePage state={state.voice || {}} status={voiceStatus} command={voiceCommand} />}

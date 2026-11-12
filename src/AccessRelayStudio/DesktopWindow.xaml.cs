@@ -31,6 +31,8 @@ public sealed partial class DesktopWindow : Window
     private DesktopVoiceService? _voice;
     private DesktopAssistantService? _assistant;
     private readonly SystemPerformanceMonitor _performance = new();
+    private readonly DesktopPreferenceStore _preferences = new(DesktopEnvironment.DataDirectory("Preferences"));
+    private bool _resourceMonitoringEnabled;
     private readonly DispatcherQueueTimer _statusTimer;
     private readonly HashSet<string> _requests = new(StringComparer.Ordinal);
     private CoreWebView2? _web;
@@ -44,6 +46,7 @@ public sealed partial class DesktopWindow : Window
     public DesktopWindow()
     {
         InitializeComponent();
+        _resourceMonitoringEnabled = _preferences.LoadResourceMonitoring();
         _browser = DesktopWeb;
         Title = BuildInfo.WindowTitle;
         if (DesktopEnvironment.IsVerification)
@@ -233,6 +236,10 @@ public sealed partial class DesktopWindow : Window
                 if (page is not ("workspace" or "controller" or "vision" or "voice" or "settings")) throw new InvalidDataException("Choose an available workspace.");
                 _page = page; _clientVisible = args.Flag("visible", true); UpdatePresentation(); return null;
             case "app.draftState": _hasUnsavedChanges = args.Flag("dirty"); return null;
+            case "app.resourceMonitoringSet":
+                bool monitorEnabled = args.GetProperty("enabled").GetBoolean();
+                _preferences.SaveResourceMonitoring(monitorEnabled);
+                _resourceMonitoringEnabled = monitorEnabled; UpdatePresentation(); return null;
             case "app.close":
                 if (!args.Flag("discard")) throw new InvalidOperationException("Confirm whether to keep editing before closing.");
                 _discardClose = true; DispatcherQueue.TryEnqueue(Close); return null;
@@ -258,7 +265,8 @@ public sealed partial class DesktopWindow : Window
         settings = new { driverAvailable = VirtualMicDriver.IsAvailable, buildFolder = AppContext.BaseDirectory, appDirectory = AppContext.BaseDirectory,
             profileDirectory = _controller!.ProfileDirectory,
             engine = "C# / .NET", interfaceTechnology = "React / WebView2 · local bundled files", platform = "Windows x64",
-            startupError = _startupError, isVerification = DesktopEnvironment.IsVerification, assistant = _assistant?.UiState() },
+            startupError = _startupError, isVerification = DesktopEnvironment.IsVerification, assistant = _assistant?.UiState(),
+            resourceMonitoringEnabled = _resourceMonitoringEnabled },
         system = _performance.Latest
     };
 
@@ -286,7 +294,7 @@ public sealed partial class DesktopWindow : Window
     private void UpdatePresentation()
     {
         bool visible = !_closing && _ready && IsPresenting();
-        _performance.Enabled = visible && _page == "workspace";
+        _performance.Enabled = _resourceMonitoringEnabled && visible && _page == "workspace";
         _vision?.SetVisible(visible && _page == "vision"); _voice?.SetVisible(visible && _page == "voice");
     }
 

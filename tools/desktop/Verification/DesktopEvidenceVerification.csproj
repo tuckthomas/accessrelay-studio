@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../src/AccessRelayStudio/Desktop/DesktopProtocol.cs" Link="DesktopProtocol.cs" />
+    <Compile Include="../../../src/AccessRelayStudio/Desktop/DesktopPreferenceStore.cs" Link="DesktopPreferenceStore.cs" />
+    <Compile Include="../../../src/AccessRelayStudio/Diagnostics/SystemPerformanceMonitor.cs" Link="SystemPerformanceMonitor.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Desktop/DesktopVisionDataset.cs" Link="DesktopVisionDataset.cs" />
     <Compile Include="../../../games/nba2k27/src/Nba2K27ShotProfile.cs" Link="Nba2K27ShotProfile.cs" />
     <ProjectReference Include="../../../src/AccessRelayStudio.Engine/AccessRelayStudio.Engine.csproj" />

@@ -1,5 +1,8 @@
 export interface SystemStatus { cpuPercent?: number | null; memoryUsedBytes?: number | null; memoryTotalBytes?: number | null;
-  gpuPercent?: number | null; vramUsedBytes?: number | null; vramTotalBytes?: number | null; gpuName?: string | null }
+  gpuPercent?: number | null; vramUsedBytes?: number | null; vramTotalBytes?: number | null; gpuName?: string | null;
+  appCpuPercent?: number | null; appMemoryBytes?: number | null; appPrivateBytes?: number | null; appThreadCount?: number | null;
+  logicalProcessors?: number; sampledAtUtc?: string | null; samplesCollected?: number; isSampling?: boolean; error?: string | null;
+  history?: { atUtc: string; cpuPercent?: number | null; gpuPercent?: number | null; appCpuPercent?: number | null }[] | null }
 export interface StudioState { version: string; controller: any; vision: any; voice: any; settings: any; system?: SystemStatus }
 export interface StudioStatus { controller?: any; vision?: any; voice?: any; system?: SystemStatus }
 type HostMessage = { type: 'snapshot'; state: StudioState } | { type: 'status'; status: StudioStatus }
@@ -89,7 +92,7 @@ export const previewState: StudioState = {
     microphoneId: '', outputId: '', destination: 'virtual', settings: { preset: 'clean', pitchSemitones: 0, gainDb: 0, muted: false },
     musicRemovalAvailable: false, profileDirectory: 'Local voice profile storage', clip: null,
     status: { isRunning: false, isStarting: false, busy: false, message: 'Voice processing is off.', inputPeak: 0, outputPeak: 0, bufferedMilliseconds: 0 } },
-  settings: { driverAvailable: true, profileDirectory: 'Local profile storage', appDirectory: 'Installed application folder', platform: 'Windows x64' }
+  settings: { driverAvailable: true, profileDirectory: 'Local profile storage', appDirectory: 'Installed application folder', platform: 'Windows x64', resourceMonitoringEnabled: true }
 };
 async function previewCommand(method: string, args: any): Promise<any> {
   await new Promise(resolve => setTimeout(resolve, 80));
@@ -99,6 +102,7 @@ async function previewCommand(method: string, args: any): Promise<any> {
   if (method === 'app.bootstrap') return structuredClone(previewState);
   if (method === 'app.page') return null;
   if (method === 'app.draftState') return null;
+  if (method === 'app.resourceMonitoringSet') { previewState.settings.resourceMonitoringEnabled = args.enabled === true; return null; }
   if (method.startsWith('app.assistant')) {
     const assistant = previewState.settings.assistant ||= { access: { enabled: false, drafts: false, offline: false }, bridgeAvailable: false,
       drafts: [], jobs: [], canUndo: false, registration: { inputs: [], interpreterRegistered: false, workspaceRegistered: false }, clientConfiguration: 'Design preview — no MCP server is running.' };

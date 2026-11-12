@@ -1,81 +1,162 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace EliteScriptStudio.Diagnostics;
 
 internal sealed record SystemPerformanceSnapshot(
     double? CpuPercent = null, ulong? MemoryUsedBytes = null, ulong? MemoryTotalBytes = null,
-    double? GpuPercent = null, ulong? VramUsedBytes = null, ulong? VramTotalBytes = null, string? GpuName = null);
+    double? GpuPercent = null, ulong? VramUsedBytes = null, ulong? VramTotalBytes = null, string? GpuName = null,
+    double? AppCpuPercent = null, long? AppMemoryBytes = null, long? AppPrivateBytes = null, int? AppThreadCount = null,
+    int LogicalProcessors = 0, DateTimeOffset? SampledAtUtc = null, long SamplesCollected = 0, bool IsSampling = false,
+    string? Error = null, IReadOnlyList<SystemResourceSample>? History = null);
+
+internal sealed record SystemResourceSample(DateTimeOffset AtUtc, double? CpuPercent, double? GpuPercent, double? AppCpuPercent);
+
+internal interface ISystemPerformanceProbe : IDisposable
+{
+    SystemPerformanceSnapshot Read();
+}
 
 internal sealed class SystemPerformanceMonitor : IDisposable
 {
-    private readonly CancellationTokenSource _stop = new();
-    private readonly Task _sampling;
+    private readonly object _gate = new();
+    private readonly Func<ISystemPerformanceProbe> _createProbe;
+    private readonly TimeSpan _interval;
+    private CancellationTokenSource? _samplingStop;
+    private Task _sampling = Task.CompletedTask;
     private SystemPerformanceSnapshot _latest = new();
-    private volatile bool _enabled = true;
-    private int _resetBaseline;
-    private int _disposed;
+    private bool _enabled, _disposed;
+    private long _generation, _sampleCount;
 
-    public SystemPerformanceMonitor() => _sampling = Task.Run(SampleAsync);
+    public SystemPerformanceMonitor(Func<ISystemPerformanceProbe>? createProbe = null, TimeSpan? interval = null)
+    {
+        _createProbe = createProbe ?? (() => new WindowsProbe());
+        _interval = interval ?? TimeSpan.FromSeconds(1);
+        if (_interval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(interval));
+    }
 
     public SystemPerformanceSnapshot Latest => Volatile.Read(ref _latest);
+    internal Task Completion { get { lock (_gate) return _sampling; } }
 
     public bool Enabled
     {
-        get => _enabled;
+        get { lock (_gate) return _enabled; }
         set
         {
-            if (_enabled == value)
-                return;
-            _enabled = value;
-            Interlocked.Exchange(ref _resetBaseline, 1);
+            lock (_gate)
+            {
+                if (_disposed || _enabled == value) return;
+                _enabled = value;
+                long generation = ++_generation;
+                _samplingStop?.Cancel(); _samplingStop = null;
+                Volatile.Write(ref _latest, new(SamplesCollected: _sampleCount));
+                if (!value) return;
+                var cancellation = _samplingStop = new CancellationTokenSource();
+                // A restart waits for the previous probe to release its native resources.
+                var previous = _sampling;
+                _sampling = Task.Run(() => SampleAsync(previous, generation, cancellation));
+            }
         }
     }
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            return;
-        _stop.Cancel();
-        _ = _sampling.ContinueWith(_ => _stop.Dispose(), CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true; _enabled = false; _generation++;
+            _samplingStop?.Cancel(); _samplingStop = null;
+            Volatile.Write(ref _latest, new(SamplesCollected: _sampleCount));
+        }
     }
 
-    private async Task SampleAsync()
+    private async Task SampleAsync(Task previous, long generation, CancellationTokenSource cancellation)
     {
-        if (!OperatingSystem.IsWindows())
-            return;
-
-        var adapter = FindAdapter();
-        using var gpu = new GpuCounters(adapter);
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        CpuTimes? previous = null;
         try
         {
+            await previous.ConfigureAwait(false);
+            cancellation.Token.ThrowIfCancellationRequested();
+            using var probe = _createProbe();
+            using var timer = new PeriodicTimer(_interval);
+            var history = new Queue<SystemResourceSample>();
             do
             {
-                if (Interlocked.Exchange(ref _resetBaseline, 0) != 0 || !Enabled)
-                    previous = null;
-                if (!Enabled)
-                    continue;
-
-                bool hasBaseline = previous.HasValue;
-                CpuTimes? current = GetSystemTimes(out var idle, out var kernel, out var user)
-                    ? new(idle, kernel, user) : null;
-                double? cpu = current is { } after && previous is { } before ? BusyPercent(before, after) : null;
-                previous = current;
-
-                var memory = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
-                bool hasMemory = GlobalMemoryStatusEx(ref memory) && memory.TotalPhysical >= memory.AvailablePhysical;
-                var (usage, vram) = gpu.Read(hasBaseline);
-                Volatile.Write(ref _latest, new SystemPerformanceSnapshot(cpu,
-                    hasMemory ? memory.TotalPhysical - memory.AvailablePhysical : null,
-                    hasMemory ? memory.TotalPhysical : null, usage, vram,
-                    adapter?.DedicatedBytes is > 0 ? adapter.DedicatedBytes : null, adapter?.Name));
+                cancellation.Token.ThrowIfCancellationRequested();
+                var reading = probe.Read();
+                var now = DateTimeOffset.UtcNow;
+                lock (_gate)
+                {
+                    if (_disposed || !_enabled || generation != _generation) return;
+                    history.Enqueue(new(now, reading.CpuPercent, reading.GpuPercent, reading.AppCpuPercent));
+                    while (history.Count > 60) history.Dequeue();
+                    Volatile.Write(ref _latest, reading with { IsSampling = true, SampledAtUtc = now,
+                        SamplesCollected = ++_sampleCount, History = history.ToArray() });
+                }
             }
-            while (await timer.WaitForNextTickAsync(_stop.Token).ConfigureAwait(false));
+            while (await timer.WaitForNextTickAsync(cancellation.Token).ConfigureAwait(false));
         }
-        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            lock (_gate)
+                if (!_disposed && generation == _generation)
+                    Volatile.Write(ref _latest, new(Error: "Resource counters unavailable: " + error.Message, SamplesCollected: _sampleCount));
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_samplingStop, cancellation)) _samplingStop = null;
+                cancellation.Dispose();
+            }
+        }
     }
+
+    private sealed class WindowsProbe : ISystemPerformanceProbe
+    {
+        private readonly Process _process;
+        private readonly Adapter? _adapter;
+        private readonly GpuCounters? _gpu;
+        private CpuTimes? _cpu;
+        private TimeSpan? _appCpu;
+        private long _at;
+        private bool _hasSample;
+
+        public WindowsProbe()
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows resource counters are required.");
+            _process = Process.GetCurrentProcess();
+            try { _adapter = FindAdapter(); _gpu = new GpuCounters(_adapter); }
+            catch (Exception) { /* CPU and memory readings remain available without GPU counters. */ }
+        }
+
+        public SystemPerformanceSnapshot Read()
+        {
+            CpuTimes? current = GetSystemTimes(out var idle, out var kernel, out var user) ? new(idle, kernel, user) : null;
+            double? cpu = current is { } after && _cpu is { } before ? BusyPercent(before, after) : null;
+            _cpu = current;
+            var memory = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
+            bool hasMemory = GlobalMemoryStatusEx(ref memory) && memory.TotalPhysical >= memory.AvailablePhysical;
+            var (usage, vram) = _gpu?.Read(_hasSample) ?? (null, null);
+            _hasSample = true;
+            _process.Refresh();
+            var appCpu = _process.TotalProcessorTime;
+            long now = Stopwatch.GetTimestamp();
+            double? appUsage = _appCpu is { } previousCpu
+                ? ProcessPercent(previousCpu, appCpu, Stopwatch.GetElapsedTime(_at, now), Environment.ProcessorCount) : null;
+            _appCpu = appCpu; _at = now;
+            return new(cpu, hasMemory ? memory.TotalPhysical - memory.AvailablePhysical : null,
+                hasMemory ? memory.TotalPhysical : null, usage, vram,
+                _adapter?.DedicatedBytes is > 0 ? _adapter.DedicatedBytes : null, _adapter?.Name,
+                appUsage, _process.WorkingSet64, _process.PrivateMemorySize64, _process.Threads.Count, Environment.ProcessorCount);
+        }
+
+        public void Dispose() { try { _gpu?.Dispose(); } finally { _process.Dispose(); } }
+    }
+
+    internal static double? ProcessPercent(TimeSpan before, TimeSpan after, TimeSpan elapsed, int processors) =>
+        elapsed > TimeSpan.Zero && processors > 0 && after >= before
+            ? Math.Clamp(100 * (after - before).TotalSeconds / (elapsed.TotalSeconds * processors), 0, 100) : null;
 
     internal readonly record struct CpuTimes(ulong Idle, ulong Kernel, ulong User);
 

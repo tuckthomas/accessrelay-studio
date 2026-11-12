@@ -8,6 +8,7 @@ string directory = Path.Combine(root, "AccessRelayDesktopEvidence-" + Guid.NewGu
 Directory.CreateDirectory(directory);
 try
 {
+    await ResourceMonitorChecks.RunAsync(Path.Combine(directory, "preferences"));
     var source = new byte[3 * 2 * 4 + 8];
     for (int row = 0; row < 2; row++)
         for (int col = 0; col < 3; col++) { int offset = row * 16 + col * 4; source[offset] = (byte)col; source[offset + 1] = (byte)row; source[offset + 2] = 77; source[offset + 3] = 255; }

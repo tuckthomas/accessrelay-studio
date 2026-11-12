@@ -68,7 +68,9 @@ describe('workspace draft and capture visibility', () => {
   it('uses live system readings only in the Workspace resource section', async () => {
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
     emit({ type: 'status', status: { system: { cpuPercent: 12.5, gpuPercent: null, memoryUsedBytes: 8 * 1024 ** 3, memoryTotalBytes: 16 * 1024 ** 3 } } });
-    expect(screen.getByText('CPU 12.5% · GPU —')).toBeTruthy();
+    expect(screen.getByText('12.5%')).toBeTruthy();
+    expect(screen.queryByText('All quiet')).toBeNull();
+    expect(document.querySelector('.local-indicator')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Controller', exact: true }));
     expect(screen.queryByText('Resource use')).toBeNull();
   });

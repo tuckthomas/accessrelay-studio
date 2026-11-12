@@ -97,11 +97,10 @@ if (-not $ActivateOnly -and $legacy -and (Test-Path -LiteralPath $legacy) -and -
     }
 }
 
-$bin = (Join-Path $build 'app-bin').Replace('\', '/') + '/'
-$obj = (Join-Path $build 'app-obj').Replace('\', '/') + '/'
 if (-not $ActivateOnly) {
     & (Join-Path $PSScriptRoot 'Build-DesktopUi.ps1')
-    & dotnet publish $project -c Release "-p:OutputPath=$bin" "-p:IntermediateOutputPath=$obj" -o $install -v:minimal
+    # Keep each referenced project's intermediate files separate under the selected build folder.
+    & dotnet publish $project -c Release --artifacts-path $build -o $install -v:minimal
     if ($LASTEXITCODE -ne 0) { throw "Beta publication failed with exit code $LASTEXITCODE. The existing Run path was not changed." }
 }
 $executable = Join-Path $install 'AccessRelayStudio.exe'
