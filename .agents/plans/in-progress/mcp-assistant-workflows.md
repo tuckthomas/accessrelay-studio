@@ -36,16 +36,24 @@ compiled dependency checks remain part of the later validation steps.
 
 ## 3. Configuration drafts and real-engine simulation
 
-- [ ] Create bounded, expiring drafts for sticky controls, elapsed-time smoothing
+- [x] Create bounded, expiring drafts for sticky controls, elapsed-time smoothing
       and optional Lua mappings; show an exact diff and retain a reversible original.
-- [ ] Bind drafts to the app instance, profile identity/revision and source digest;
+- [x] Bind drafts to the app instance, profile identity/revision and source digest;
       refuse stale changes and keep output/scripts inactive on apply/undo.
-- [ ] Run Lua using the actual engine/API and deterministic physical event timelines,
+- [x] Run Lua using the actual engine/API and deterministic physical event timelines,
       including instruction budgets, stop/disconnect behavior and manual composition.
-- [ ] Isolate script execution in a bounded worker process with timeout/cancellation
+- [x] Isolate script execution in a bounded worker process with timeout/cancellation
       and bounded input/output; do not substitute an invented Lua contract.
-- [ ] Test normal holds, termination/errors, stale drafts, cancellation, quota breaches
+- [x] Test normal holds, termination/errors, stale drafts, cancellation, quota breaches
       and preservation of existing profile settings and runtime arbitration.
+
+Draft/rehearsal/SDK implementation: `215695faaa9501390cc54b284a73d008dc6e2055`.
+Portable actual-process checks passed for production Lua holds, Stop/disconnect,
+instruction exhaustion, nonaligned events, inactive reviewed apply/undo, stale and
+revoked drafts, framed message bounds and a real SDK stdio client/server over a
+current-user pipe. The SDK startup reflection-options defect was found and fixed
+before this commit. Native app integration and Windows job-object enforcement are
+verified separately in the following sections.
 
 ## 4. MCP transport and accessible Studio integration
 
