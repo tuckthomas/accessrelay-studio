@@ -611,7 +611,7 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync) return _stop.IsCancellationRequested ? null : _vision.DeadlineTimestamp;
     }
 
-    private void AdvanceReleaseDeadline(long timestamp)
+    private void AdvanceReleaseDeadline(long callbackTimestamp)
     {
         long token = Volatile.Read(ref _lockMeasurementToken), requested = token != 0 ? Stopwatch.GetTimestamp() : 0;
         lock (_sync)
@@ -619,7 +619,9 @@ internal sealed class StudioRuntime : IDisposable
             if (token != 0) _lockMeasurements.Record(RuntimeLockPath.ReleaseDeadline, token, requested, Stopwatch.GetTimestamp());
             if (_stop.IsCancellationRequested) return;
             var before = _vision.Status;
-            if (!_vision.TryAdvanceDeadline(timestamp)) { CancelLostLockFeedbackLocked(before); return; }
+            // Callback time can precede waiting for this lock. Recheck lateness
+            // and physical-input freshness using the clock after ownership is acquired.
+            if (!_vision.TryAdvanceDeadline(Stopwatch.GetTimestamp())) { CancelLostLockFeedbackLocked(before); return; }
             try
             {
                 WriteTracedOutputLocked(_vision.Output, VisionTrainingTraceKind.DeadlineOutput,

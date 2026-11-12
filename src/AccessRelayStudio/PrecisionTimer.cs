@@ -10,6 +10,7 @@ internal sealed class PrecisionTimer : WaitHandle
 
     public static PrecisionTimer? TryStart(int intervalMs)
     {
+        if (!OperatingSystem.IsWindows()) return null;
         var handle = CreateWaitableTimerEx(0, 0, HighResolution, ModifyAndSynchronize);
         long due = -intervalMs * 10_000L;
         if (handle.IsInvalid || !SetWaitableTimer(handle, ref due, intervalMs, 0, 0, false))

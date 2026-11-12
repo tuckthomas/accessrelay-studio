@@ -57,6 +57,38 @@ internal static class RuntimeAccessibilityChecks
         CoPilot();
         VoiceCommands();
         LockMeasurements();
+        DelayedDeadlineClock();
+    }
+
+    private static void DelayedDeadlineClock()
+    {
+        using var input = new EliteInputMonitor();
+        using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
+        runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest?.Input.IsConnected == true && runtime.Latest?.OutputActive == true, "Deadline test did not connect.");
+        runtime.ConfigureVision(VisionSettings.Default with { MaximumFrameAgeMs = 1000, MaximumLatenessMs = 2 });
+        runtime.BeginVisionSession();
+        if (!runtime.SetVisionArmed(true)) throw new Exception("Synthetic deadline session did not arm.");
+        input.SetState(default(ControllerState) with { Buttons = (ushort)ControlId.X });
+        Wait(() => runtime.VisionStatus.ShotToken != 0, "Deadline test shot did not begin.");
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var sync = typeof(StudioRuntime).GetField("_sync", flags)!.GetValue(runtime)!;
+        var advance = typeof(StudioRuntime).GetMethod("AdvanceReleaseDeadline", flags)!;
+        lock (sync)
+        {
+            var shot = runtime.VisionStatus; long now = Stopwatch.GetTimestamp();
+            if (!runtime.SubmitVisionPrediction(new(shot.SessionGeneration, shot.ShotToken, 1, now, now, 20, 1, 0, true)))
+                throw new Exception("Synthetic deadline prediction was rejected.");
+            long staleCallbackClock = runtime.VisionStatus.ReleaseDeadlineTimestamp!.Value;
+            // Hold the exact runtime lock while the due time and freshness budget
+            // expire, then invoke reentrantly before another polling thread can act.
+            Thread.Sleep(100);
+            advance.Invoke(runtime, [staleCallbackClock]);
+            var after = runtime.VisionStatus;
+            if (after.AutomatedReleases != 0 || after.MissedDeadlines != 1)
+                throw new Exception("Deadline callback used its old clock after waiting for runtime ownership.");
+        }
+        Console.WriteLine("SUCCESS: deadline freshness is checked after acquiring runtime ownership, even with a stale callback timestamp.");
     }
 
     private static void LockMeasurements()
