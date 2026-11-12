@@ -86,16 +86,16 @@ internal sealed class VisionPerformanceBuffer
 
     internal void Finish() { lock (_gate) _finished = _timestamp(); }
 
-    internal void Record(VisionPerformanceFrame frame)
+    internal bool Record(VisionPerformanceFrame frame)
     {
         if (frame.CaptureTimestamp <= 0 || frame.StartedTimestamp < frame.CaptureTimestamp ||
             frame.CompletedTimestamp < frame.StartedTimestamp || frame.AllocatedBytes < 0 ||
             frame.Gen0Collections < 0 || frame.Gen1Collections < 0 || frame.Gen2Collections < 0 ||
             !ValidOptional(frame.PreprocessingMs) || !ValidOptional(frame.InferenceWithTransfersMs))
-            return;
+            return false;
         lock (_gate)
         {
-            if (frame.Sequence <= _lastSequence || _finished != 0) return;
+            if (frame.Sequence <= _lastSequence || _finished != 0) return false;
             // A policy rejection without inference is processing work, not a model decision.
             frame = frame with { HasDecision = frame.HasDecision && frame.InferenceWithTransfersMs.HasValue };
             _lastSequence = frame.Sequence;
@@ -103,6 +103,7 @@ internal sealed class VisionPerformanceBuffer
             _totalFrames++;
             if (frame.HasDecision) _totalDecisions++;
             if (frame.InferenceWithTransfersMs.HasValue) _totalInferences++;
+            return true;
         }
     }
 

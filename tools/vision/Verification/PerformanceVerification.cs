@@ -91,13 +91,16 @@ internal static class PerformanceVerification
             valid with { CompletedTimestamp = valid.StartedTimestamp - 1 }, valid with { AllocatedBytes = -1 },
             valid with { Gen0Collections = -1 }, valid with { PreprocessingMs = double.NaN },
             valid with { InferenceWithTransfersMs = double.PositiveInfinity }, valid with { InferenceWithTransfersMs = -1 }
-        }) buffer.Record(invalid);
+        }) Require(!buffer.Record(invalid), "Invalid timing data was reported as an accepted sample.");
         Require(buffer.Snapshot().TotalFrames == 0, "Invalid timestamps or stage values must be discarded.");
-        buffer.Record(valid); buffer.Record(valid); buffer.Record(Frame(0));
+        Require(buffer.Record(valid), "A valid new timing sample was reported as excluded.");
+        Require(!buffer.Record(valid), "A duplicate sequence was reported as an accepted timing sample.");
+        Require(!buffer.Record(Frame(0)), "An older sequence was reported as an accepted timing sample.");
         Require(buffer.Snapshot().TotalFrames == 1, "Repeated or old frame sequences must not duplicate samples.");
         now = 5000; buffer.Finish();
         var stopped = buffer.Snapshot();
-        now = 100000; buffer.Record(Frame(2));
+        now = 100000;
+        Require(!buffer.Record(Frame(2)), "A finished collector reported a later sample as accepted.");
         var later = buffer.Snapshot();
         Require(stopped.ElapsedSeconds == 4 && stopped.ElapsedSeconds == later.ElapsedSeconds &&
             stopped.ProcessingFps == later.ProcessingFps && later.TotalFrames == 1,
@@ -105,6 +108,7 @@ internal static class PerformanceVerification
         buffer.Reset(Context("CPUExecutionProvider"));
         Require(buffer.Snapshot().TotalFrames == 0 && buffer.Snapshot().ExecutionProvider == "CPUExecutionProvider",
             "A new observation must reset counters and provider context.");
+        Require(buffer.Record(Frame(1)), "Reset did not allow a fresh timing sample after finish.");
     }
 
     private static void RollingWindow()

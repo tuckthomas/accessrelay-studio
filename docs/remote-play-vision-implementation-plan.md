@@ -229,6 +229,8 @@ Add a Vision page/panel following existing navigation and accessible controls. S
 - local processing and output-handoff metrics, with upstream/input estimates labeled separately;
 - start/stop controls integrated with Stop all and physical early-release behavior.
 
+Use two cached tabs: Configuration for source/model/crop/timing settings, and Live Capture for the preview, performance statistics and training controls. Keep observation status, start/stop and arm/disarm above the separately scrolling tab contents. One session serves both tabs; tab changes cannot restart capture, reload the model, reset history or arm output. Suspend preview production, bitmap uploads and percentile presentation when Live Capture is hidden, the page is elsewhere or the application is minimized. Capture, inference, training recording, telemetry collection and controller scheduling continue independently. Return to the newest available preview without queuing old frames; the existing low-rate preview is separate from inference cadence.
+
 Preview overlays are optional application diagnostics, not an in-game player icon requirement. Use keyboard-accessible controls, meaningful automation names, readable status text, focus behavior, and text larger than XS. Do not encode status solely through color.
 
 Store vision settings in a versioned profile structure. Validate crop bounds, finite numeric values, timing limits, model schema/hash, and supported shot configuration on load/import. Preserve older profiles and default vision to disabled. Imported profiles cannot silently start capture or arm output. Keep calibration bound to the source/model/game/animation configuration and invalidate it when those assumptions change.

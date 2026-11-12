@@ -1,6 +1,6 @@
 # Remote Play vision implementation verification
 
-Date: 2026-11-11. Branch: `codex/remote-play-vision`. Application version: `1.9.0-beta.1`.
+Date: 2026-11-11. Branch: `codex/remote-play-vision`. Application version: `1.9.0-beta.2`.
 
 ## Implemented software
 
@@ -11,6 +11,10 @@ The NBA 2K27 plugin supports saved profile creation, editing, reverting, duplica
 Training controls record bounded local cropped takes with timestamps and full shot-profile provenance. Recording inhibits automatic release at the output arbiter. The review dialog supports frame scrubbing, reviewed target/negative intervals and session-level train/validation/held-out splits. Offline Python scripts provide training, ONNX export and independent evaluation; no Python worker is used by the running application.
 
 The performance panel displays local capture/processing/decision and inference-with-transfers timing distributions, bounded recent sample counts, allocation/collection diagnostics and the latest helper pipe handoff estimate. Saved JSON runs carry configuration context; comparisons require at least 100 decisions each and matching context while permitting a backend change. Live inputs are uncontrolled, so this is an observation tool rather than a controlled benchmark. It does not measure original Xbox frame age, Xbox input receipt or gameplay release accuracy. Capture-only model metrics remain unavailable.
+
+Configuration and Live Capture are cached tabs with one session. Observation status, start/stop and arming stay above the independently scrolling contents. Preview production/upload and detailed percentile presentation pause when Live Capture is hidden, the page is elsewhere or the beta is minimized. Capture, inference, training recording and controller processing remain independent of presentation.
+
+The source picker refreshes on opening and at a two-second interval while Configuration is visible and observation is stopped. HWND/process identity preserves the selection through title/order changes without resetting calibration. Closed sources clear the selection rather than choosing an unrelated window. The picker lists top-level windows and explains that browser entries represent their active tab, not background tabs. This refresh change was compiled and independently source-reviewed; its native dropdown behavior was not rechecked after computer control was stopped by the user.
 
 ## Completed checks
 
@@ -28,15 +32,19 @@ The performance panel displays local capture/processing/decision and inference-w
 | Application build and UI | Release build/publish passed with zero warnings/errors. The running WinUI app showed the new shot attributes; 35% release 1 updated release 2 to 65%, meter-on enabled release type, and reverting restored the draft. Capture-only preview displayed frames from a selected local app, remained disarmed, and stopped successfully. No Xbox session or virtual-controller output was exercised by this UI check. |
 | Installed beta and timing UI | The installed application visibly showed Beta 1.9.0-beta.1. Live capture populated frame-age/processing percentiles while absent model metrics remained N/A; saving a performance JSON succeeded and capture-only comparison stayed blocked. Direct-launch CUDA diagnostic loading succeeded with app-local dependencies, without a launcher-provided PATH, and remained disarmed. |
 | Beta installation asset handling | Link-aware asset copying passed nested/relative/file link tests, repeat-copy checks, conflicting destination protection and activation/path guards. Original voice model links are preserved rather than expanding large model files onto the installation drive. |
+| Preview visibility lifecycle | Focused real-WGC/session verification passed default-hidden capture, pending-preview cleanup, stable consumer-held buffers, repeated visibility changes without generation restart, continuing hidden training/manual output and stop cleanup. The fixture uses capture-only observation and test controller devices, not a gameplay model or live controller route. |
+| Tabbed beta layout | Installed beta 1.9.0-beta.2 showed Configuration and Live Capture, a larger animated synthetic-window preview, and persistent status/actions above scrolling content. Observation remained disarmed with no model or live virtual-controller output. |
 
 Build outputs, synthetic fixtures, NVIDIA runtime redistributables and Python dependencies were placed outside the repository on C: and D:. The beta installation is on D:, with optional CUDA redistributables in its local `CudaRuntime` folder. Raw frames, trained weights, runtime dependencies and per-user shortcuts are excluded from Git. Existing live application files are not overwritten while that installation is running; switching the legacy Run path is a separate, guarded activation step.
 
-After the saved stable application was closed, the usual `AccessRelayStudio/Run` path was activated as a junction to the beta installation. Its prior contents were retained in a timestamped `Run-Stable-*` sibling. The beta executable identifies itself as `1.9.0-beta.1` with the source commit in its informational version; rebuilding source alone does not update a separately published stable installation.
+After the saved stable application was closed, the usual `AccessRelayStudio/Run` path was activated as a junction to the beta installation. Its prior contents were retained in a timestamped `Run-Stable-*` sibling. The beta executable identifies itself with its beta version and source commit in its informational version; rebuilding source alone does not update a separately published stable installation.
 
 ## Remaining acceptance gates
 
 No real gameplay training footage or trained no-meter NBA 2K27 model was supplied. Actual gameplay collection, justified target-phase annotation, model training, disjoint held-out evaluation, live calibration and Xbox Remote Play virtual-controller/release trials remain pending. The starter model architecture and manually selected player crop do not establish full-court player tracking or reliable shot timing.
 
 Local timestamps measure PC capture, processing and controller handoff. They do not directly measure the Xbox render timestamp or when Xbox applies an input. GC collection counts are diagnostic correlations, not measured GC pause lengths. Windows scheduling and Remote Play transport remain variable; deadline misses are skipped rather than represented as timely releases. A fresh-looking changing frame is not proof of low upstream streaming delay.
+
+During the preview regression, 37 of 38 WGC compositor timestamps were approximately 8–10 ms ahead of the local QPC at processing start. On this PC the timestamp conversion ratio is exactly 1, so the observed offset is not caused by that conversion. Raw diagnostic values were retained; no timestamps were clamped or rewritten. Invalid timestamp orders remain excluded from the performance panel's timing statistics and rejected by the animation tracker; raw exported processing-duration diagnostics still retain all processed frames. Session status now shows all processed frames and excluded timing samples; the performance panel explicitly labels its counts/rate as frames with valid timing rather than capture throughput. Percentiles over this subset cannot establish full-pipeline latency while the timestamp discrepancy remains unresolved.
 
 The application deliberately remains observation-only for models without matching reviewed held-out and hardware validation evidence. Hashes ensure file/configuration consistency; they cannot certify the truth of manually authored reports. See [the model and dataset workflow](vision-model-workflow.md) and [the implementation plan](remote-play-vision-implementation-plan.md).

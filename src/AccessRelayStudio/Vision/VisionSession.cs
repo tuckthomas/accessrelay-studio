@@ -7,7 +7,7 @@ namespace EliteScriptStudio.Vision;
 
 internal readonly record struct VisionSessionStatus(bool Running, bool ModelReady, bool CanArm, string Message,
     long Frames, long Predictions, long DroppedFrames, double LastProcessingMs, long LatestCaptureTicks,
-    int CaptureWidth = 0, int CaptureHeight = 0);
+    int CaptureWidth = 0, int CaptureHeight = 0, long ExcludedTimingFrames = 0);
 
 internal sealed class VisionPreview(byte[] pixels, int width, int height, int stride, long sequence) : IDisposable
 {
@@ -34,6 +34,7 @@ internal sealed class VisionSession : IDisposable
     private string? _modelHash;
     private VisionDiagnosticEvent[] _lastModelEvents = [];
     private VisionPreview? _preview;
+    private bool _previewEnabled;
     private VisionSessionStatus _status = new(false, false, false, "Observation is off.", 0, 0, 0, 0, 0);
     private readonly FrameMetric[] _metrics = new FrameMetric[2048];
     private readonly VisionPerformanceBuffer _performance = new();
@@ -70,6 +71,16 @@ internal sealed class VisionSession : IDisposable
     internal string TrainingStatus { get { lock (_gate) return _recorder?.Message ?? "No training take is recording."; } }
     internal bool IsRecordingTraining { get { lock (_gate) return _recorder?.IsRecording == true; } }
     internal VisionPreview? TakePreview() { lock (_gate) { var value = _preview; _preview = null; return value; } }
+
+    // Presentation is optional. Hiding a tab must not stop observation, recording or controller output.
+    internal void SetPreviewEnabled(bool enabled)
+    {
+        lock (_gate)
+        {
+            _previewEnabled = enabled && !_disposed;
+            if (!_previewEnabled) { _preview?.Dispose(); _preview = null; }
+        }
+    }
 
     internal void Start(nint hwnd, VisionSettings settings)
     {
@@ -120,7 +131,7 @@ internal sealed class VisionSession : IDisposable
             }
             cancellation.ThrowIfCancellationRequested();
             long previewAt = 0, sourceGeneration = -1;
-            long frames = 0, predictions = 0;
+            long frames = 0, predictions = 0, excludedTimingFrames = 0;
             bool sourceReady = false;
             WaitHandle[] waits = [cancellation.WaitHandle, capture.FrameReady];
             while (!cancellation.IsCancellationRequested)
@@ -210,12 +221,13 @@ internal sealed class VisionSession : IDisposable
                             _metricIndex = (_metricIndex + 1) % _metrics.Length;
                             _metricCount = Math.Min(_metricCount + 1, _metrics.Length);
                             _performanceReplacedFrames = Math.Max(0, source.DroppedFrames - _performanceDropBaseline);
-                            _performance.Record(new(frame.Sequence, frame.CaptureTicks, started, completed, hasDecision && inferenceMs.HasValue,
+                            if (!_performance.Record(new(frame.Sequence, frame.CaptureTicks, started, completed, hasDecision && inferenceMs.HasValue,
                                 preprocessingMs, inferenceMs, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
                                 Math.Max(0, GC.CollectionCount(0) - gen0), Math.Max(0, GC.CollectionCount(1) - gen1),
-                                Math.Max(0, GC.CollectionCount(2) - gen2), _trainingInhibited));
+                                Math.Max(0, GC.CollectionCount(2) - gen2), _trainingInhibited))) excludedTimingFrames++;
                             // A low-rate preview copy does not retain a leased capture resource.
-                            if (Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200)
+                            if (_previewEnabled && !cancellation.IsCancellationRequested &&
+                                Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200)
                             {
                                 var copy = ArrayPool<byte>.Shared.Rent(checked(frame.Stride * frame.Height));
                                 frame.Pixels.Span.CopyTo(copy);
@@ -225,7 +237,7 @@ internal sealed class VisionSession : IDisposable
                             }
                             _status = new(true, model is not null, !cancellation.IsCancellationRequested && !_trainingInhibited && fresh && model?.CanArm == true && sourceReady,
                                 fresh ? modelMessage : "Source is stale or unchanged. " + modelMessage,
-                                frames, predictions, source.DroppedFrames, processingMs, frame.CaptureTicks, frame.Width, frame.Height);
+                                frames, predictions, source.DroppedFrames, processingMs, frame.CaptureTicks, frame.Width, frame.Height, excludedTimingFrames);
                         }
                     }
                 }

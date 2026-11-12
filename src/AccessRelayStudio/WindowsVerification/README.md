@@ -12,4 +12,8 @@ The project also compiles the actual runtime, macro engine, arbiter and timers w
 
 For headless buffer, dataset and simulated-runtime checks, append `-- --no-capture`. To check buffer ownership alone, append `-- --buffer-only`. Neither mode certifies screen capture. Dataset checks require at least 512 MiB free in the Windows temporary directory because they exercise the production free-space guard.
 
+For the focused preview-visibility regression, append `-- --preview-only`. It runs one real capture-only session and checks default-hidden capture, preview enable/disable, pending and consumer-owned buffers, continued training recording and manual passthrough, and stopping. It does not certify inference or console timing. `-- --preview-source` instead opens an animated synthetic window for selecting in Studio's capture picker; it starts no capture or controller and exits when closed or after four minutes.
+
+`-- --preview-diagnostics <absolute-output.json>` runs that focused regression and exports the session's raw capture/completion timestamps and processing durations for investigating host-clock behavior. It preserves the production timestamp and freshness checks.
+
 When workspace disk space is limited, pass `-p:BaseIntermediateOutputPath=<absolute C: directory>/obj/ -p:OutputPath=<absolute C: directory>/bin/` before the `--` separator. Keep outputs outside the source tree when needed.

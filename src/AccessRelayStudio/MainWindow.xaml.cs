@@ -149,6 +149,7 @@ public sealed partial class MainWindow : Window
         _performanceRefresh.Interval = TimeSpan.FromSeconds(1);
         _performanceRefresh.Tick += (_, _) => RefreshDashboardPerformance();
         Root.Loaded += StartMonitoring;
+        AppWindow.Changed += (_, _) => UpdateVisionPresentationVisibility();
         AppWindow.Closing += (_, args) =>
         {
             if (_nba2K27Plugin?.HasUnsavedShotProfileChanges == true)
@@ -857,8 +858,18 @@ public sealed partial class MainWindow : Window
         Status.Text = "Vision, voice and scripts stopped · Virtual Xbox output disconnected";
     }
 
+    private bool IsWindowPresenting() => !_closing && AppWindow.IsVisible &&
+        AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+
+    private void UpdateVisionPresentationVisibility()
+    {
+        if (_visionPanel is not null)
+            _visionPanel.SetPageVisible(CurrentPage == StudioPage.Vision && IsWindowPresenting());
+    }
+
     private void RefreshMonitor(DispatcherQueueTimer sender, object args)
     {
+        UpdateVisionPresentationVisibility();
         _visionPanel?.SetProfile(_active.Id, _active.Name);
         _visionPanel?.RefreshStatus();
         RefreshRecorder();
@@ -1212,6 +1223,7 @@ public sealed partial class MainWindow : Window
         _probeIndex = -1;
         _previewStatus = null;
         StudioPage page = CurrentPage;
+        _visionPanel?.SetPageVisible(page == StudioPage.Vision && IsWindowPresenting());
         if (_refresh is { } refresh)
             refresh.Interval = TimeSpan.FromMilliseconds(page == StudioPage.Monitor ? 16 : 32);
         if (_performance is { } performance)
@@ -1229,7 +1241,8 @@ public sealed partial class MainWindow : Window
             InspectorCards.Children.Insert(target, TimingCard);
         }
         Map.Visibility = page == StudioPage.Bindings ? Visibility.Visible : Visibility.Collapsed;
-        DetailScroll.Visibility = page is StudioPage.Bindings or StudioPage.Dashboard ? Visibility.Collapsed : Visibility.Visible;
+        DetailScroll.Visibility = page is StudioPage.Bindings or StudioPage.Dashboard or StudioPage.Vision ? Visibility.Collapsed : Visibility.Visible;
+        VisionHost.Visibility = page == StudioPage.Vision ? Visibility.Visible : Visibility.Collapsed;
         DashboardScroll.Visibility = page == StudioPage.Dashboard ? Visibility.Visible : Visibility.Collapsed;
         CenterFooter.Text = page switch
         {
@@ -1355,7 +1368,8 @@ public sealed partial class MainWindow : Window
                 }, () => SelectPage(StudioPage.Plugins));
                 _visionPanel.SetProfile(_active.Id, _active.Name);
                 if (_nba2K27Plugin is not null) _visionPanel.SetShotProfile(_nba2K27Plugin.SelectedShotProfile);
-                Details.Children.Add(_visionPanel);
+                if (VisionHost.Children.Count == 0) VisionHost.Children.Add(_visionPanel);
+                UpdateVisionPresentationVisibility();
                 break;
             case StudioPage.Settings:
                 Heading("Settings", "Manage local controller output and find your saved profiles.");

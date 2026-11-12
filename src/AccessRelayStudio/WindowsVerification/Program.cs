@@ -2,12 +2,32 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args.Contains("--preview-source", StringComparer.Ordinal))
+{
+    PreviewSessionChecks.RunSource();
+    return;
+}
+if (args is ["--preview-diagnostics", var diagnosticsPath])
+{
+    PreviewSessionChecks.Run(diagnosticsPath);
+    return;
+}
+if (args.Contains("--preview-only", StringComparer.Ordinal))
+{
+    PreviewSessionChecks.Run();
+    return;
+}
+
 BufferCheck();
 if (!args.Contains("--buffer-only", StringComparer.Ordinal))
 {
     DatasetChecks.Run();
     RuntimeTrainingChecks.Run();
-    if (!args.Contains("--no-capture", StringComparer.Ordinal)) CaptureCheck();
+    if (!args.Contains("--no-capture", StringComparer.Ordinal))
+    {
+        CaptureCheck();
+        PreviewSessionChecks.Run();
+    }
 }
 
 static void Check(bool value, string reason)

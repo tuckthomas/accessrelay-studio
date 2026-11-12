@@ -39,6 +39,7 @@ internal sealed class VisionPerformancePanel : UserControl
         content.Children.Add(new TextBlock { Text = "Live vision performance", FontSize = 20,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         content.Children.Add(Text("Local PC timing. Statistics use bounded recent sample windows; they do not measure original Xbox frame age or when the Xbox applies input. N/A means no matching samples exist."));
+        content.Children.Add(Text("The counts and sample rate below cover frames with valid local timestamps. Session status shows all processed frames and excluded timestamp samples."));
         content.Children.Add(_context);
         content.Children.Add(_activity);
         content.Children.Add(BuildTable());
@@ -70,7 +71,7 @@ internal sealed class VisionPerformancePanel : UserControl
         table.RowDefinitions.Add(new RowDefinition());
         for (int column = 0; column < headers.Length; column++)
             AddCell(table, Text(headers[column], bold: true), 0, column);
-        string[] names = ["Frame age at processing start", "Frame to model decision", "Frame processing (all frames)",
+        string[] names = ["Frame age at processing start", "Frame to model decision", "Frame processing (valid timing)",
             "Player preprocessing", "Inference including transfers", "Input helper pipe handoff (latest only)"];
         for (int row = 0; row < names.Length; row++)
         {
@@ -113,7 +114,8 @@ internal sealed class VisionPerformancePanel : UserControl
         string model = string.IsNullOrWhiteSpace(snapshot.ModelManifestHash) ? "no loaded model" : "model " + snapshot.ModelManifestHash[..Math.Min(12, snapshot.ModelManifestHash.Length)];
         _context.Text = $"Backend: {snapshot.ExecutionProvider} · {model} · capture {snapshot.CaptureWidth}×{snapshot.CaptureHeight}\n" +
             $"Camera: {(string.IsNullOrWhiteSpace(snapshot.CameraView) ? "unspecified" : snapshot.CameraView)} · elapsed {snapshot.ElapsedSeconds:F1} s";
-        _activity.Text = $"Processed {snapshot.TotalFrames:N0} frames · {snapshot.ProcessingFps:F1} frames/s · {snapshot.TotalDecisions:N0} model decisions · {snapshot.TotalInferences:N0} inferences\n" +
+        _activity.Text = $"Frames with valid timing: {snapshot.TotalFrames:N0} · {snapshot.ProcessingFps:F1} timing samples/s\n" +
+            $"Within those frames: {snapshot.TotalDecisions:N0} model decisions · {snapshot.TotalInferences:N0} inferences\n" +
             $"Replaced capture frames: {snapshot.ReplacedCaptureFrames:N0} · automated releases: {snapshot.AutomatedReleases:N0} · missed deadlines: {snapshot.MissedDeadlines:N0}\n" +
             (snapshot.Armed ? "Automatic release is armed." : "Automatic release is disarmed.") +
             (snapshot.RecordingTraining ? "\nThe recent window includes training capture; these samples cannot be used for run comparison." : "");

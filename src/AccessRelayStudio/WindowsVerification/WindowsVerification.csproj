@@ -12,6 +12,7 @@
     <Compile Include="DatasetChecks.cs" />
     <Compile Include="RuntimeTrainingChecks.cs" />
     <Compile Include="RuntimeTestDevices.cs" />
+    <Compile Include="PreviewSessionChecks.cs" />
     <Compile Include="../StudioRuntime.cs" Link="StudioRuntime.cs" />
     <Compile Include="../PrecisionTimer.cs" Link="PrecisionTimer.cs" />
     <Compile Include="../HighResolutionReleaseTimer.cs" Link="HighResolutionReleaseTimer.cs" />
@@ -20,7 +21,15 @@
     <Compile Include="../Vision/LatestFrameBuffer.cs" Link="Vision/LatestFrameBuffer.cs" />
     <Compile Include="../Vision/CapturedVisionFrame.cs" Link="Vision/CapturedVisionFrame.cs" />
     <Compile Include="../Vision/VisionTrainingRecorder.cs" Link="Vision/VisionTrainingRecorder.cs" />
+    <Compile Include="../Vision/VisionSession.cs" Link="Vision/VisionSession.cs" />
+    <Compile Include="../Vision/VisionModel.cs" Link="Vision/VisionModel.cs" />
+    <Compile Include="../Vision/VisionModelManifest.cs" Link="Vision/VisionModelManifest.cs" />
+    <Compile Include="../Vision/ShotTracker.cs" Link="Vision/ShotTracker.cs" />
+    <Compile Include="../Vision/FramePreprocessor.cs" Link="Vision/FramePreprocessor.cs" />
+    <Compile Include="../Vision/VisionDiagnostics.cs" Link="Vision/VisionDiagnostics.cs" />
+    <Compile Include="../Vision/VisionPerformance.cs" Link="Vision/VisionPerformance.cs" />
     <Compile Include="../Core/*.cs" Link="Core/%(Filename)%(Extension)" />
     <PackageReference Include="MoonSharp" Version="2.0.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.31.1" />
   </ItemGroup>
 </Project>

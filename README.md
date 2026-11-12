@@ -32,6 +32,10 @@ Install [optional voice models](docs/voice-models.md) into the publish folder wh
 
 Run the controller logic checks with `dotnet run --project .\src\AccessRelayStudio\Verification\Verification.csproj -c Release`.
 
+Remote Play Vision separates **Configuration** from **Live Capture**. Observation status, start/stop and arming controls remain above both tabs. The Live Capture tab contains the preview, timing statistics and training controls. Switching tabs keeps the same capture/inference session; preview copies and detailed timing presentation pause while Live Capture is hidden or the application is minimized.
+
+The source picker refreshes when opened and while Configuration is idle. It lists application windows; a browser window shows its active tab rather than listing each background tab. Renamed windows retain their selection, while closed windows are removed without automatically selecting another source.
+
 This experimental branch uses the Windows GPU ONNX Runtime package, which also supplies CPU inference. Choose **CPU** or **CUDA** explicitly for vision; CUDA is the default and fails visibly if unavailable. CPU vision, capture-only observation and the existing CPU audio path do not initialize CUDA. CUDA vision requires compatible CUDA 13/cuDNN 9 dependencies for the pinned ONNX Runtime build. The scoped [experimental launcher](scripts/Start-VisionExperiment.ps1) changes dependency lookup only for its child process. Backend changes require matching validation/calibration context before automatic release can arm. Python is used by offline training/evaluation tools, not by the production vision loop.
 
 ## License

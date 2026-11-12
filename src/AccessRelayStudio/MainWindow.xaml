@@ -414,6 +414,7 @@
                     <ScrollViewer x:Name="DetailScroll" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="Details" Spacing="12" />
                     </ScrollViewer>
+                    <Grid x:Name="VisionHost" Grid.Row="1" Visibility="Collapsed" />
                     <ScrollViewer x:Name="DashboardScroll" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                         <Grid Margin="3,4,10,5" RowSpacing="13" ColumnSpacing="13"
                               RowDefinitions="Auto,Auto,Auto" SizeChanged="ArrangeDashboardCards">
