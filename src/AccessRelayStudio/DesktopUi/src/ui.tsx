@@ -15,6 +15,7 @@ export interface PageProps { state: any; status: any; command: (action: string, 
 const unsavedDrafts = new Set<symbol>();
 const openModals = new Set<HTMLDialogElement>();
 const modalOpeners = new WeakMap<Element, HTMLElement>();
+export function activeModal() { return [...openModals].at(-1) ?? null; }
 let originalBodyOverflow = '';
 function syncModalAnnouncements() {
   const active = [...openModals].at(-1);

@@ -52,6 +52,7 @@ internal static class RuntimeAccessibilityChecks
             "Reconnect latched a held control.");
         Console.WriteLine("SUCCESS: real runtime sticky composition, Stop, profile/device changes, disconnect and raw recording with simulated devices.");
         Smoothing();
+        Navigation();
     }
 
     private static void Smoothing()
@@ -89,6 +90,52 @@ internal static class RuntimeAccessibilityChecks
         runtime.StopOutput(stopScripts: true); runtime.Attach(new UsbipXboxOutput());
         Wait(() => runtime.Latest?.Output == default(ControllerState), "Output restart retained smoothing history.");
         Console.WriteLine("SUCCESS: real runtime smoothing, immediate deadzone neutralization, raw recording/training and unsmoothed sequences with simulated devices.");
+    }
+
+    private static void Navigation()
+    {
+        using var input = new EliteInputMonitor();
+        using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(5, 5));
+        runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Navigation input/output did not connect.");
+        var config = new SwitchNavigationSettings(true, ControlId.DPadRight, ControlId.A, 50);
+        runtime.ConfigureNavigation(config);
+        var previous = runtime.Latest;
+        Wait(() => !ReferenceEquals(runtime.Latest, previous), "Navigation did not observe released controls.");
+        var step = default(ControllerState) with { Buttons = (ushort)ControlId.DPadRight, RightX = short.MaxValue };
+        input.SetState(step);
+        Wait(() => runtime.NavigationStatus.Events.Length == 1, "Physical step did not reach navigation.");
+        Wait(() => runtime.Latest is { } sample && sample.Input.State == step && sample.Output == default(ControllerState),
+            "Navigation leaked physical controls to gameplay.");
+        input.SetState(default); Wait(() => runtime.Latest?.Input.State == default(ControllerState), "Navigation release was not observed.");
+        var select = default(ControllerState) with { Buttons = (ushort)ControlId.A };
+        input.SetState(select);
+        Wait(() => runtime.NavigationStatus.Events.Length == 2, "Physical selection did not reach navigation.");
+        var history = runtime.NavigationStatus;
+        if (history.Events[0].Action != SwitchNavigationAction.Step || history.Events[1].Action != SwitchNavigationAction.Activate)
+            throw new InvalidOperationException("Navigation event order changed.");
+        runtime.BeginVisionSession();
+        if (runtime.SetVisionArmed(true)) throw new InvalidOperationException("Vision armed during controller navigation.");
+        runtime.ConfigureNavigation(config with { Enabled = false });
+        previous = runtime.Latest;
+        Wait(() => !ReferenceEquals(runtime.Latest, previous) && runtime.Latest?.Output == default(ControllerState),
+            "Exiting navigation forwarded a held selection press.");
+        input.SetState(default); Wait(() => runtime.Latest?.Input.State == default(ControllerState), "Exit release was not observed.");
+        input.SetState(select); Wait(() => runtime.Latest?.Output.Buttons == select.Buttons, "Fresh gameplay press after navigation was lost.");
+        input.SetState(default); Wait(() => runtime.Latest?.Input.State == default(ControllerState), "Gameplay release was not observed.");
+        runtime.ConfigureNavigation(config);
+        long generation = runtime.NavigationStatus.Generation;
+        input.SetConnection(false, 2); Wait(() => runtime.Latest?.Input.IsConnected == false, "Navigation disconnect was not observed.");
+        input.SetState(select); input.SetConnection(true, 3);
+        Wait(() => runtime.Latest is { } sample && sample.Input.IsConnected && sample.Input.State == select, "Navigation reconnect was not observed.");
+        if (runtime.NavigationStatus.Generation <= generation || runtime.NavigationStatus.Events.Length != 0)
+            throw new InvalidOperationException("Reconnect retained navigation history or selected a held control.");
+        runtime.Apply(StudioProfile.CreateDefault());
+        if (runtime.NavigationStatus.Events.Length != 0) throw new InvalidOperationException("Profile change retained navigation events.");
+        runtime.StopOutput(stopScripts: true);
+        if (runtime.NavigationStatus.Enabled || runtime.NavigationStatus.Events.Length != 0)
+            throw new InvalidOperationException("Stop retained controller navigation.");
+        Console.WriteLine("SUCCESS: runtime switch navigation, neutral gameplay output, ordered bridge history, release gate, profile/disconnect resets and Stop.");
     }
 
     private static void Wait(Func<bool> condition, string message)

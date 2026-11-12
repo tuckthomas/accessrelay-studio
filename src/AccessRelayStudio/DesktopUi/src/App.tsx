@@ -8,6 +8,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { VoicePage } from './pages/VoicePage';
 import { VisionPage } from './pages/VisionPage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
+import { SwitchNavigation } from './SwitchNavigation';
 
 type Page = 'workspace' | 'controller' | 'vision' | 'voice' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
@@ -93,9 +94,11 @@ export function App() {
       <header className="app-topbar">
         <div className="topbar-breadcrumb"><span>Studio</span><Icon name="chevronRight" size={15} /><strong>{currentLabel}</strong></div>
         <div className="topbar-actions"><span className="local-indicator"><span className={'status-dot' + (anythingRunning ? ' live' : '')} />{anythingRunning ? 'Session active' : 'All quiet'}</span>
+          <SwitchNavigation controller={state.controller} status={controllerStatus} command={controllerCommand} />
           {voiceStatus.isRunning && <Badge tone="success"><Icon name="mic" size={15} />Mic live</Badge>}
           <Badge>Beta</Badge>
           <Button variant="ghost" className="stop-everything" busy={stopping} onClick={async () => {
+            window.dispatchEvent(new Event('accessrelay-stop-all'));
             setStopping(true); try { await controllerCommand('stopAll'); } catch {} finally { setStopping(false); }
           }}><Icon name="stop" size={15} />Stop everything</Button>
         </div>

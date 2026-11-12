@@ -1,5 +1,32 @@
 # Controller accessibility
 
+## Switch navigation
+
+Choose **Switch navigation** in the top bar. One-switch mode advances focus at the
+configured interval; the select switch activates the outlined control. Two-switch
+mode uses separate step and select inputs. Keyboard switches default to **Enter**
+for step and **Space** for select. **F8** starts/stops and **Escape** stops scanning;
+an open dialog remains available to dismiss with another Escape. Preferences are
+remembered, but scanning never starts automatically when Studio opens.
+
+Choose keyboard switches or the selected physical controller, including adaptive
+paddles. Controller mode temporarily sends neutral gameplay output and pauses
+sequences/vision. Release all controls before returning to gameplay. It cannot be
+started during macro or gameplay training recording. Keyboard scanning can navigate
+recording controls without routing a gamepad away from manual input. Scanning stops
+when Studio loses focus, on Stop everything, or when its controller disconnects.
+
+Scanning stays inside the active dialog/menu and skips unavailable controls. Select
+a slider, number field or dropdown to open **Decrease / previous**, **Increase / next**,
+and **Finish editing** actions. Text fields still need a text-entry device or the
+Windows on-screen keyboard. **Stop scanning** is also part of the scanning ring.
+
+Controller events use bounded ordered history with generation/sequence identifiers,
+per-switch debounce, and fresh-release requirements after profile/device changes.
+Repeated snapshots do not repeat selections. Lost or delayed history stops scanning
+instead of selecting an item using uncertain input. Browser preview supports keyboard
+switches; native physical-controller routing is tested separately on Windows.
+
 ## Sticky buttons
 
 In **Controller → Accessibility**, select the buttons or triggers you want to toggle,

@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Switch navigation ordering, debounce, bounded history and fresh physical edges", SwitchNavigationVerification.Run),
     ("Elapsed-time stick smoothing, independent axes, neutralization and persistence", StickSmoothingVerification.Run),
     ("Sticky button edges, resets, manual composition and legacy profile compatibility", StickyButtonVerification.Run),
     ("Vision deadlines, manual cancellation, release latch, generations, freshness and ownership", VisionVerification.Run),

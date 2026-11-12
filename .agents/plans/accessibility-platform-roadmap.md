@@ -10,8 +10,9 @@ operator activation must remain compatible.
 
 Current checkpoint: sections 1–2 are complete. Sections 3–4 have shipped code and
 passing Windows CI with simulated devices; physical-device acceptance remains open.
+Section 5 implementation is being validated and pushed before continuing section 6.
 Section 10 has the session-provenance guard implemented; its conversion/data work
-remains open. Sections 5–9 and 11–12 are queued, not implemented.
+remains open. Sections 6–9 and 11–12 are queued, not implemented.
 
 ## Delivery and evidence
 
@@ -107,17 +108,22 @@ Real physical comfort/latency validation remains open.
 
 ## 5. Switch and controller navigation
 
-- [ ] Add opt-in one-switch automatic scanning and two-switch step/select modes with
+- [x] Add opt-in one-switch automatic scanning and two-switch step/select modes with
       configurable timing, debounce, focus indication, and an accessible exit.
-- [ ] Scope scanning to the active modal/menu or page; skip hidden/disabled controls
+- [x] Scope scanning to the active modal/menu or page; skip hidden/disabled controls
       and support editing sliders/selects without losing navigation.
-- [ ] Route native physical input through the bridge; define input consumption so
+- [x] Route native physical input through the bridge; define input consumption so
       navigation does not accidentally activate gameplay. Keep browser preview useful.
-- [ ] Test dynamic controls, dialogs, repeat edges, Stop, disconnect, and profile changes.
+- [x] Test dynamic controls, dialogs, repeat edges, Stop, disconnect, and profile changes.
 - [ ] Validate native gamepad/adaptive-switch behavior on Windows before completion.
 - [ ] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: pending.
+Implementation commit: pending push. Validation: 54 frontend unit tests, 16 Chromium
+browser tests, portable controller checks, and Windows verification cross-compilation
+passed. Tests exercise keyboard scanning, native bridge ordering, stale pre-activation
+snapshots, lost history, sliders/selects, nested scope, repeat suppression and exits.
+New Windows runtime tests verify physical edges and neutral gameplay with simulated
+devices. Windows CI and real adaptive-switch/gamepad acceptance remain pending.
 
 ## 6. Nonvisual feedback
 

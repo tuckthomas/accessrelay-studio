@@ -18,6 +18,8 @@ internal sealed class StudioRuntime : IDisposable
     private readonly MacroEngine _engine = new();
     private readonly StickyButtons _sticky = new();
     private readonly StickSmoother _smoother = new();
+    private readonly SwitchNavigationInput _navigation = new();
+    private bool _navigationNeedsNeutral;
     private readonly object _sync = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly Thread _worker;
@@ -45,6 +47,26 @@ internal sealed class StudioRuntime : IDisposable
     public bool IsVisionTrainingRecording { get { lock (_sync) return _visionTrainingRecording; } }
     public double? RecentOutputHandoffMs { get { lock (_sync) return (_output as UsbipXboxOutput)?.RecentHandoffMs; } }
     public VisionStatusSnapshot VisionStatus { get { lock (_sync) return _vision.Status; } }
+    internal SwitchNavigationSnapshot NavigationStatus { get { lock (_sync) return _navigation.Snapshot(_clock.ElapsedMilliseconds); } }
+
+    internal void ConfigureNavigation(SwitchNavigationSettings settings)
+    {
+        settings.Validate();
+        lock (_sync)
+        {
+            if (settings.Enabled && _latest?.Input.IsConnected != true)
+                throw new InvalidOperationException("Connect the selected physical controller before using controller switches.");
+            if (settings.Enabled && (_visionTrainingRecording || _recorder is not null))
+                throw new InvalidOperationException("Finish recording before routing controller input to Studio navigation.");
+            bool wasEnabled = _navigation.Enabled;
+            _navigation.Configure(settings);
+            _navigationNeedsNeutral |= wasEnabled || settings.Enabled;
+            _sticky.Reset(); _smoother.Reset();
+            if (settings.Enabled) _engine.SetEnabled(false);
+            InvalidateVisionLocked("Controller navigation changed. Assistance is disarmed.");
+            _output?.Neutralize();
+        }
+    }
 
     public void ConfigureVision(VisionSettings settings)
     {
@@ -97,8 +119,8 @@ internal sealed class StudioRuntime : IDisposable
         {
             // The entry check and all script/recording transitions share this lock, so training
             // cannot race an enable request after VisionSession's earlier UI eligibility check.
-            if (recording && (_engine.ScriptsEnabled || _recorder is not null))
-                throw new InvalidOperationException("Turn off macro scripts and finish macro recording before recording manual gameplay training data.");
+            if (recording && (_engine.ScriptsEnabled || _recorder is not null || _navigation.Enabled || _navigationNeedsNeutral))
+                throw new InvalidOperationException("Turn off sequences and controller navigation, release controls, and finish macro recording before recording manual gameplay training data.");
             _visionTrainingRecording = recording;
             _sticky.Reset();
             _smoother.Reset();
@@ -151,6 +173,7 @@ internal sealed class StudioRuntime : IDisposable
             _sticky.Configure(profile.StickyControls);
             _smoother.Configure(profile.Smoothing);
             _visionProfile = profile;
+            _navigation.ResetInput();
             InvalidateVisionLocked("Macro profile changed. Arm vision again after releasing the shoot button.");
         }
     }
@@ -175,6 +198,7 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             _input.SelectDevice(id);
+            _navigation.ResetInput();
             _sticky.Reset();
             _smoother.Reset();
             Interlocked.Increment(ref _selectionVersion);
@@ -200,6 +224,8 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             RequireTrainingStoppedLocked("starting a macro recording");
+            if (_navigation.Enabled || _navigationNeedsNeutral)
+                throw new InvalidOperationException("Exit controller navigation and release the controls before recording manual input.");
             if (_recorder is not null)
                 return;
             if (_pending is not null && !replacePending)
@@ -288,6 +314,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void DisconnectOutput(string status = "Virtual output off")
     {
+        if (_navigation.Enabled) { _navigation.Stop(); _navigationNeedsNeutral = true; }
         _sticky.Reset();
         _smoother.Reset();
         InvalidateVisionLocked("Virtual output stopped. Vision release is disarmed.");
@@ -352,13 +379,21 @@ internal sealed class StudioRuntime : IDisposable
                     if (connection != input.ConnectionVersion)
                     {
                         connection = input.ConnectionVersion;
+                        _navigation.ResetInput();
                         _sticky.Reset();
                         _smoother.Reset();
                         _engine.Tick(default, PaddleButtons.None, false, now);
                         InvalidateVisionLocked("Physical controller connection changed. Vision release is disarmed.");
                     }
                     ControllerState state;
-                    if (_recorder is not null)
+                    _navigation.Sample(input.State, input.HeldPaddles | input.PressedPaddles, input.IsConnected, now);
+                    if (!_navigation.Enabled && _navigationNeedsNeutral && input.IsConnected
+                        && ControlMap.PressedMask(input.State, input.HeldPaddles | input.PressedPaddles) == 0
+                        && _stickDeadzone.Apply(input.State) is { LeftX: 0, LeftY: 0, RightX: 0, RightY: 0 })
+                        _navigationNeedsNeutral = false;
+                    if (_navigation.Enabled || _navigationNeedsNeutral)
+                        state = default;
+                    else if (_recorder is not null)
                     {
                         // Capture from the physical sample before any script or virtual-output processing.
                         // The unfiltered sample remains available for manual play during the take.
@@ -433,6 +468,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private bool VisionMacroConflict()
     {
+        if (_navigation.Enabled || _navigationNeedsNeutral) return true;
         if (_visionProfile.StickyControls.Contains(_vision.Settings.ShootButton)) return true;
         if (!_engine.ScriptsEnabled) return false;
         var binding = _visionProfile.GetBinding(_vision.Settings.ShootButton);

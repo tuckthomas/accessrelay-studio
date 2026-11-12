@@ -93,6 +93,7 @@ internal sealed class DesktopControllerService : IDesktopModule
             visibleControls = sample?.VisibleControls ?? 0,
             supportsBackgroundInput = sample?.Input.SupportsBackgroundInput == true,
             training = runtime?.IsVisionTrainingRecording == true,
+            navigation = runtime?.NavigationStatus,
             recording = new { isRecording = recording?.IsRecording == true, hasInput = recording?.HasInput == true,
                 elapsedMs = recording?.ElapsedMs ?? 0, pending = recording?.Pending is { } pending ? RecordingSummary(pending) : null,
                 note = recording?.Note }, message = _notice
@@ -106,6 +107,11 @@ internal sealed class DesktopControllerService : IDesktopModule
         {
             case "state": return GetState();
             case "deviceRefresh": return GetState();
+            case "navigationSet":
+                Runtime.ConfigureNavigation(new(args.Flag("enabled"), args.EnumValue<ControlId>("step"),
+                    args.EnumValue<ControlId>("activate"), args.GetProperty("debounceMs").GetInt32()));
+                _notice = args.Flag("enabled") ? "Controller input is navigating Studio; gameplay output is neutral." : "Controller navigation is off. Release controls before returning to the game.";
+                return Runtime.NavigationStatus;
             case "deviceSelect": Runtime.SelectController(args.Text("id")); _notice = "Input controller selected."; break;
             case "outputStart": await StartOutputAsync(); break;
             case "outputStop": StopOutput(); break;

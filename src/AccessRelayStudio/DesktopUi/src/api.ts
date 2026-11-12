@@ -102,6 +102,10 @@ async function previewCommand(method: string, args: any): Promise<any> {
     if (action === 'profileCreate' || action === 'profileDuplicate') {
       const id = crypto.randomUUID(), name = args.name || 'New setup';
       controller.profiles.push({ id, name }); controller.activeProfile = { ...structuredClone(controller.activeProfile), id, name };
+    } else if (action === 'profileSelect') {
+      const profile = controller.profiles.find((item: any) => item.id === args.id);
+      if (!profile) throw new Error('That setup is unavailable.');
+      controller.activeProfile = { ...structuredClone(controller.activeProfile), ...profile };
     } else if (action === 'profileRename') {
       controller.activeProfile.name = args.name; controller.profiles.find((profile: any) => profile.id === controller.activeProfile.id).name = args.name;
     } else if (action === 'bindingSave') {
@@ -109,6 +113,8 @@ async function previewCommand(method: string, args: any): Promise<any> {
       controller.activeProfile.bindings[index] = { ...controller.activeProfile.bindings[index], ...args };
     } else if (action === 'timingSave') {
       controller.activeProfile.timings.find((item: any) => item.variant === args.variant).timing = args.timing;
+    } else if (action === 'navigationSet') {
+      if (args.enabled) throw new Error('Controller switches need the installed app. Choose keyboard switches for the design preview.');
     } else if (action === 'stickySave') controller.activeProfile.stickyControls = args.controls;
     else if (action === 'smoothingSave') controller.activeProfile.smoothing = args.settings;
     else if (action === 'deadzoneSave') controller.deadzone = args;
