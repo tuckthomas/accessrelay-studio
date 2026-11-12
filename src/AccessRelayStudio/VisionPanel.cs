@@ -117,7 +117,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
         controls.Children.Add(_start);
         var stop = new Button { Content = new TextBlock { Text = "Stop live view", FontSize = 14, TextWrapping = TextWrapping.Wrap }, FontSize = 14,
             HorizontalAlignment = HorizontalAlignment.Stretch };
-        stop.Click += (_, _) => RunAction(Stop);
+        stop.Click += (_, _) => RunAction(() => { _session?.StopTraining(); Stop(); });
         Grid.SetColumn(stop, 1); controls.Children.Add(stop);
         Grid.SetColumn(_armed, 2); controls.Children.Add(_armed);
         header.Children.Add(controls);
