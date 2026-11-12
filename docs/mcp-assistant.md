@@ -129,7 +129,9 @@ Jobs outlive a single tool request and have explicit IDs; inspect status before
 retrying an interrupted start. Revoke, expiry, Stop everything or app close cancels
 jobs. Foreground controller/capture/voice mutations also cancel offline work, while
 ordinary state reads and navigation between pages do not. Completed/cancelled
-status is published after owned-process/log cleanup. Files are preserved, not erased.
+status is published after owned-process/log cleanup. A foreground action between
+the idle check and job admission rejects that pending request, even if there was
+no running job to cancel yet. Files are preserved, not erased.
 
 ## Architecture and validation
 

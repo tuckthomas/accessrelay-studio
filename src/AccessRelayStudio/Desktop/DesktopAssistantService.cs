@@ -32,9 +32,10 @@ internal sealed class DesktopAssistantService : IStudioApplicationContext, IAsyn
         _offline = new(_access, Path.Combine(AppContext.BaseDirectory, "Mcp", "TrainingTools"));
         Service.OfflineDispatch = async (request, cancellation) =>
         {
+            long foreground = _offline.ForegroundGeneration;
             if (request.Operation is "auditDataset" or "visionExperiment")
                 StudioAssistantService.RequireIdle((await ReadAsync(cancellation)).Runtime);
-            return await _offline.DispatchAsync(request, cancellation);
+            return await _offline.DispatchAsync(request, cancellation, foreground);
         };
     }
     internal object UiState() => new

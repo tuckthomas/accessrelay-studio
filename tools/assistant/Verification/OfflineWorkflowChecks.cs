@@ -21,6 +21,16 @@ static class OfflineWorkflowChecks
             var inputs = registration.GetProperty("inputs").EnumerateArray().ToArray();
             string trainId = inputs[0].GetProperty("id").GetString()!, valId = inputs[1].GetProperty("id").GetString()!, thresholdId = inputs[2].GetProperty("id").GetString()!;
             Check(!registration.GetRawText().Contains(root) && !registration.GetRawText().Contains("session.json"), "Registration leaked paths.");
+            // A foreground action between the native idle read and job admission
+            // must reject both operations, even if no job existed to cancel yet.
+            long foreground = jobs.ForegroundGeneration;
+            jobs.CancelAll();
+            foreach (string operation in new[] { "auditDataset", "visionExperiment" })
+            {
+                try { await jobs.DispatchAsync(Request(operation, new { }), default, foreground); throw new Exception("Stale foreground job admitted"); }
+                catch (AssistantException error) when (error.Code == "foregroundChanged") { }
+            }
+            Check(jobs.Jobs().Length == 0 && !Directory.EnumerateDirectories(root, "accessrelay-*").Any(), "Rejected job created work or artifacts.");
             await StartAndWait(jobs, "auditDataset", new { datasetIds = new[] { trainId, valId } });
             var audit = jobs.Jobs().Last(); Check(audit.State == "completed" && audit.Report?.GetProperty("sessionCount").GetInt32() == 2, "Actual stdlib audit failed: " + audit.ErrorCode);
             await StartAndWait(jobs, "visionExperiment", new { trainingIds = new[] { trainId }, validationIds = new[] { valId }, thresholdsId = thresholdId, planOnly = true, epochs = 1, seed = 42 });
@@ -68,13 +78,13 @@ time.sleep(60)
                 }
             }
             catch { if (!disposed) await stalled.DisposeAsync(); throw; }
-            Console.WriteLine("PASS real stdlib audit and six-job plan-only runner, registered IDs, private-path redaction, source changes and revoked offline access.");
+            Console.WriteLine("PASS real stdlib audit and six-job plan-only runner, foreground admission races, registered IDs, private-path redaction, source changes and revoked offline access.");
         }
         finally { Directory.Delete(root, recursive: true); }
     }
     static async Task StartAndWait(OfflineJobManager manager, string operation, object args)
     {
-        await manager.DispatchAsync(Request(operation, args), default);
+        await manager.DispatchAsync(Request(operation, args), default, manager.ForegroundGeneration);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
         while (manager.Jobs().Last().State is "queued" or "running") await Task.Delay(25, timeout.Token);
         if (manager.Jobs().Last().State != "completed")

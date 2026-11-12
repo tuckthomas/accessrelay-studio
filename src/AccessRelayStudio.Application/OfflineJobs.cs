@@ -23,6 +23,8 @@ public sealed class OfflineJobManager(AssistantSession access, string trainingTo
     private readonly Dictionary<string, (RegisteredTrainingInput View, string Path, string? Digest)> _inputs = [];
     private readonly Dictionary<string, OfflineJob> _jobs = [];
     private string? _python, _workspace;
+    private long _foregroundGeneration;
+    public long ForegroundGeneration { get { lock (_gate) return _foregroundGeneration; } }
     public void Register(string kind, string path)
     {
         path = System.IO.Path.GetFullPath(path);
@@ -65,7 +67,7 @@ public sealed class OfflineJobManager(AssistantSession access, string trainingTo
             return new { inputs = _inputs.Values.Select(item => item.View).ToArray(), interpreterRegistered = _python is not null, workspaceRegistered = _workspace is not null };
         }
     }
-    public Task<object?> DispatchAsync(AssistantRequest request, CancellationToken cancellation)
+    public Task<object?> DispatchAsync(AssistantRequest request, CancellationToken cancellation, long? expectedForegroundGeneration = null)
     {
         var grant = access.Require(offline: true); cancellation.ThrowIfCancellationRequested();
         if (request.Operation == "trainingInputs") return Task.FromResult<object?>(RegistrationState());
@@ -85,6 +87,8 @@ public sealed class OfflineJobManager(AssistantSession access, string trainingTo
         lock (_gate)
         {
             access.Check(grant);
+            if (expectedForegroundGeneration is { } expected && expected != _foregroundGeneration)
+                throw new AssistantException("foregroundChanged", "Foreground processing changed while the offline request was being checked. Stop processing and request the job again.");
             if (_python is null || _workspace is null) throw new AssistantException("offlineNotConfigured", "Register a trusted Python interpreter and output workspace in Studio Settings.");
             if (_jobs.Values.Any(job => job.View.State is "queued" or "running")) throw new AssistantException("jobActive", "Only one offline job runs at a time.");
             if (_jobs.Count >= 16) throw new AssistantException("jobLimit", "At most 16 jobs run per Studio session. Review local evidence and restart before more jobs.");
@@ -189,7 +193,14 @@ public sealed class OfflineJobManager(AssistantSession access, string trainingTo
             heldOutEvaluated = false, hardwareValidated = false, promotionApproved = false }, AssistantJson.Options);
     }
     public OfflineJobView[] Jobs() { lock (_gate) return _jobs.Values.Select(job => job.View).ToArray(); }
-    public void CancelAll() { lock (_gate) foreach (var job in _jobs.Values) job.Stop.Cancel(); }
+    public void CancelAll()
+    {
+        lock (_gate)
+        {
+            _foregroundGeneration++;
+            foreach (var job in _jobs.Values) job.Stop.Cancel();
+        }
+    }
     public async ValueTask DisposeAsync()
     {
         CancelAll(); Task[] tasks; lock (_gate) tasks = _jobs.Values.Select(job => job.Completion).ToArray();
