@@ -65,7 +65,7 @@ export function WorkspacePage({ state, status, command, navigate }: {
       : commandListening ? 'Voice commands are listening' : active.voice ? 'Starting voice…' : unavailable.voice || 'Voice processing is off' },
   ];
   return <div className="page-stack">
-    <SectionHeader title="Your workspace" description="Your controller, your voice, your way to play." />
+    <SectionHeader eyebrow="A space for your setup" title="Your workspace" description="Your controller, your voice, your way to play." />
     <div className="workspace-grid">
       <section className="workspace-hero">
         <div className="hero-kicker"><Icon name="gamepad" size={20} />Controller workspace</div>
