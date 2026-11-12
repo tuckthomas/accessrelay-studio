@@ -1,4 +1,5 @@
 using EliteScriptStudio.Core;
+using System.Runtime.CompilerServices;
 
 internal static class RuntimeLockVerification
 {
@@ -20,13 +21,23 @@ internal static class RuntimeLockVerification
         Equal(1, Snapshot(collector, newer)!.VisionSubmission.Samples);
         Equal(true, collector.Finish(newer)); collector.Record(RuntimeLockPath.VisionSubmission, newer, 200, 205);
         Equal(1, Snapshot(collector, newer)!.VisionSubmission.Samples);
-        token = collector.Begin(); collector.Record(RuntimeLockPath.InputPoll, token, 1, 2);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 1; i <= 100000; i++) collector.Record(RuntimeLockPath.InputPoll, token, i * 10, i * 10 + 1);
-        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+        token = collector.Begin();
+        _ = MeasureRecordAllocations(collector, token); // Warm the full measured path, including the allocation counter.
+        token = collector.Begin();
+        Equal(0L, MeasureRecordAllocations(collector, token));
+        Equal(100000L, Snapshot(collector, token)!.InputPoll.TotalSamples);
         var invalid = Snapshot(collector, token)! with { Generation = 0 };
         try { RuntimeLockMeasurements.Validate(invalid); throw new Exception("Invalid measurement generation accepted."); }
         catch (InvalidDataException) { }
+    }
+    // Keep tiered compilation / loop OSR of this test harness outside the measured
+    // interval. The production Record path still has a strict zero-byte assertion.
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private static long MeasureRecordAllocations(RuntimeLockMeasurements collector, long token)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 1; i <= 100000; i++) collector.Record(RuntimeLockPath.InputPoll, token, i * 10, i * 10 + 1);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
     private static RuntimeLockSnapshot? Snapshot(RuntimeLockMeasurements collector, long token)
     {
