@@ -48,6 +48,8 @@ public static class AssistantWire
         }
         await WriteAsync(pipe, new AssistantRequest(operation, JsonSerializer.SerializeToElement(args, AssistantJson.Options)), timeout.Token);
         var reply = AssistantJson.Read<AssistantReply>(await ReadAsync(pipe, timeout.Token));
+        // DisconnectNamedPipe discards unread reply bytes on Windows. Acknowledge the complete frame first.
+        await pipe.WriteAsync(new byte[] { 0xAC }, timeout.Token); await pipe.FlushAsync(timeout.Token);
         if (reply.SchemaVersion != 1) throw new AssistantException("protocolVersion", "Update the MCP bridge to match the running Studio installation.");
         return reply;
     }
@@ -103,6 +105,9 @@ public sealed class AssistantPipeServer : IAsyncDisposable
                 { reply = new(false, null, "invalidRequest", "The assistant request is malformed or outside its bounds."); }
                 catch (Exception) { reply = new(false, null, "requestFailed", "The request could not finish. Inspect its state in Studio before retrying."); }
                 await AssistantWire.WriteAsync(_listener, reply, deadline.Token);
+                var acknowledgement = new byte[1];
+                await _listener.ReadExactlyAsync(acknowledgement, deadline.Token);
+                if (acknowledgement[0] != 0xAC) throw new IOException("The assistant response was not acknowledged.");
             }
             catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException) { }
             finally
