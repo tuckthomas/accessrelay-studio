@@ -12,11 +12,18 @@ engine/presentation separation through real project references.
 
 ## 2. Remove the inactive native screens
 
-- [ ] Confirm the active launch path and references before deleting legacy UI.
-- [ ] Remove the unused MainWindow, native panels/editors and their UI-only helpers.
-- [ ] Remove unused native resource definitions; retain the current shell, loading,
+- [x] Confirm the active launch path and references before deleting legacy UI.
+- [x] Remove the unused MainWindow, native panels/editors and their UI-only helpers.
+- [x] Remove unused native resource definitions; retain the current shell, loading,
       recovery and emergency-stop controls, React assets and 3D controller viewer.
-- [ ] Record the implementation commit and validation evidence.
+- [x] Record the implementation commit and validation evidence.
+
+Implementation: `2fae5d685d939ee1cfba27c22933a6d153c14004`. The app launch path
+constructs only DesktopWindow; references to the removed screen/helper types stayed
+inside the legacy MainWindow tree. Removed 24 inactive UI files and their unused
+brush resources (9,152 lines). App.xaml and DesktopWindow.xaml are the only remaining
+XAML sources. React, the 3D viewer, native loading/retry/emergency-stop and shutdown
+logic remain in the active host. Full Windows compilation is tracked in section 4.
 
 ## 3. Enforce project boundaries
 
