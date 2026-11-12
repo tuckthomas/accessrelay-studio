@@ -7,7 +7,8 @@ namespace EliteScriptStudio.Vision;
 
 internal readonly record struct VisionSessionStatus(bool Running, bool ModelReady, bool CanArm, string Message,
     long Frames, long Predictions, long DroppedFrames, double LastProcessingMs, long LatestCaptureTicks,
-    int CaptureWidth = 0, int CaptureHeight = 0, long ExcludedTimingFrames = 0);
+    int CaptureWidth = 0, int CaptureHeight = 0, long ExcludedTimingFrames = 0,
+    bool ModelLoadFailed = false, bool SourceStale = false, bool CaptureFailed = false);
 
 internal sealed class VisionPreview(byte[] pixels, int width, int height, int stride, long sequence) : IDisposable
 {
@@ -30,7 +31,7 @@ internal sealed class VisionSession : IDisposable
     private VisionModel? _model;
     private VisionTrainingRecorder? _recorder;
     private VisionSettings? _activeSettings;
-    private bool _trainingInhibited;
+    private bool _trainingInhibited, _stopping;
     private string? _modelHash;
     private VisionDiagnosticEvent[] _lastModelEvents = [];
     private VisionPreview? _preview;
@@ -47,6 +48,7 @@ internal sealed class VisionSession : IDisposable
 
     internal VisionSession(StudioRuntime runtime) => _runtime = runtime;
     internal VisionSessionStatus Status { get { lock (_gate) return _status; } }
+    internal bool IsStopping { get { lock (_gate) return _worker?.IsAlive == true && (_stopping || !_status.Running); } }
     internal VisionPerformanceSnapshot Performance
     {
         get
@@ -70,6 +72,14 @@ internal sealed class VisionSession : IDisposable
     }
     internal string TrainingStatus { get { lock (_gate) return _recorder?.Message ?? "No training take is recording."; } }
     internal bool IsRecordingTraining { get { lock (_gate) return _recorder?.IsRecording == true; } }
+    internal VisionTrainingStatus TrainingSnapshot
+    {
+        get
+        {
+            lock (_gate) return _recorder?.Snapshot ?? new(false, false, false, false, "", 0, 0,
+                "Viewing only. Observation frames are not saved as training data.");
+        }
+    }
     internal VisionPreview? TakePreview() { lock (_gate) { var value = _preview; _preview = null; return value; } }
 
     // Presentation is optional. Hiding a tab must not stop observation, recording or controller output.
@@ -82,13 +92,14 @@ internal sealed class VisionSession : IDisposable
         }
     }
 
-    internal void Start(nint hwnd, VisionSettings settings)
+    internal void Start(nint hwnd, VisionSettings settings, bool loadModel = true)
     {
         settings.Validate();
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_worker?.IsAlive == true) throw new InvalidOperationException("Stop the current observation session first.");
+            _stopping = false;
             _stop?.Dispose();
             _stop = new CancellationTokenSource();
             var cancellation = _stop.Token;
@@ -104,21 +115,22 @@ internal sealed class VisionSession : IDisposable
             _performanceMissBaseline = _runtime.VisionStatus.MissedDeadlines;
             _modelHash = null; _lastModelEvents = [];
             _preview?.Dispose(); _preview = null;
-            _worker = new Thread(() => Run(hwnd, settings, cancellation))
+            _worker = new Thread(() => Run(hwnd, settings, cancellation, loadModel))
                 { IsBackground = true, Name = "AccessRelay vision" };
             _worker.Start();
         }
     }
 
-    private void Run(nint hwnd, VisionSettings settings, CancellationToken cancellation)
+    private void Run(nint hwnd, VisionSettings settings, CancellationToken cancellation, bool loadModel)
     {
         VisionModel? model = null;
+        bool modelLoadFailed = false;
         try
         {
             using var capture = new RemotePlayCapture();
             capture.Start(hwnd);
             string modelMessage = "Capture only. Select a validated animation model to enable assistance.";
-            if (!string.IsNullOrWhiteSpace(settings.ModelManifestPath))
+            if (loadModel && !string.IsNullOrWhiteSpace(settings.ModelManifestPath))
             {
                 try
                 {
@@ -127,7 +139,11 @@ internal sealed class VisionSession : IDisposable
                     modelMessage = model.ValidationSummary;
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
-                { modelMessage = "Capture only. Model unavailable: " + error.Message; }
+                {
+                    modelLoadFailed = true;
+                    modelMessage = "Capture only. Model unavailable: " + error.Message;
+                    lock (_gate) _status = _status with { ModelLoadFailed = true, Message = modelMessage };
+                }
             }
             cancellation.ThrowIfCancellationRequested();
             long previewAt = 0, sourceGeneration = -1;
@@ -157,7 +173,8 @@ internal sealed class VisionSession : IDisposable
                     model?.ResetTracking();
                 }
                 if (!fresh)
-                    lock (_gate) _status = _status with { CanArm = false, Message = "Source is stale or unchanged. " + modelMessage };
+                    lock (_gate) _status = _status with { CanArm = false, SourceStale = true,
+                        Message = "Source is stale or unchanged. " + modelMessage };
                 if (capture.TryAcquireLatest(out var frame) && frame is not null)
                 {
                     using (frame)
@@ -237,7 +254,8 @@ internal sealed class VisionSession : IDisposable
                             }
                             _status = new(true, model is not null, !cancellation.IsCancellationRequested && !_trainingInhibited && fresh && model?.CanArm == true && sourceReady,
                                 fresh ? modelMessage : "Source is stale or unchanged. " + modelMessage,
-                                frames, predictions, source.DroppedFrames, processingMs, frame.CaptureTicks, frame.Width, frame.Height, excludedTimingFrames);
+                                frames, predictions, source.DroppedFrames, processingMs, frame.CaptureTicks, frame.Width, frame.Height,
+                                excludedTimingFrames, modelLoadFailed, !fresh);
                         }
                     }
                 }
@@ -248,10 +266,11 @@ internal sealed class VisionSession : IDisposable
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception error)
         {
-            lock (_gate) _status = _status with { Message = "Observation stopped: " + error.Message };
+            lock (_gate) _status = _status with { CaptureFailed = true, Message = "Observation stopped: " + error.Message };
         }
         finally
         {
+            lock (_gate) _stopping = true;
             _performance.Finish();
             _runtime.InvalidateVisionSession("Vision observation is stopped.");
             lock (_gate)
@@ -276,6 +295,7 @@ internal sealed class VisionSession : IDisposable
     {
         lock (_gate)
         {
+            _stopping = true;
             _stop?.Cancel();
             _model?.RequestStop();
             _recorder?.Stop();
@@ -318,7 +338,8 @@ internal sealed class VisionSession : IDisposable
     {
         lock (_gate)
         {
-            if (!_status.Running || _activeSettings is null) throw new InvalidOperationException("Start window observation before recording training data.");
+            if (_stopping) throw new InvalidOperationException("Live view is stopping. Record a training clip after it has stopped.");
+            if (!_status.Running || _activeSettings is null) throw new InvalidOperationException("Start live view before recording training data.");
             if (_runtime.ScriptsEnabled || _runtime.Recording.IsRecording)
                 throw new InvalidOperationException("Turn off macro scripts and finish macro recording before capturing manual gameplay training data.");
             if (_recorder?.IsRecording == true) throw new InvalidOperationException("A training take is already recording.");

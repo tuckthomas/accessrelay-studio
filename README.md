@@ -36,6 +36,8 @@ Remote Play Vision separates **Configuration** from **Live Capture**. Observatio
 
 The source picker refreshes when opened and while Configuration is idle. It lists application windows; a browser window shows its active tab rather than listing each background tab. Renamed windows retain their selection, while closed windows are removed without automatically selecting another source.
 
+**Live viewing does not save a recording.** Use the prominent **Record training clip…** action to save a bounded manual gameplay take; its recording/saved status, frame count and folder are shown separately. Recording does not require an AI model. Choose imported models by name from the model dropdown; no trained NBA 2K27 model is bundled.
+
 This experimental branch uses the Windows GPU ONNX Runtime package, which also supplies CPU inference. Choose **CPU** or **CUDA** explicitly for vision; CUDA is the default and fails visibly if unavailable. CPU vision, capture-only observation and the existing CPU audio path do not initialize CUDA. CUDA vision requires compatible CUDA 13/cuDNN 9 dependencies for the pinned ONNX Runtime build. The scoped [experimental launcher](scripts/Start-VisionExperiment.ps1) changes dependency lookup only for its child process. Backend changes require matching validation/calibration context before automatic release can arm. Python is used by offline training/evaluation tools, not by the production vision loop.
 
 ## License

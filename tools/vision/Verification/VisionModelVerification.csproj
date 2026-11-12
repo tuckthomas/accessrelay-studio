@@ -16,6 +16,7 @@
     <Compile Include="../../../src/AccessRelayStudio/Vision/FramePreprocessor.cs" Link="Vision/FramePreprocessor.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionModel.cs" Link="Vision/VisionModel.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionModelManifest.cs" Link="Vision/VisionModelManifest.cs" />
+    <Compile Include="../../../src/AccessRelayStudio/Vision/VisionModelLibrary.cs" Link="Vision/VisionModelLibrary.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionSettingsStore.cs" Link="Vision/VisionSettingsStore.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/ShotTracker.cs" Link="Vision/ShotTracker.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionCalibration.cs" Link="Vision/VisionCalibration.cs" />

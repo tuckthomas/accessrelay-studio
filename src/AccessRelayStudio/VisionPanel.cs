@@ -17,12 +17,18 @@ namespace EliteScriptStudio;
 /// <summary>Experimental vision controls. Loading settings never starts capture or arms output.</summary>
 internal sealed class VisionPanel : UserControl, IDisposable
 {
+    private sealed record ModelChoice(string ManifestPath, string Name, string Status, bool Available,
+        VisionModelLibraryEntry? Entry = null);
+    private const string ViewingNotice = "Live view is running. Record a training clip to save footage; viewing alone does not save it.";
+    private const string RecordingNotice = "Recording a manual training clip. Return focus to Remote Play and perform the shot.";
+    private const string FinalizingNotice = "Finishing the training clip. Wait for its saved status before reviewing it.";
     [ComImport, Guid("905A0FEF-BC53-11DF-8C49-001E4FC686DA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IBufferByteAccess { void Buffer(out nint data); }
     private readonly Func<StudioRuntime?> _runtime;
     private readonly Func<Task> _connectOutput;
     private readonly Microsoft.UI.WindowId _windowId;
     private readonly VisionSettingsStore _store = new();
+    private readonly VisionModelLibrary _modelLibrary = new();
     private VisionSession? _session;
     private Guid _profileId;
     private Guid _macroProfileId;
@@ -37,13 +43,20 @@ internal sealed class VisionPanel : UserControl, IDisposable
     private readonly TextBlock _sourceContext = Text("Choose a Remote Play window in Configuration.");
     private readonly TextBlock _profile = Text("Select a macro profile.");
     private readonly TextBlock _shotProfileInfo = Text("Select a saved NBA 2K27 player/shot profile in Plugins before collecting training data.");
-    private readonly TextBlock _trainingInfo = Text("Training takes contain player-crop images and timestamps. Targets must be labeled after capture.");
+    private readonly TextBlock _trainingInfo = Text("Not recording — live view frames are not saved.");
+    private readonly TextBlock _trainingDetails = Text("Record a training clip to save a 10-second take. A model is not required.");
+    private readonly TextBlock _diagnosticStatus = Text("Live timing details appear after a session starts.");
+    private readonly Expander _diagnostics = new() { Header = new TextBlock { Text = "Timing and diagnostics", FontSize = 14 }, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _status = Text("Observation is off.");
     private readonly VisionPerformancePanel _performance;
-    private readonly TextBlock _notice = Text("Experimental · no trained animation model is bundled. Capture and diagnostics work without one.");
+    private readonly TextBlock _notice = Text("Start live view to preview, or record a training clip to save footage.");
     private readonly ComboBox _source = new() { Header = "Remote Play window", PlaceholderText = "Choose a Remote Play window", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch, DisplayMemberPath = "Title" };
     private readonly Button _refreshSources = new() { Content = "Refresh windows", FontSize = 14 };
-    private readonly TextBox _manifest = new() { Header = "Animation model manifest (.json)", FontSize = 14, PlaceholderText = "Choose a local model manifest" };
+    private readonly ComboBox _modelPicker = new() { Header = "Gameplay model", FontSize = 14, DisplayMemberPath = nameof(ModelChoice.Name), HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly TextBlock _modelInfo = Text("No trained gameplay model is included. You can view capture and record training clips without one.");
+    private readonly TextBox _modelPath = new() { Header = "Installed model location", FontSize = 14, IsReadOnly = true, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _modelErrors = Text("");
+    private readonly Button _importModel = new() { Content = "Import model package…", FontSize = 14 };
     private readonly ComboBox _executionProvider = new() { Header = "Inference execution provider", FontSize = 14,
         HorizontalAlignment = HorizontalAlignment.Stretch, ItemsSource = new[] { "CUDA", "CPU" }, SelectedIndex = 0 };
     private readonly TextBox _animation = new() { Header = "Game / camera / animation configuration", FontSize = 14, Text = "Default", MaxLength = 80 };
@@ -63,11 +76,20 @@ internal sealed class VisionPanel : UserControl, IDisposable
     private readonly Image _preview = new() { MaxHeight = 480, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _previewPlaceholder = Text("Start observation to see a fresh capture preview.");
     private readonly TextBlock _previewCaption = Text("Preview updates appear here while Live Capture is visible.");
-    private readonly Button _start = new() { Content = new TextBlock { Text = "Observe selected window", FontSize = 14, TextWrapping = TextWrapping.Wrap }, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Button _start = new() { Content = new TextBlock { Text = "Start live view", FontSize = 14, TextWrapping = TextWrapping.Wrap }, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Button _recordTraining = new() { Content = "Record training clip…", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Button _stopTraining = new() { Content = "Stop recording", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _save = new() { Content = "Save settings", FontSize = 14 };
     private readonly Control[] _configurationControls;
     private WriteableBitmap? _bitmap;
     private bool _refreshing, _busy, _disposed, _populating, _pageVisible, _liveSelected, _previewDesired, _refreshingSources;
+    private bool _refreshingModels, _modelsLoading;
+    private int _modelContextVersion;
+    private int _workflowVersion;
+    private VisionSettings? _pendingModelContext;
+    private VisionSettings? _runningModelContext;
+    private string _selectedModelPath = "";
+    private bool _manualTrainingView;
     private bool? _configurationEditable;
     private CaptureSource? _selectedSourceIdentity;
     private nint _lastObservedSource;
@@ -77,8 +99,10 @@ internal sealed class VisionPanel : UserControl, IDisposable
     internal VisionPanel(Microsoft.UI.WindowId windowId, Func<StudioRuntime?> runtime, Func<Task> connectOutput, Action openShotProfiles)
     {
         _runtime = runtime; _windowId = windowId; _connectOutput = connectOutput;
+        if (Application.Current.Resources.TryGetValue("StudioAccentBrush", out var recordAccent) && recordAccent is Brush accentBrush)
+            _recordTraining.Background = accentBrush;
         _performance = new VisionPerformancePanel(SavePerformanceRun, LoadPerformanceRun);
-        _configurationControls = [_source, _manifest, _executionProvider, _animation, _shoot, _left, _top, _width, _height,
+        _configurationControls = [_source, _modelPicker, _executionProvider, _animation, _shoot, _left, _top, _width, _height,
             _confidence, _uncertainty, _frameAge, _videoDelay, _inputDelay, _correction, _lateness];
         _layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -91,12 +115,18 @@ internal sealed class VisionPanel : UserControl, IDisposable
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _start.Click += (_, _) => RunAction(Start);
         controls.Children.Add(_start);
-        var stop = new Button { Content = new TextBlock { Text = "Stop observation", FontSize = 14, TextWrapping = TextWrapping.Wrap }, FontSize = 14,
+        var stop = new Button { Content = new TextBlock { Text = "Stop live view", FontSize = 14, TextWrapping = TextWrapping.Wrap }, FontSize = 14,
             HorizontalAlignment = HorizontalAlignment.Stretch };
         stop.Click += (_, _) => RunAction(Stop);
         Grid.SetColumn(stop, 1); controls.Children.Add(stop);
         Grid.SetColumn(_armed, 2); controls.Children.Add(_armed);
         header.Children.Add(controls);
+        var recordingActions = Pair(_recordTraining, _stopTraining);
+        _recordTraining.Click += (_, _) => RecordTraining();
+        _stopTraining.Click += (_, _) => RunAction(() => _session?.StopTraining());
+        header.Children.Add(recordingActions);
+        _trainingInfo.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        header.Children.Add(_trainingInfo);
         _status.MaxLines = 3; _status.TextTrimming = TextTrimming.CharacterEllipsis;
         header.Children.Add(_status);
         header.Children.Add(_notice);
@@ -112,6 +142,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
         var profileActions = Row();
         AddButton(profileActions, "Manage NBA 2K27 shot profiles", openShotProfiles);
         _configuration.Children.Add(profileActions);
+        _configuration.Children.Add(Text("Choose your player/shot profile and Remote Play window, then use Record training clip above. Recording starts live view for you. No gameplay model is needed to save clips."));
         _configuration.Children.Add(Text("Route your physical controller through AccessRelay's virtual Xbox controller into Remote Play. Choose the intended player's region below; no shot meter or special in-game icon is required."));
         _configuration.Children.Add(_source);
         _configuration.Children.Add(Text("Browser windows show their active tab; background tabs are not separate capture sources."));
@@ -124,31 +155,43 @@ internal sealed class VisionPanel : UserControl, IDisposable
             catch (Exception error) { _notice.Text = error.Message; }
         });
         _configuration.Children.Add(sourceActions);
-        _configuration.Children.Add(_manifest);
-        _configuration.Children.Add(_executionProvider);
-        _configuration.Children.Add(Text("Stop observation before changing CPU or CUDA. Starting a session uses the selected provider; an unavailable provider does not silently switch to another."));
+        _configuration.Children.Add(_modelPicker);
+        _configuration.Children.Add(_modelInfo);
         var models = Row();
-        AddButton(models, "Browse manifest…", BrowseManifest);
-        AddButton(models, "Import settings…", ImportSettings);
-        AddButton(models, "Export settings…", ExportSettings);
+        _importModel.Click += (_, _) => ImportModelPackage();
+        models.Children.Add(_importModel);
         _configuration.Children.Add(models);
-        _configuration.Children.Add(_animation);
-        _configuration.Children.Add(_shoot);
-        _configuration.Children.Add(Text("Player region · normalized to the captured window. Keep the intended player inside this crop. Repositioning it invalidates calibration and requires restarting observation."));
-        _configuration.Children.Add(Pair(_left, _top));
-        _configuration.Children.Add(Pair(_width, _height));
-        _configuration.Children.Add(Pair(_confidence, _uncertainty));
-        _configuration.Children.Add(Pair(_frameAge, _lateness));
-        _configuration.Children.Add(Pair(_videoDelay, _inputDelay));
-        _configuration.Children.Add(_correction);
-        _configuration.Children.Add(Text("Calibration uses estimated combined streaming/input delay and reviewed practice outcomes. A positive correction sends later; a negative correction sends earlier. These values do not measure exact Xbox render or input-application times."));
+        var advanced = new StackPanel { Spacing = 12 };
+        var advancedSettings = new Expander { Header = new TextBlock { Text = "Advanced settings and calibration", FontSize = 14 },
+            Content = advanced, HorizontalAlignment = HorizontalAlignment.Stretch };
+        _configuration.Children.Add(advancedSettings);
+        advanced.Children.Add(_executionProvider);
+        advanced.Children.Add(Text("Stop live view before changing CPU or CUDA. Starting a session uses the selected provider; an unavailable provider does not silently switch to another."));
+        var modelDetails = new StackPanel { Spacing = 8 };
+        modelDetails.Children.Add(_modelPath); modelDetails.Children.Add(_modelErrors);
+        advanced.Children.Add(new Expander { Header = new TextBlock { Text = "Model package details", FontSize = 14 }, Content = modelDetails,
+            HorizontalAlignment = HorizontalAlignment.Stretch });
+        var settingsFiles = Row();
+        AddButton(settingsFiles, "Import settings…", ImportSettings);
+        AddButton(settingsFiles, "Export settings…", ExportSettings);
+        advanced.Children.Add(settingsFiles);
+        advanced.Children.Add(_animation);
+        advanced.Children.Add(_shoot);
+        advanced.Children.Add(Text("Player region · normalized to the captured window. Keep the intended player inside this crop. Repositioning it invalidates calibration and requires restarting live view."));
+        advanced.Children.Add(Pair(_left, _top));
+        advanced.Children.Add(Pair(_width, _height));
+        advanced.Children.Add(Pair(_confidence, _uncertainty));
+        advanced.Children.Add(Pair(_frameAge, _lateness));
+        advanced.Children.Add(Pair(_videoDelay, _inputDelay));
+        advanced.Children.Add(_correction);
+        advanced.Children.Add(Text("Calibration uses estimated combined streaming/input delay and reviewed practice outcomes. A positive correction sends later; a negative correction sends earlier. These values do not measure exact Xbox render or input-application times."));
         var settings = Row();
         _save.Click += (_, _) => RunAction(SaveSettings);
         settings.Children.Add(_save);
         AddButton(settings, "Export calibration template…", ExportCalibrationTemplate);
         AddButton(settings, "Review measured calibration…", ReviewCalibration);
         AddButton(settings, "Export timing diagnostics…", ExportDiagnostics);
-        _configuration.Children.Add(settings);
+        advanced.Children.Add(settings);
         _armed.Toggled += (_, _) =>
         {
             if (_refreshing) return;
@@ -168,17 +211,17 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _previewPlaceholder.VerticalAlignment = VerticalAlignment.Center;
         _previewPlaceholder.IsHitTestVisible = false;
         previewHost.Children.Add(_previewPlaceholder);
+        _live.Children.Add(_trainingDetails);
+        var training = Row();
+        AddButton(training, "Review and label clip…", ReviewTake);
+        _live.Children.Add(training);
         _live.Children.Add(previewHost);
         _live.Children.Add(_previewCaption);
-        _live.Children.Add(_performance);
-        _live.Children.Add(Text("Training data · manual gameplay only"));
-        _live.Children.Add(Text("Record 10-second takes of the intended player. Each take stores cropped 256×256 BGRA frames, real capture timestamps and the selected player/shot configuration. Automatic release is disarmed during recording. Review the frames and label intended release targets before training."));
-        var training = Row();
-        AddButton(training, "Record training take…", RecordTraining);
-        AddButton(training, "Stop training take", () => _session?.StopTraining());
-        AddButton(training, "Review and label take…", ReviewTake);
-        _live.Children.Add(training);
-        _live.Children.Add(_trainingInfo);
+        var diagnosticsContent = new StackPanel { Spacing = 10 };
+        diagnosticsContent.Children.Add(_diagnosticStatus);
+        diagnosticsContent.Children.Add(_performance);
+        _diagnostics.Content = diagnosticsContent;
+        _live.Children.Add(_diagnostics);
         _tabs.SelectionChanged += (_, _) =>
         {
             _liveSelected = ReferenceEquals(_tabs.SelectedItem, _liveTab);
@@ -186,7 +229,8 @@ internal sealed class VisionPanel : UserControl, IDisposable
             RefreshStatus();
         };
         _shoot.SelectedItem = ControlId.X;
-        _manifest.TextChanged += (_, _) => InvalidateCorrection();
+        _modelPicker.SelectionChanged += (_, _) => ModelSelectionChanged();
+        _modelPicker.DropDownOpened += (_, _) => RefreshModelsFromFields();
         _animation.TextChanged += (_, _) => InvalidateCorrection();
         _source.SelectionChanged += (_, _) => SourceSelectionChanged();
         _source.DropDownOpened += (_, _) =>
@@ -194,7 +238,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
             if (!_busy && _session?.Status.Running != true) RunAction(RefreshWindows);
         };
         _shoot.SelectionChanged += (_, _) => InvalidateCorrection();
-        _executionProvider.SelectionChanged += (_, _) => InvalidateCorrection();
+        _executionProvider.SelectionChanged += (_, _) => { InvalidateCorrection(); if (!_populating) RefreshModelsFromFields(); };
         foreach (var field in new[] { _left, _top, _width, _height, _videoDelay, _inputDelay })
             field.ValueChanged += (_, _) => InvalidateCorrection();
         AutomationProperties.SetName(_preview, "Remote Play capture preview");
@@ -204,7 +248,11 @@ internal sealed class VisionPanel : UserControl, IDisposable
         AutomationProperties.SetName(_configurationTab, "Vision Configuration");
         AutomationProperties.SetName(_liveTab, "Vision Live Capture");
         AutomationProperties.SetName(_source, "Remote Play source window");
-        AutomationProperties.SetName(stop, "Stop Remote Play vision observation");
+        AutomationProperties.SetName(_modelPicker, "Installed gameplay model or capture and recording only");
+        AutomationProperties.SetName(_recordTraining, "Record and save a training clip");
+        AutomationProperties.SetName(_stopTraining, "Stop the current training clip recording");
+        AutomationProperties.SetName(stop, "Stop Remote Play live view");
+        ApplyModelChoices(Array.Empty<VisionModelLibraryEntry>(), Array.Empty<string>());
         RefreshWindows();
         try
         {
@@ -341,13 +389,99 @@ internal sealed class VisionPanel : UserControl, IDisposable
         if (previous is not null && selected is null)
             _notice.Text = "The selected window is no longer available. Choose a source window before starting observation.";
     }
+    private void ModelSelectionChanged()
+    {
+        if (_refreshingModels || _populating || _modelPicker.SelectedItem is not ModelChoice selected) return;
+        if (!string.Equals(_selectedModelPath, selected.ManifestPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedModelPath = selected.ManifestPath;
+            InvalidateCorrection();
+        }
+        UpdateModelInfo();
+    }
+    private void UpdateModelInfo()
+    {
+        _modelPath.Text = _selectedModelPath.Length == 0 ? "No model selected" : _selectedModelPath;
+        if (_modelPicker.SelectedItem is not ModelChoice selected) return;
+        _modelInfo.Text = selected.Entry is { } entry
+            ? $"{entry.DisplayName} · {entry.ModelVersion}\n{entry.Status}\nLive view checks model readiness again. Selecting a model does not arm release assistance."
+            : selected.Status;
+    }
+    private void ApplyModelChoices(IReadOnlyList<VisionModelLibraryEntry> entries, IReadOnlyList<string> errors)
+    {
+        var choices = new List<ModelChoice>
+        {
+            new("", "No model — capture/record only", entries.Count == 0
+                ? "No shooting model is installed yet. You can view Remote Play and record training clips without one."
+                : "No model selected. Live view and training clips work without one. Choose an installed model only when you want animation inference.", true)
+        };
+        choices.AddRange(entries.Select(entry => new ModelChoice(entry.ManifestPath,
+            entry.DisplayName + " · " + entry.ModelVersion + (entry.IsCompatible ? "" : " · different shot/camera"),
+            entry.Status, true, entry)));
+        var selected = choices.FirstOrDefault(choice => string.Equals(choice.ManifestPath, _selectedModelPath, StringComparison.OrdinalIgnoreCase));
+        if (selected is null)
+        {
+            selected = new(_selectedModelPath, "Saved model not installed — import its package",
+                "The saved model is not installed in this library. Import its model package folder, or choose No model to use live view and record training clips.", false);
+            choices.Add(selected);
+        }
+        bool wasOpen = _modelPicker.IsDropDownOpen;
+        _refreshingModels = true;
+        try
+        {
+            _modelPicker.ItemsSource = choices;
+            _modelPicker.SelectedItem = selected;
+            if (wasOpen && !_modelPicker.IsDropDownOpen) _modelPicker.IsDropDownOpen = true;
+        }
+        finally { _refreshingModels = false; }
+        _modelErrors.Text = errors.Count == 0 ? "" : "Packages that could not be loaded:\n" + string.Join("\n", errors.Take(4));
+        UpdateModelInfo();
+    }
+    private void RefreshModelsFromFields()
+    {
+        if (_disposed || _populating || _refreshingModels || _busy || _session?.Status.Running == true) return;
+        try { RefreshModelLibrary(ReadSettings()); }
+        catch (Exception error) { _modelInfo.Text = "Finish the settings fields before checking model compatibility. " + error.Message; }
+    }
+    private async void RefreshModelLibrary(VisionSettings settings)
+    {
+        // One discovery runs at a time; rapid settings/profile changes replace only the pending
+        // context. No model file hashing or directory enumeration runs on the UI/inference loop.
+        if (_modelsLoading && (_pendingModelContext == settings || (_pendingModelContext is null && _runningModelContext == settings))) return;
+        _pendingModelContext = settings;
+        _modelContextVersion++;
+        if (_modelsLoading) return;
+        _modelsLoading = true;
+        RefreshStatus();
+        try
+        {
+            while (_pendingModelContext is { } context)
+            {
+                _pendingModelContext = null;
+                _runningModelContext = context;
+                int version = _modelContextVersion;
+                try
+                {
+                    var found = await Task.Run(() => _modelLibrary.Discover(context));
+                    if (_disposed) return;
+                    if (version == _modelContextVersion) ApplyModelChoices(found.Models, found.Errors);
+                }
+                catch (Exception error)
+                {
+                    if (!_disposed && version == _modelContextVersion)
+                        _modelInfo.Text = "Could not read the model library. " + error.Message;
+                }
+            }
+        }
+        finally { _runningModelContext = null; _modelsLoading = false; RefreshStatus(); }
+    }
     private VisionSettings ReadSettings()
     {
         if (_executionProvider.SelectedIndex is < 0 or > 1)
             throw new InvalidDataException("Choose CPU or CUDA for inference.");
         var settings = _loadedSettings with
         {
-            ModelManifestPath = _manifest.Text.Trim(), AnimationProfile = _shotProfile is { } profile ? "nba2k27:" + profile.ConfigurationFingerprint : _animation.Text.Trim(),
+            ModelManifestPath = _selectedModelPath, AnimationProfile = _shotProfile is { } profile ? "nba2k27:" + profile.ConfigurationFingerprint : _animation.Text.Trim(),
             CameraView = _shotProfile?.CameraView ?? _loadedSettings.CameraView,
             ExecutionProvider = _executionProvider.SelectedIndex == 1 ? VisionExecutionProvider.Cpu : VisionExecutionProvider.Cuda,
             ShootButton = _shoot.SelectedItem is ControlId button ? button : ControlId.X,
@@ -365,7 +499,9 @@ internal sealed class VisionPanel : UserControl, IDisposable
         try
         {
             _loadedSettings = settings;
-            _manifest.Text = settings.ModelManifestPath; _animation.Text = settings.AnimationProfile; _shoot.SelectedItem = settings.ShootButton;
+            _selectedModelPath = settings.ModelManifestPath;
+            ApplyModelChoices(Array.Empty<VisionModelLibraryEntry>(), Array.Empty<string>());
+            _animation.Text = settings.AnimationProfile; _shoot.SelectedItem = settings.ShootButton;
             _executionProvider.SelectedIndex = settings.ExecutionProvider == VisionExecutionProvider.Cpu ? 1 : 0;
             _left.Value = settings.Crop.Left * 100; _top.Value = settings.Crop.Top * 100;
             _width.Value = settings.Crop.Width * 100; _height.Value = settings.Crop.Height * 100;
@@ -375,6 +511,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
             _lateness.Value = settings.MaximumLatenessMs;
         }
         finally { _populating = false; }
+        RefreshModelLibrary(settings);
     }
     private void InvalidateCorrection()
     {
@@ -388,53 +525,80 @@ internal sealed class VisionPanel : UserControl, IDisposable
         var settings = ReadSettings(); _store.Save(_profileId, settings); _runtime()?.ConfigureVision(settings);
         _notice.Text = "Vision settings saved for this macro profile. Revalidate calibration after changing source, model or animation.";
     }
-    private void Start()
+    private void Start() => StartSession(loadModel: true);
+    private void StartSession(bool loadModel)
     {
         if (_runtime() is not { } runtime) throw new InvalidOperationException("Controller monitor unavailable.");
         if (_source.SelectedItem is not CaptureSource source) throw new InvalidOperationException("Choose a window to observe.");
+        if (loadModel && _modelPicker.SelectedItem is not ModelChoice { Available: true })
+            throw new InvalidOperationException("Choose an installed model, import its package, or select No model for live view only.");
         var settings = ReadSettings(); _store.Save(_profileId, settings);
         _session ??= new VisionSession(runtime);
         _session.SetPreviewEnabled(LivePresentationVisible);
         ShowWaitingForPreview();
-        _session.Start(source.Hwnd, settings);
+        _session.Start(source.Hwnd, settings, loadModel);
+        _manualTrainingView = !loadModel;
+        _workflowVersion++;
         _lastObservedSource = source.Hwnd;
-        _notice.Text = "Observing locally. Automatic release remains disarmed.";
+        _notice.Text = ViewingNotice;
         RefreshStatus();
     }
-    internal void Stop() { _session?.Stop(); _runtime()?.SetVisionArmed(false); RefreshStatus(); }
+    internal void Stop()
+    {
+        _workflowVersion++;
+        _session?.Stop(); _runtime()?.SetVisionArmed(false);
+        if (_notice.Text is ViewingNotice or RecordingNotice or FinalizingNotice)
+            _notice.Text = "Live view stopped. Clip recording status is shown above; viewing alone does not save footage.";
+        RefreshStatus();
+    }
 
     internal void RefreshStatus()
     {
         if (_disposed) return;
         var session = _session?.Status;
         var runtime = _runtime()?.VisionStatus;
+        var training = _session?.TrainingSnapshot;
         _refreshing = true;
         _armed.IsOn = runtime?.Armed == true;
         _armed.IsEnabled = session?.CanArm == true && runtime.HasValue;
-        _start.IsEnabled = !_busy && session?.Running != true && _source.SelectedItem is CaptureSource;
-        bool editable = session?.Running != true;
+        _start.IsEnabled = !_busy && !_modelsLoading && _session?.IsStopping != true && session?.Running != true && _source.SelectedItem is CaptureSource &&
+            _modelPicker.SelectedItem is ModelChoice { Available: true };
+        bool editable = session?.Running != true && !_busy;
         _refreshSources.IsEnabled = editable && !_busy;
+        _importModel.IsEnabled = editable && !_modelsLoading;
+        _recordTraining.IsEnabled = !_busy && _session?.IsStopping != true && training?.IsRecording != true &&
+            (training is not { HasTake: true, IsFinalized: false });
+        _stopTraining.IsEnabled = !_busy && training?.IsRecording == true;
         if (_pageVisible && !_liveSelected && editable && !_busy && !_source.IsDropDownOpen && !_refreshingSources &&
             (_sourcesRefreshedAt == 0 || Stopwatch.GetElapsedTime(_sourcesRefreshedAt).TotalSeconds >= 2))
             RunAction(RefreshWindows);
         if (_pageVisible && !_liveSelected && _configurationEditable != editable)
         {
-            _save.IsEnabled = editable;
             foreach (var control in _configurationControls) control.IsEnabled = editable;
             _configurationEditable = editable;
         }
+        _save.IsEnabled = editable && !_modelsLoading;
         _refreshing = false;
-        string statusText = session?.Message ?? "Observation is off.";
-        if (runtime is { } output)
-            statusText += "\n" + output.State + " · " + output.Message;
-        if (session is { Frames: > 0 } observed)
-            statusText += $"\nProcessed {observed.Frames:N0} frames" + (observed.ExcludedTimingFrames > 0
-                ? $" · {observed.ExcludedTimingFrames:N0} samples excluded from timing because their measurements were invalid." : "");
+        string statusText = session?.Running == true ? (_manualTrainingView ? "Live view for training is running." : "Live view is running.") : "Live view is stopped.";
+        if (_session?.IsStopping == true) statusText = "Live view is stopping.";
+        else if (session?.CaptureFailed == true) statusText = "Live view could not continue. Details are in Timing and diagnostics.";
+        else if (session?.Running == true && session?.SourceStale == true) statusText += " The video is paused, stale or unavailable.";
+        if (session is { Running: true, ModelLoadFailed: true }) statusText += " Selected AI model unavailable; viewing and recording still work.";
+        if (session is { Frames: > 0 } observed) statusText += $" Live frames viewed: {observed.Frames:N0}.";
+        if (_selectedModelPath.Length == 0) statusText += " No model is needed to record clips.";
         if (_status.Text != statusText)
         {
             _status.Text = statusText;
             ToolTipService.SetToolTip(_status, statusText);
         }
+        UpdateTrainingStatus(training);
+        if (session?.Running != true && _notice.Text == ViewingNotice)
+            _notice.Text = "Live view is stopped. Viewing alone does not save training clips.";
+        if ((_notice.Text == RecordingNotice && training?.IsRecording != true) ||
+            (_notice.Text == FinalizingNotice && training?.IsFinalized == true))
+            _notice.Text = training is { HasTake: true, IsFinalized: false } ? FinalizingNotice
+                : training is { IsFinalized: true, IsComplete: true } ? "Training clip saved. Review and label it before model training."
+                : "Training recording ended. Check the clip status above.";
         if (_pageVisible)
         {
             string context = _source.SelectedItem is CaptureSource source
@@ -452,13 +616,17 @@ internal sealed class VisionPanel : UserControl, IDisposable
         // MainWindow refreshes preview/status frequently. Percentile snapshots allocate and sort
         // only on this low-rate presentation path, never on each UI tick or capture frame.
         long now = Stopwatch.GetTimestamp();
-        if (_performanceRefreshedAt == 0 || Stopwatch.GetElapsedTime(_performanceRefreshedAt, now).TotalMilliseconds >= 500)
+        if (_diagnostics.IsExpanded && (_performanceRefreshedAt == 0 || Stopwatch.GetElapsedTime(_performanceRefreshedAt, now).TotalMilliseconds >= 500))
         {
             _performanceRefreshedAt = now;
             _performance.Update(_session?.Performance);
+            string details = session?.Message ?? "No live view session.";
+            if (runtime is { } output) details += "\n" + output.State + " · " + output.Message;
+            if (session is { } measured)
+                details += $"\nLive frames viewed: {measured.Frames:N0} · timing samples excluded: {measured.ExcludedTimingFrames:N0}. These exclusions affect timing statistics; clip frame counts are shown separately.";
+            _diagnosticStatus.Text = details;
         }
-        _performance.SetBusy(_busy);
-        _trainingInfo.Text = _session?.TrainingStatus ?? "No training take is recording.";
+        if (_diagnostics.IsExpanded) _performance.SetBusy(_busy);
         if (_session?.TakePreview() is { } preview)
         {
             using (preview)
@@ -487,16 +655,51 @@ internal sealed class VisionPanel : UserControl, IDisposable
         }
     }
 
-    private async void BrowseManifest()
+    private void UpdateTrainingStatus(VisionTrainingStatus? training)
     {
-        if (_busy || _session?.Status.Running == true) return;
-        _busy = true;
+        string summary;
+        if (training is not { HasTake: true } take)
+            summary = "Not recording — live view frames are not saved.";
+        else if (take.IsRecording)
+            summary = $"RECORDING training clip · {take.StoredFrames:N0} frames written · {take.DroppedFrames:N0} dropped.";
+        else if (!take.IsFinalized)
+            summary = $"Saving training clip · {take.StoredFrames:N0} frames written. Please wait.";
+        else if (take.IsComplete)
+            summary = $"Last training clip saved: {take.StoredFrames:N0} frames. Not recording — live view frames are not saved.";
+        else
+            summary = $"Training clip incomplete · {take.StoredFrames:N0} frames retained. Not recording.";
+        if (_trainingInfo.Text != summary) _trainingInfo.Text = summary;
+        if (!LivePresentationVisible) return;
+        _trainingDetails.Text = training is { HasTake: true } clip
+            ? clip.Message + "\nClip folder: " + clip.DirectoryPath + "\nReview and label captured shots before using them to train a model."
+            : "Use Record training clip above to choose a save folder and record 10 seconds of manual gameplay. Live view starts automatically. A model is not required. Clips must be reviewed and labeled before model training.";
+    }
+
+    private async void ImportModelPackage()
+    {
+        if (_busy || _modelsLoading || _session?.Status.Running == true) return;
+        _busy = true; RefreshStatus();
         try
         {
-            var picker = new FileOpenPicker(_windowId); picker.FileTypeFilter.Add(".json");
-            if (await picker.PickSingleFileAsync() is { } file) _manifest.Text = file.Path;
+            var settings = ReadSettings();
+            Guid profileId = _profileId;
+            var picker = new FolderPicker(_windowId);
+            if (await picker.PickSingleFolderAsync() is not { } folder) return;
+            string manifest = Path.Combine(folder.Path, "manifest.json");
+            if (!File.Exists(manifest))
+                throw new InvalidDataException("Choose an exported model package folder containing manifest.json and its model files. A gameplay model is not included with the app.");
+            var imported = await Task.Run(() => _modelLibrary.Import(manifest, settings));
+            if (_disposed) return;
+            if (_profileId == profileId && ReadSettings() == settings)
+            {
+                if (!string.Equals(_selectedModelPath, imported.ManifestPath, StringComparison.OrdinalIgnoreCase))
+                { _selectedModelPath = imported.ManifestPath; InvalidateCorrection(); }
+                _notice.Text = "Model package imported. Selecting a model does not arm release assistance.";
+            }
+            else _notice.Text = "Model package imported. Select it from the library for the current profile if it is compatible.";
+            RefreshModelLibrary(ReadSettings());
         }
-        catch (Exception error) { _notice.Text = error.Message; }
+        catch (Exception error) { if (!_disposed) _notice.Text = error.Message; }
         finally { _busy = false; RefreshStatus(); }
     }
     private async void ImportSettings()
@@ -588,16 +791,43 @@ internal sealed class VisionPanel : UserControl, IDisposable
     }
     private async void RecordTraining()
     {
-        if (_busy || _session is null) return;
-        _busy = true;
+        if (_busy) return;
+        _busy = true; RefreshStatus();
         try
         {
             if (_shotProfile is not { } profile) throw new InvalidOperationException("Create and select a complete NBA 2K27 player/shot profile in Plugins first.");
+            profile.Validate();
+            if (_source.SelectedItem is not CaptureSource source) throw new InvalidOperationException("Choose the Remote Play window in Configuration before recording a clip.");
+            var runtime = _runtime() ?? throw new InvalidOperationException("Controller monitor unavailable.");
+            if (_session?.IsStopping == true)
+                throw new InvalidOperationException("Live view is still stopping. Wait for it to finish, then record a clip.");
+            if (runtime.ScriptsEnabled || runtime.Recording.IsRecording)
+                throw new InvalidOperationException("Turn off macro scripts and finish macro recording before recording a manual training clip.");
+            if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
+                throw new InvalidOperationException("Wait for the current clip to finish recording or saving.");
+            var settings = ReadSettings();
+            int workflowVersion = _workflowVersion;
+            Guid profileId = _profileId;
             var picker = new FolderPicker(_windowId);
             if (await picker.PickSingleFolderAsync() is { } folder)
             {
-                _session.StartTraining(folder.Path, profile, (_source.SelectedItem as CaptureSource)?.Title ?? "Selected window");
-                _notice.Text = "Recording manual gameplay. Automatic release is off. Return focus to Remote Play and perform the intended animation.";
+                if (_disposed) return;
+                var selectedProfile = _shotProfile;
+                if (_workflowVersion != workflowVersion || _profileId != profileId || selectedProfile is null || selectedProfile.Id != profile.Id ||
+                    selectedProfile.ConfigurationFingerprint != profile.ConfigurationFingerprint || ReadSettings() != settings ||
+                    _source.SelectedItem is not CaptureSource current || current.Hwnd != source.Hwnd || current.ProcessId != source.ProcessId ||
+                    !ReferenceEquals(runtime, _runtime()))
+                    throw new InvalidOperationException("The source or shot settings changed while choosing a folder. Check Configuration and choose Record training clip again.");
+                var currentSource = RemotePlayCapture.EnumerateWindows().FirstOrDefault(window => window.Hwnd == source.Hwnd && window.ProcessId == source.ProcessId)
+                    ?? throw new InvalidOperationException("The selected Remote Play window is no longer available. Choose its window again.");
+                if (runtime.ScriptsEnabled || runtime.Recording.IsRecording)
+                    throw new InvalidOperationException("Turn off macro scripts and finish macro recording before recording a manual training clip.");
+                if (_session?.IsStopping == true)
+                    throw new InvalidOperationException("Live view is still stopping. Wait for it to finish, then record a clip.");
+                if (_session?.Status.Running != true) StartSession(loadModel: false);
+                _session!.StartTraining(folder.Path, profile, currentSource.Title);
+                _tabs.SelectedItem = _liveTab;
+                _notice.Text = RecordingNotice;
             }
         }
         catch (Exception error) { _notice.Text = error.Message; }

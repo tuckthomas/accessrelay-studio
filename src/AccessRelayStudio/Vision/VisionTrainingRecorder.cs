@@ -6,6 +6,9 @@ using EliteScriptStudio.Core;
 
 namespace EliteScriptStudio.Vision;
 
+internal readonly record struct VisionTrainingStatus(bool HasTake, bool IsRecording, bool IsFinalized,
+    bool IsComplete, string DirectoryPath, long StoredFrames, long DroppedFrames, string Message);
+
 /// <summary>Opt-in, bounded raw player-crop dataset writer. This records observations, never target labels.</summary>
 internal sealed class VisionTrainingRecorder : IDisposable
 {
@@ -26,14 +29,22 @@ internal sealed class VisionTrainingRecorder : IDisposable
     private readonly long _started = Stopwatch.GetTimestamp();
     private readonly DateTimeOffset _createdAtUtc = DateTimeOffset.UtcNow;
     private readonly object _gate = new();
-    private long _generation = -1, _dropped;
+    private long _generation = -1, _dropped, _storedFrames;
     private int _width, _height;
-    private bool _finished, _complete = true;
+    private bool _finished, _complete = true, _metadataComplete;
     private string _message = "Recording a 10-second manual training take.";
     internal string DirectoryPath { get; }
     internal string Message { get { lock (_gate) return _message; } }
     internal bool IsRecording { get { lock (_gate) return !_finished; } }
     internal bool IsFinalized => _writer.IsCompleted;
+    internal VisionTrainingStatus Snapshot
+    {
+        get
+        {
+            lock (_gate) return new(true, !_finished, _writer.IsCompleted, _metadataComplete && _writer.IsCompleted,
+                DirectoryPath, Interlocked.Read(ref _storedFrames), Interlocked.Read(ref _dropped), _message);
+        }
+    }
 
     internal VisionTrainingRecorder(string parentDirectory, Nba2K27ShotProfile profile, VisionSettings settings, string sourceTitle,
         Func<string, Stream>? streamFactory = null, TimeSpan? durationLimit = null)
@@ -116,6 +127,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
                     await stream.WriteAsync(frame.Pixels.AsMemory(0, FrameBytes));
                     _index.Add(new(frame.Sequence, frame.CaptureTicks, "frames.bgra", offset, FrameBytes,
                         frame.ShotToken, frame.PhysicalShootHeld));
+                    Interlocked.Increment(ref _storedFrames);
                 }
                 finally { ArrayPool<byte>.Shared.Return(frame.Pixels); }
             }
@@ -134,8 +146,15 @@ internal sealed class VisionTrainingRecorder : IDisposable
         finally
         {
             lock (_gate) { _finished = true; if (_index.Count == 0) _complete = false; }
-            try { WriteMetadata(_complete); }
-            catch (Exception error) { lock (_gate) _message = "Could not finalize take metadata: " + error.Message; }
+            try
+            {
+                WriteMetadata(_complete);
+                lock (_gate) _metadataComplete = _complete;
+            }
+            catch (Exception error)
+            {
+                lock (_gate) { _complete = false; _message = "Could not finalize take metadata: " + error.Message; }
+            }
         }
     }
 

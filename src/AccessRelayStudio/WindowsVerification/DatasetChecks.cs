@@ -24,7 +24,7 @@ internal static class DatasetChecks
             MetadataFailure(directory, profile, settings);
             LateWriteFailure(directory, profile, settings);
             IndependentTimeout(directory, profile, settings);
-            Console.WriteLine("SUCCESS: training crop pixels, offsets, provenance, incomplete takes, metadata/late-write failure and independent timeout verified.");
+            Console.WriteLine("SUCCESS: training crop pixels, offsets, provenance, live/finalizing/finalized snapshots, incomplete takes, metadata/late-write failure and independent timeout verified.");
         }
         finally
         {
@@ -40,12 +40,19 @@ internal static class DatasetChecks
     private static void CompleteTake(string directory, Nba2K27ShotProfile profile, VisionSettings settings)
     {
         using var recorder = new VisionTrainingRecorder(directory, profile, settings, "Synthetic capture verification");
+        var initial = recorder.Snapshot;
+        Check(initial.HasTake && initial.IsRecording && !initial.IsFinalized && !initial.IsComplete &&
+            initial.DirectoryPath == recorder.DirectoryPath && initial.StoredFrames == 0 && initial.DroppedFrames == 0 &&
+            !string.IsNullOrWhiteSpace(initial.Message), "A new training snapshot did not identify an active, unsaved take.");
         using var first = Frame(1, 1);
         using var second = Frame(2, 1);
         recorder.Capture(first, default(VisionStatusSnapshot) with { ShotToken = 7, ShootHeld = true });
         recorder.Capture(second, default(VisionStatusSnapshot) with { ShotToken = 7, ShootHeld = false });
         recorder.Stop(complete: true);
         recorder.Dispose();
+        CheckFinalSnapshot(recorder, storedFrames: 2, complete: true);
+        Check(initial.IsRecording && !initial.IsFinalized && !initial.IsComplete && initial.StoredFrames == 0,
+            "The previously captured training snapshot changed after finalization.");
         using var metadata = ReadMetadata(recorder);
         var root = metadata.RootElement;
         Check(root.GetProperty("complete").GetBoolean(), "An explicitly completed take was marked incomplete.");
@@ -81,6 +88,7 @@ internal static class DatasetChecks
             stopped.Capture(frame, default);
             stopped.Stop();
             stopped.Dispose();
+            CheckFinalSnapshot(stopped, storedFrames: 1, complete: false);
             using var metadata = ReadMetadata(stopped);
             Check(!metadata.RootElement.GetProperty("complete").GetBoolean(), "An early stop was marked complete.");
         }
@@ -91,6 +99,7 @@ internal static class DatasetChecks
             resized.Capture(before, default);
             resized.Capture(after, default);
             resized.Dispose();
+            CheckFinalSnapshot(resized, storedFrames: 1, complete: false);
             using var metadata = ReadMetadata(resized);
             Check(!metadata.RootElement.GetProperty("complete").GetBoolean(), "A source generation change was marked complete.");
             Check(metadata.RootElement.GetProperty("frames").GetArrayLength() == 1, "A mismatched-generation frame entered the take.");
@@ -99,6 +108,7 @@ internal static class DatasetChecks
         {
             empty.Stop(complete: true);
             empty.Dispose();
+            CheckFinalSnapshot(empty, storedFrames: 0, complete: false);
             using var metadata = ReadMetadata(empty);
             Check(!metadata.RootElement.GetProperty("complete").GetBoolean(), "An empty take was marked complete.");
         }
@@ -115,6 +125,9 @@ internal static class DatasetChecks
         {
             recorder.Stop(complete: true);
             recorder.Dispose();
+            CheckFinalSnapshot(recorder, storedFrames: 1, complete: false);
+            Check(recorder.Snapshot.Message.Contains("finalize take metadata", StringComparison.Ordinal),
+                "The training snapshot hid a metadata finalization failure.");
             Check(recorder.Message.Contains("finalize take metadata", StringComparison.Ordinal), "Finalization failure was not reported.");
             using var metadata = ReadMetadata(recorder);
             Check(!metadata.RootElement.GetProperty("complete").GetBoolean(), "Failed finalization replaced the incomplete metadata marker.");
@@ -149,9 +162,19 @@ internal static class DatasetChecks
             recorder.Capture(first, default);
             recorder.Capture(second, default);
             Check(failedStream.WriteEntered.Task.Wait(TimeSpan.FromSeconds(3)), "The injected writer did not reach the second frame.");
+            var writing = recorder.Snapshot;
+            Check(writing.HasTake && writing.IsRecording && !writing.IsFinalized && !writing.IsComplete && writing.StoredFrames == 1,
+                "A blocked writer did not expose only successfully stored frames in its live snapshot.");
             recorder.Stop(complete: true);
+            var finalizing = recorder.Snapshot;
+            Check(finalizing.HasTake && !finalizing.IsRecording && !finalizing.IsFinalized && !finalizing.IsComplete &&
+                finalizing.StoredFrames == 1 && finalizing.DirectoryPath == recorder.DirectoryPath,
+                "Stopping an unfinished writer prematurely reported a completed saved take.");
             failedStream.Release.TrySetResult();
             recorder.Dispose();
+            CheckFinalSnapshot(recorder, storedFrames: 1, complete: false);
+            Check(writing.IsRecording && !finalizing.IsFinalized,
+                "Earlier live/finalizing snapshots changed when the writer completed.");
             using var metadata = ReadMetadata(recorder);
             Check(!metadata.RootElement.GetProperty("complete").GetBoolean(), "A disk failure after complete-stop was marked complete.");
             Check(metadata.RootElement.GetProperty("frames").GetArrayLength() == 1, "The failed write was added to the dataset index.");
@@ -166,6 +189,7 @@ internal static class DatasetChecks
             "Synthetic no-frame timeout", durationLimit: TimeSpan.FromMilliseconds(100));
         Check(SpinWait.SpinUntil(() => !recorder.IsRecording, TimeSpan.FromSeconds(3)), "A source without frames did not reach its wall-clock timeout.");
         recorder.Dispose();
+        CheckFinalSnapshot(recorder, storedFrames: 0, complete: false);
         using var metadata = ReadMetadata(recorder);
         Check(!metadata.RootElement.GetProperty("complete").GetBoolean(), "A timed-out take without frames was marked complete.");
     }
@@ -190,6 +214,15 @@ internal static class DatasetChecks
 
     private static JsonDocument ReadMetadata(VisionTrainingRecorder recorder) =>
         JsonDocument.Parse(File.ReadAllText(Path.Combine(recorder.DirectoryPath, "session.json")));
+
+    private static void CheckFinalSnapshot(VisionTrainingRecorder recorder, long storedFrames, bool complete)
+    {
+        var snapshot = recorder.Snapshot;
+        Check(snapshot.HasTake && !snapshot.IsRecording && snapshot.IsFinalized && snapshot.IsComplete == complete &&
+            snapshot.DirectoryPath == recorder.DirectoryPath && snapshot.StoredFrames == storedFrames &&
+            snapshot.DroppedFrames == 0 && !string.IsNullOrWhiteSpace(snapshot.Message),
+            "Final training snapshot disagrees with its writer completion, metadata outcome, path or frame counts.");
+    }
 
     private static void Check(bool success, string error)
     {

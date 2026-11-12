@@ -4,6 +4,14 @@ The application has a C# capture/inference integration. It does **not** include 
 
 The live application uses ONNX Runtime in C# with an explicit **CPU** or **CUDA** provider selection. CUDA is the default. Python below is an **offline** training/export/evaluation tool, not a running service used by AccessRelay.
 
+## Choose an installed model
+
+The Configuration tab uses an installed-model dropdown. **No model — capture/record only** is a normal selection: live viewing and recording training clips do not require a model. No trained NBA 2K27 release model is bundled, and diagnostic/random models are not added to this library automatically.
+
+**Import model package…** selects an exported model-package folder containing `manifest.json`, its referenced ONNX weights and any referenced validation report. Import copies the bounded, hash-checked package into the local model library; the manifest remains metadata describing the model, not the neural network itself. Ordinary use does not require typing a JSON filename. Model compatibility and supplied validation evidence remain separate from permission to arm live output.
+
+The supported package uses one ONNX file with embedded weights, as produced by the included exporter (`external_data=False`); external ONNX weight shards are not imported.
+
 ## Current runtime contract
 
 - One fixed-shape `float32` input named by the manifest, normally `frames`, with shape `[1,T,3,H,W]` (NTCHW).
@@ -23,9 +31,11 @@ For an experimental publish with scoped NVIDIA redistributables already installe
 
 ## Record clips and label them
 
+Live viewing reads frames temporarily for preview/analysis. The live-frame counter does not mean those frames were written to disk, and timing-sample exclusions do not mean the video images were discarded. Only explicitly recording a training clip saves gameplay frames. The page labels viewing-only, recording, finalizing, saved and incomplete states separately, including the saved frame count and folder.
+
 Record through AccessRelay's opt-in training controls. Choose the relevant shot profile before recording. Each take is bounded, stored outside the repository, and includes its shot-profile configuration fingerprint. A source change or incomplete write marks a take incomplete; training rejects it.
 
-In **Plugins**, create and save the player/shot profile, including height, three-point rating, base, both upper releases, four-level shot speed, release blend and meter settings. Release percentages are linked to total 100%; release type is enabled only with the meter on. In **Remote Play Vision**, select the source window, configure the player crop and start observation. **Record training take** chooses a local dataset folder and records up to ten seconds with automatic release inhibited. **Review and label take** opens a completed take, scrubs its frames, marks interval start/end and target game phase, and saves reviewed labels and the session split. Capture and review do not require a model.
+In **Plugins**, create and save the player/shot profile, including height, three-point rating, base, both upper releases, four-level shot speed, release blend and meter settings. Release percentages are linked to total 100%; release type is enabled only with the meter on. In **Remote Play Vision**, select the source window. The persistent **Record training clip…** button chooses a local dataset folder, starts live view automatically if needed, and records up to ten seconds with automatic release inhibited. A manually started recording session skips model loading/warm-up entirely. **Stop recording** finalizes a shorter clip. **Review and label clip…** opens a completed take, scrubs its frames, marks interval start/end and target game phase, and saves reviewed labels and the session split. Viewing, recording and review do not require a model. Player-region settings remain under **Advanced settings and calibration**; the current recorder stores the configured crop, not automatic full-court player tracking.
 
 A session directory contains `session.json` and `frames.bgra`. Frame metadata identifies a byte offset and size inside the packed BGRA file. Stored images are already nearest-neighbor player-cropped to the canonical 256×256 grid; training uses the full stored image and does not apply the source crop twice. Runtime and offline transforms use this same v2 contract. Models declaring the old v1 transform are rejected and require re-export/revalidation. Cross-language gradient/crop parity checks validate these transforms independently of training accuracy.
 

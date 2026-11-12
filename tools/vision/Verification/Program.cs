@@ -30,7 +30,8 @@ var tests = new (string Name, Action Test)[]
     ("Temporal history rejects old frames and preserves observation tokens", TemporalHistory),
     ("Frozen player ROI cancels a scheduled release despite changing outside pixels", FrozenPlayerRegion),
     ("Calibration sign, reviewed measurements and bounded diagnostics", CalibrationAndDiagnostics),
-    ("Performance metrics remain bounded, honest and comparable", PerformanceVerification.Run)
+    ("Performance metrics remain bounded, honest and comparable", PerformanceVerification.Run),
+    ("Managed model packages preserve hashes, context and bounded secure imports", ModelLibraryVerification.Run)
 };
 foreach (var test in tests) { test.Test(); Console.WriteLine($"SUCCESS {test.Name}"); }
 
