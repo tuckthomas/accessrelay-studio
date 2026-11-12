@@ -10,10 +10,11 @@ operator activation must remain compatible.
 
 Current checkpoint: sections 1–2 are complete. Sections 3–4 have shipped code and
 passing Windows CI with simulated devices; physical-device acceptance remains open.
-Sections 5–6 are implemented and passed Windows CI with simulated inputs. Section 7
-is implemented and has portable/browser validation; native simulated-device CI is next.
+Sections 5–7 are implemented and passed Windows CI with simulated inputs. Section 8
+has local phrase/template recognition and bounded host arbitration implemented;
+Windows native CI and real microphone evaluation remain to be recorded.
 Section 10 has the session-provenance guard implemented; its conversion/data work
-remains open. Sections 8–9 and 11–12 are queued, not implemented.
+remains open. Sections 9 and 11–12 are queued, not implemented.
 
 ## Delivery and evidence
 
@@ -164,25 +165,37 @@ merge/ownership/disconnect/conflict/persistence/provenance checks, 56 frontend u
 tests, TypeScript/Vite build and 18 browser workflows (17 unchanged workflows plus
 the co-pilot workflow) passed. Actual Windows input/audio sources and runtime tests
 were cross-compiled. Native runtime tests with simulated contributors are queued for
-Windows CI. Physical multi-device acceptance remains open.
+Windows CI, which passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43280232084.
+Physical multi-device acceptance remains open.
 
 ## 8. Local voice commands and personalized vocalizations
 
-- [ ] Select a licensed local recognition model and define latency measurements from
+- [x] Select a licensed local recognition model and define latency measurements from
       acoustic onset/end through controller delivery; do not promise unmeasured 30/100 ms.
-- [ ] Feed independent bounded recognition workers from microphone capture before
+- [x] Feed independent bounded recognition workers from microphone capture before
       voice conversion. MRX is currently imported-clip cleanup, not live microphone cleanup.
 - [ ] Evaluate echo/noise handling without suppressing intended clicks/hums; measure
       false activations with game speech and dysarthric/personalized inputs.
-- [ ] Add opt-in active-profile phrase/template bindings, recording/training UI,
+- [x] Add opt-in active-profile phrase/template bindings, recording/training UI,
       confidence/refractory settings, and explicit activation/status controls.
-- [ ] Route command IDs through host-owned arbitration and cancellation, with bounded
+- [x] Route command IDs through host-owned arbitration and cancellation, with bounded
       actions, Stop/disconnect/profile reset handling, and no direct worker output writes.
-- [ ] Test queue overload, stale commands, recognition faults, and synthetic audio;
-      validate real microphone/model accuracy, resource use, and latency separately.
-- [ ] Push each independently usable feature and record section commit SHAs here.
+- [x] Test queue overload, stale commands, recognition faults, and synthetic audio.
+- [ ] Validate real microphone/model accuracy, resource use, and latency separately.
+- [x] Push each independently usable feature and record section commit SHAs here.
 
-Implementation commits: pending. Prerequisites: model selection and real audio/device evaluation.
+Implementation commit: `f9efb64e4ca57d2543bb5381bb98b8d29b06cd96`. Backend choice:
+installed Windows desktop speech engines (OS-licensed models; MIT System.Speech
+adapter) with an explicit phrase grammar, plus local spectral/DTW templates. The
+first phrase backend processes bounded utterances rather than making an unmeasured
+streaming ONNX latency promise. See `docs/voice-commands.md` for licensing, host
+ownership, raw microphone routing, queue/age limits, startup behavior and limitations.
+Portable synthetic-audio/fault/overload/cancellation checks, 57 frontend unit tests,
+19 Chromium browser workflows, TypeScript/Vite build, Windows runtime cross-compile
+and actual audio-source compilation passed. Windows runtime integration tests use
+simulated devices. Real microphone/SAPI operation, echo/noise/dysarthric accuracy and
+physical delivery latency remain open; no such measurement is claimed.
 
 ## 9. Versioned game packs
 
