@@ -6,6 +6,7 @@ The root [0BSD license](LICENSE) covers original AccessRelay Studio code. The co
 | --- | --- |
 | React and React DOM | MIT. Their upstream copyright/license texts are included with the bundled desktop interface in `DesktopUi/THIRD-PARTY-NOTICES.txt`. |
 | Lucide React icons | ISC. Its upstream notice is included in the same desktop interface notice file. |
+| Radix UI dropdown primitives, Floating UI positioning and their runtime dependencies | MIT and the individual upstream terms collected in `DesktopUi/THIRD-PARTY-NOTICES.txt`. They provide menu positioning, focus management and keyboard navigation. |
 | Three.js and addons | MIT. [Viewer notice and build information](src/AccessRelayStudio/Viewer/THIRD-PARTY-NOTICES.md) |
 | Standard and Elite controller meshes | CC0 1.0 source mesh with AccessRelay adaptations. [Model provenance](src/AccessRelayStudio/Model/README.md) |
 | DualShock 4 and Switch Pro meshes | MIT. [Model provenance](src/AccessRelayStudio/Model/3DcoPlus.PROVENANCE.md) |

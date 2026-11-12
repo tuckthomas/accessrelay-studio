@@ -1,6 +1,12 @@
 # Remote Play vision implementation verification
 
-Updated: 2026-11-12. Branch: `codex/remote-play-vision`. Application version: `1.9.0-beta.5`.
+Updated: 2026-11-12. Delivery branch: `main`. Application version: `1.9.0-beta.6`.
+
+## Beta.6 adaptive menus and main-branch integration
+
+Voice-library and saved-sequence actions share a Radix dropdown with viewport/scroll-container collision handling. Menus flip above their trigger when needed, shift away from edges, follow scrolling/resizing, and scroll internally in short windows. Portals avoid clipping and do not extend the underlying page. Keyboard navigation, Escape/focus return, outside dismissal and focus transfer into action dialogs are included. Native HTML select controls retain browser-managed popups.
+
+All 44 UI tests and six Edge browser checks passed. The added browser checks cover top/bottom placement, short windows, live resizing, full-menu visibility, unchanged page scroll height, keyboard navigation/dismissal, dialog focus and the shared sequence menu. The complete feature history and interface replacement are now delivered through `main` at the user's request; vision-model/gameplay acceptance gates below still apply.
 
 ## Beta.5 desktop interface
 

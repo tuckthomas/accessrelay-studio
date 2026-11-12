@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
-import { Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
+import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
 
 const INITIAL_TIMING = { startDelay: 0, downSweep: 0, downHold: 512, upSweep: 80, upHold: 48, centerHold: 120, flick: 64, settle: 240, flickX: 0, flickY: -32767 };
 const controlGlyph = (control: string) => ({ a: 'A', b: 'B', x: 'X', y: 'Y', leftBumper: 'LB', rightBumper: 'RB',
@@ -150,10 +150,10 @@ function Sequences({ state, status, command }: PageProps) {
       {!records.length?<EmptyState icon="waves" title="Keep a movement you like" description="Record from your controller, stop when you are done, and give the sequence a name."/>:
       <div className="sequence-list">{records.map((item:any)=><div className="sequence-item" key={item.id}><span className="sequence-icon"><Icon name="waves"/></span>
         <div><strong>{item.name}</strong><p>{formatDuration(item.durationMs)} · {item.frameCount} samples</p></div><Button variant="ghost" onClick={()=>setEditId(item.id)}>Edit<Icon name="arrowRight" size={16}/></Button>
-        <details className="sequence-menu"><summary aria-label={'More actions for '+item.name}><Icon name="more" size={20}/></summary><div className="sequence-menu-items">
-          <Button variant="ghost" onClick={()=>{setName(item.name+' copy');setDuplicateItem(item);}}><Icon name="copy" size={16}/>Duplicate</Button>
-          <Button variant="ghost" onClick={()=>void command('recordExport',{id:item.id}).catch(()=>{})}><Icon name="download" size={16}/>Export</Button>
-          <Button variant="ghost" onClick={()=>setDeleteItem(item)}><Icon name="trash" size={16}/>Delete</Button></div></details></div>)}</div>}
+        <ActionMenu label={'More actions for '+item.name}>
+          <ActionMenuItem onSelect={()=>{setName(item.name+' copy');setDuplicateItem(item);}}><Icon name="copy" size={16}/>Duplicate</ActionMenuItem>
+          <ActionMenuItem onSelect={()=>void command('recordExport',{id:item.id}).catch(()=>{})}><Icon name="download" size={16}/>Export</ActionMenuItem>
+          <ActionMenuItem onSelect={()=>setDeleteItem(item)}><Icon name="trash" size={16}/>Delete</ActionMenuItem></ActionMenu></div>)}</div>}
     </Card><RecordPanel state={state} status={status} command={command}/></div>:<TimingEditor state={state} status={status} command={command}/>}
     {editId&&<RecordingEditor id={editId} command={command} onClose={()=>setEditId(null)}/>}
     <ConfirmDialog open={!!deleteItem} onClose={()=>setDeleteItem(null)} title="Delete this sequence?" description={'“'+deleteItem?.name+'” will be removed. Its mappings will be cleared.'}

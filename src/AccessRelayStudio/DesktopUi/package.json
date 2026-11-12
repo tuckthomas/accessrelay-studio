@@ -11,6 +11,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@radix-ui/react-dropdown-menu": "2.2.1",
     "lucide-react": "^0.468.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"

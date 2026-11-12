@@ -3,7 +3,7 @@
 - Date: 2026-11-11
 - Status: experimental software implemented; gameplay data, trained weights and Xbox release validation pending
 - Repository: `tuckthomas/accessrelay-studio`
-- Feature branch: `codex/remote-play-vision`
+- Delivery branch: `main` (integrating `codex/remote-play-vision` at the user's request on 2026-11-12)
 
 ## 1. Objective and decisions
 
@@ -15,7 +15,7 @@ CPU work already includes crop/normalization, temporal bookkeeping, controller a
 
 The next tracking revision should evaluate physical-input-gated candidate acquisition and bounded single-player tracking, with optional gamertag verification when readable. Continuous tracking of every player and mandatory OCR are not prerequisites. Physical input supplies intent and an attempt boundary, but cannot identify which visible body is ours: the displayed stream can predate the input reaching the Xbox. Acquire identity from ordinary gameplay evidence, associate it with a detected body, and maintain a stabilized moving player region through camera motion. Camera-specific tag offsets and box proportions can be acquisition priors, refined by body detection/scale and confidence checks; text recognition need not run on every frame. Define crop dimensions relative to source resolution and detected player scale, including at 2560×1440, rather than fixing a 160-pixel source box. Tag text may retain a fixed screen-space font size, so its height alone is not a proven player-depth estimate. Preserve hands/ball context, smooth crop motion, and invalidate deadlines on identity loss or reassignment. This is a proposed replacement for manual fixed-region selection; the current runtime still uses a fixed region. That revision needs full-scene recording or sufficient scene context, per-frame body/identity observations and transforms, track confidence, a versioned crop policy, and validation across the supported 2K, 2K Low and 2K Legacy views. The camera field added now records the selected view; it does not itself implement automatic player tracking.
 
-The application remains WinUI 3 on Windows x64. Reuse its physical-input handling, profiles, controller state, virtual Xbox output, and existing signed USB/IP transport. The controller helper remains a separate native process; choosing in-process C# vision does not remove that existing process boundary.
+The application remains installable on Windows x64, with a bundled React/WebView2 interface in a thin WinUI 3 window. Input handling, profiles, controller state, virtual Xbox output, vision and audio processing remain in C# and the existing native helpers; the interface creates no HTTP server. The controller helper remains a separate native process; choosing in-process C# vision does not remove that existing process boundary.
 
 This document records the implementation and the remaining acceptance gates. No validated gameplay animation model, trained-model RTX 2070 performance measurement, Remote Play compatibility result for our virtual device, or release-accuracy result currently exists for this feature. The untrained CUDA diagnostic establishes runtime compatibility only. See [implementation verification](remote-play-vision-validation.md) for the completed checks and their limits.
 
@@ -360,6 +360,8 @@ Extend the verification project deliberately with explicit compile includes or a
 | Missing or poor model | Treat dataset/training/export/validation as required implementation work. Keep assistance disabled until evidence supports the selected configuration. |
 
 ## 17. Documentation delivery and branch workflow
+
+2026-11-12 delivery update: the user requested merging the entire experimental branch, including the desktop interface replacement and adaptive menus, into `main`. Integrate the complete history without discarding existing work, publish `main` normally, and leave it checked out as the ongoing delivery branch. The original baseline/branch setup below records the earlier delivery sequence. Model and Xbox-side acceptance remain separate unfinished gates.
 
 Publish the existing application source/documentation changes together with the updated implementation plan to `origin/main`. Include the tracked edits, intentional deletion, and new source/documentation files that were already present when the plan was requested. Review the publication scope and run the relevant existing verification and Release publish checks first. Keep ignored build outputs, models, recordings, credentials, and machine-specific configuration outside the source commit.
 

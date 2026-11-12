@@ -1,5 +1,6 @@
 import { cloneElement, isValidElement, useEffect, useId, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, AudioLines, BookOpen, Camera, Check,
   ChevronDown, ChevronLeft, ChevronRight, Circle, CircleHelp, CirclePause, CirclePlay, Copy,
@@ -51,6 +52,31 @@ export function Button({ variant = 'secondary', busy = false, children, classNam
   ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; busy?: boolean }) {
   return <button type="button" {...props} className={'button button-' + variant + ' ' + className}
     disabled={disabled || busy} aria-busy={busy || undefined}>{busy && <Icon name="loader" size={17} className="spin" />}{children}</button>;
+}
+export function ActionMenu({ label, children }: { label: string; children: ReactNode }) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [boundary, setBoundary] = useState<Element | null>(null);
+  return <DropdownMenu.Root modal={false} onOpenChange={open => {
+    if (open) setBoundary(trigger.current?.closest('.modal, .app-main') ?? null);
+  }}>
+    <DropdownMenu.Trigger ref={trigger} className="button button-ghost icon-button action-menu-trigger" aria-label={label}>
+      <Icon name="more" />
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Portal><DropdownMenu.Content className="action-menu-content" aria-label={label}
+      align="end" sideOffset={6} collisionPadding={10} collisionBoundary={boundary} avoidCollisions hideWhenDetached loop
+      onCloseAutoFocus={event => {
+        // An action may open a dialog. Let that dialog own focus instead of returning
+        // to the menu button behind it; Escape still returns focus to the trigger.
+        const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+        const dialog = dialogs[dialogs.length - 1];
+        if (dialog && !dialog.contains(trigger.current)) event.preventDefault();
+      }}>
+      {children}
+    </DropdownMenu.Content></DropdownMenu.Portal>
+  </DropdownMenu.Root>;
+}
+export function ActionMenuItem({ children, disabled, onSelect }: { children: ReactNode; disabled?: boolean; onSelect: () => void }) {
+  return <DropdownMenu.Item className="action-menu-item" disabled={disabled} onSelect={onSelect}>{children}</DropdownMenu.Item>;
 }
 export function Card({ title, description, actions, children, className = '' }:
   { title?: ReactNode; description?: ReactNode; actions?: ReactNode; children?: ReactNode; className?: string }) {
