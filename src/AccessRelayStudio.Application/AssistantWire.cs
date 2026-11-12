@@ -33,9 +33,19 @@ public static class AssistantWire
     public static async Task<AssistantReply> CallAsync(string operation, object args, CancellationToken cancellation, string? pipeName = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation); timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        await using var pipe = new NamedPipeClientStream(".", pipeName ?? PipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        await using var pipe = new NamedPipeClientStream(".", pipeName ?? PipeName, PipeDirection.InOut,
+            PipeOptions.Asynchronous | (OperatingSystem.IsWindows() ? PipeOptions.None : PipeOptions.CurrentUserOnly));
         try { await pipe.ConnectAsync(5000, timeout.Token); }
         catch (TimeoutException) { throw new AssistantException("studioUnavailable", "Open AccessRelay Studio and enable assistant access in Settings."); }
+        if (OperatingSystem.IsWindows())
+        {
+            // .NET's CurrentUserOnly client compares token Owner, which can be the Administrators group.
+            // Our server is owned/ACL'd to the actual user SID; compare that exact identity instead.
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var owner = PipesAclExtensions.GetAccessControl(pipe).GetOwner(typeof(System.Security.Principal.SecurityIdentifier));
+            if (identity.User is null || !identity.User.Equals(owner))
+                throw new AssistantException("endpointIdentity", "The assistant endpoint is not owned by this Windows user.");
+        }
         await WriteAsync(pipe, new AssistantRequest(operation, JsonSerializer.SerializeToElement(args, AssistantJson.Options)), timeout.Token);
         var reply = AssistantJson.Read<AssistantReply>(await ReadAsync(pipe, timeout.Token));
         if (reply.SchemaVersion != 1) throw new AssistantException("protocolVersion", "Update the MCP bridge to match the running Studio installation.");
