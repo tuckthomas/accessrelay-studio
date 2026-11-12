@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="DatasetChecks.cs" />
+    <Compile Include="RuntimeTrainingChecks.cs" />
+    <Compile Include="RuntimeTestDevices.cs" />
+    <Compile Include="../StudioRuntime.cs" Link="StudioRuntime.cs" />
+    <Compile Include="../PrecisionTimer.cs" Link="PrecisionTimer.cs" />
+    <Compile Include="../HighResolutionReleaseTimer.cs" Link="HighResolutionReleaseTimer.cs" />
+    <Compile Include="../Vision/CaptureD3D11.cs" Link="Vision/CaptureD3D11.cs" />
+    <Compile Include="../Vision/RemotePlayCapture.cs" Link="Vision/RemotePlayCapture.cs" />
+    <Compile Include="../Vision/LatestFrameBuffer.cs" Link="Vision/LatestFrameBuffer.cs" />
+    <Compile Include="../Vision/CapturedVisionFrame.cs" Link="Vision/CapturedVisionFrame.cs" />
+    <Compile Include="../Vision/VisionTrainingRecorder.cs" Link="Vision/VisionTrainingRecorder.cs" />
+    <Compile Include="../Core/*.cs" Link="Core/%(Filename)%(Extension)" />
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
+  </ItemGroup>
+</Project>

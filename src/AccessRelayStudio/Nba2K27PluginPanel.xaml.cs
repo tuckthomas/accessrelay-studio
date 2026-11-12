@@ -21,12 +21,260 @@ public sealed partial class Nba2K27PluginPanel : UserControl
     private MacroChoice? _loaded;
     private TuningUndo? _undo;
     private bool _refreshing;
+    private readonly Nba2K27ShotProfileStore _shotProfiles = new();
+    private IReadOnlyList<Nba2K27ShotProfile> _savedShotProfiles = [];
+    private Nba2K27ShotProfile? _selectedShotProfile;
+    private Nba2K27ShotProfile? _shotDraftOriginal;
+    private bool _restoringShotProfile, _shotDraftDirty, _shotProfileOperation;
+
+    internal event Action<Nba2K27ShotProfile?>? ShotProfileChanged;
+    internal Nba2K27ShotProfile? SelectedShotProfile => _shotDraftDirty ? null : _selectedShotProfile;
+    internal bool HasUnsavedShotProfileChanges => _shotDraftDirty;
 
     internal Nba2K27PluginPanel(Action<StudioProfile, StudioProfile> save, Func<ShotVariant, string> variantName)
     {
         _save = save;
         _variantName = variantName;
         InitializeComponent();
+        try { RefreshShotProfiles(_shotProfiles.LoadSelectedId(), chooseFirst: true); }
+        catch (Exception error) { ShotProfileStatus.Text = $"Could not load shot profiles. {error.Message}"; LoadShotDraft(Nba2K27ShotProfile.Create(), saved: false); }
+    }
+
+    private void RefreshShotProfiles(Guid? selectedId, bool chooseFirst)
+    {
+        var profiles = _shotProfiles.LoadAll();
+        var selected = profiles.FirstOrDefault(profile => profile.Id == selectedId)
+            ?? (chooseFirst ? profiles.FirstOrDefault() : null);
+        if (selected is not null) _shotProfiles.Select(selected.Id);
+        _savedShotProfiles = profiles;
+        _restoringShotProfile = true;
+        try
+        {
+            ShotProfilePicker.ItemsSource = profiles;
+            ShotProfilePicker.SelectedItem = selected;
+            LoadShotDraft(selected ?? Nba2K27ShotProfile.Create(), saved: selected is not null);
+        }
+        finally { _restoringShotProfile = false; }
+        ShotProfileChanged?.Invoke(SelectedShotProfile);
+        ShotProfileStatus.Text = selected is null
+            ? "Create a profile and enter all three jump-shot creator labels before saving."
+            : $"Selected {selected.Name}. Assistance remains off until explicitly armed in Vision.";
+    }
+
+    private void LoadShotDraft(Nba2K27ShotProfile profile, bool saved)
+    {
+        bool restoring = _restoringShotProfile;
+        _restoringShotProfile = true;
+        try
+        {
+            _selectedShotProfile = saved ? profile : null;
+            _shotDraftOriginal = profile;
+            ShotProfileName.Text = profile.Name;
+            ShotPlayerHeight.Value = profile.HeightInches;
+            ShotThreePointRating.Value = profile.ThreePointRating;
+            ShotBase.Text = profile.Base;
+            ShotUpperRelease1.Text = profile.UpperRelease1;
+            ShotUpperRelease2.Text = profile.UpperRelease2;
+            ShotRelease1Percent.Value = profile.Release1Percent;
+            ShotRelease2Percent.Value = profile.Release2Percent;
+            ShotSpeed.SelectedIndex = profile.ShotSpeed - 1;
+            ShotUsesMeter.IsOn = profile.UsesShotMeter;
+            ShotMeterReleaseType.Text = profile.MeterReleaseType;
+            _shotDraftDirty = false;
+        }
+        finally { _restoringShotProfile = restoring; }
+        UpdateShotProfileActions();
+    }
+
+    private void ShotProfileSelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_restoringShotProfile || _shotProfileOperation || ShotProfilePicker.SelectedItem is not Nba2K27ShotProfile selected)
+            return;
+        if (_shotDraftDirty)
+        {
+            _restoringShotProfile = true;
+            try { ShotProfilePicker.SelectedItem = _selectedShotProfile; }
+            finally { _restoringShotProfile = false; }
+            ShotProfileStatus.Text = "Save or revert the current edits before selecting another shot profile.";
+            return;
+        }
+        try
+        {
+            _shotProfiles.Select(selected.Id);
+            LoadShotDraft(selected, saved: true);
+            ShotProfileChanged?.Invoke(selected);
+            ShotProfileStatus.Text = $"Selected {selected.Name}. Assistance remains off until explicitly armed in Vision.";
+        }
+        catch (Exception error)
+        {
+            _restoringShotProfile = true;
+            try { ShotProfilePicker.SelectedItem = _selectedShotProfile; }
+            finally { _restoringShotProfile = false; }
+            ShotProfileStatus.Text = $"Could not select the shot profile. {error.Message}";
+        }
+    }
+
+    private void ShotTextChanged(object sender, TextChangedEventArgs args) => ShotDraftChanged();
+    private void ShotNumberChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => ShotDraftChanged();
+    private void ShotSpeedChanged(object sender, SelectionChangedEventArgs args) => ShotDraftChanged();
+    private void ShotMeterChanged(object sender, RoutedEventArgs args) => ShotDraftChanged();
+
+    private void ShotBlend1Changed(NumberBox sender, NumberBoxValueChangedEventArgs args) => UpdateShotBlend(firstChanged: true);
+    private void ShotBlend2Changed(NumberBox sender, NumberBoxValueChangedEventArgs args) => UpdateShotBlend(firstChanged: false);
+
+    private void UpdateShotBlend(bool firstChanged)
+    {
+        if (_restoringShotProfile || _shotDraftOriginal is null) return;
+        double changed = firstChanged ? ShotRelease1Percent.Value : ShotRelease2Percent.Value;
+        if (double.IsFinite(changed) && changed is >= 0 and <= 100)
+        {
+            _restoringShotProfile = true;
+            try
+            {
+                if (firstChanged) ShotRelease2Percent.Value = 100 - changed;
+                else ShotRelease1Percent.Value = 100 - changed;
+            }
+            finally { _restoringShotProfile = false; }
+        }
+        ShotDraftChanged();
+    }
+
+    private void ShotDraftChanged()
+    {
+        if (_restoringShotProfile || _shotDraftOriginal is null)
+            return;
+        _shotDraftDirty = true;
+        UpdateShotProfileActions();
+        ShotProfileChanged?.Invoke(null);
+        ShotProfileStatus.Text = "Unsaved shot settings. Save or revert them before using this profile in Vision.";
+    }
+
+    private void UpdateShotProfileActions()
+    {
+        if (ShotPlayerHeight is null) return; // XAML value events can occur during InitializeComponent.
+        bool editable = !_shotProfileOperation;
+        ShotProfilePicker.IsEnabled = editable;
+        ShotProfileName.IsEnabled = ShotPlayerHeight.IsEnabled = ShotThreePointRating.IsEnabled =
+            ShotBase.IsEnabled = ShotUpperRelease1.IsEnabled = ShotUpperRelease2.IsEnabled =
+            ShotRelease1Percent.IsEnabled = ShotRelease2Percent.IsEnabled = ShotSpeed.IsEnabled = ShotUsesMeter.IsEnabled = editable;
+        ShotMeterReleaseType.IsEnabled = editable && ShotUsesMeter.IsOn;
+        NewShotProfileButton.IsEnabled = editable;
+        SaveShotProfileButton.IsEnabled = editable && (_shotDraftDirty || _selectedShotProfile is null);
+        RevertShotProfileButton.IsEnabled = editable && _shotDraftDirty;
+        DuplicateShotProfileButton.IsEnabled = DeleteShotProfileButton.IsEnabled = editable && !_shotDraftDirty && _selectedShotProfile is not null;
+        double height = ShotPlayerHeight.Value;
+        ShotHeightHint.Text = double.IsFinite(height) && height == Math.Truncate(height)
+            ? $"{(int)height / 12} ft {(int)height % 12} in. Height and rating describe this build; animation names are entered manually."
+            : "Enter player height as a whole number of inches.";
+    }
+
+    private Nba2K27ShotProfile ReadShotDraft()
+    {
+        var original = _shotDraftOriginal ?? Nba2K27ShotProfile.Create();
+        if (!double.IsFinite(ShotPlayerHeight.Value) || ShotPlayerHeight.Value != Math.Truncate(ShotPlayerHeight.Value) ||
+            !double.IsFinite(ShotThreePointRating.Value) || ShotThreePointRating.Value != Math.Truncate(ShotThreePointRating.Value))
+            throw new InvalidDataException("Player height and three-point rating must be whole numbers.");
+        if (!double.IsFinite(ShotRelease1Percent.Value) || ShotRelease1Percent.Value != Math.Truncate(ShotRelease1Percent.Value) ||
+            !double.IsFinite(ShotRelease2Percent.Value) || ShotRelease2Percent.Value != Math.Truncate(ShotRelease2Percent.Value) ||
+            ShotRelease1Percent.Value + ShotRelease2Percent.Value != 100)
+            throw new InvalidDataException("Upper-release percentages must be whole numbers that total 100%.");
+        if (ShotSpeed.SelectedIndex is < 0 or > 3)
+            throw new InvalidDataException("Choose one of the four shot speeds.");
+        var result = original with
+        {
+            Name = ShotProfileName.Text.Trim(),
+            HeightInches = (int)ShotPlayerHeight.Value,
+            ThreePointRating = (int)ShotThreePointRating.Value,
+            Base = ShotBase.Text.Trim(),
+            UpperRelease1 = ShotUpperRelease1.Text.Trim(),
+            UpperRelease2 = ShotUpperRelease2.Text.Trim(),
+            Release1Percent = (int)ShotRelease1Percent.Value,
+            ShotSpeed = ShotSpeed.SelectedIndex + 1,
+            UsesShotMeter = ShotUsesMeter.IsOn,
+            MeterReleaseType = ShotUsesMeter.IsOn ? ShotMeterReleaseType.Text.Trim() : ""
+        };
+        result.Validate();
+        return result;
+    }
+
+    private void NewShotProfileClicked(object sender, RoutedEventArgs args)
+    {
+        if (_shotDraftDirty)
+        {
+            ShotProfileStatus.Text = "Save or revert the current edits before creating another shot profile.";
+            return;
+        }
+        _restoringShotProfile = true;
+        try { ShotProfilePicker.SelectedItem = null; LoadShotDraft(Nba2K27ShotProfile.Create(), saved: false); }
+        finally { _restoringShotProfile = false; }
+        ShotProfileChanged?.Invoke(null);
+        ShotProfileStatus.Text = "New shot profile. Enter a name, build settings, base and both upper releases, then save.";
+        ShotProfileName.Focus(FocusState.Programmatic);
+        ShotProfileName.SelectAll();
+    }
+
+    private void SaveShotProfileClicked(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            var profile = ReadShotDraft();
+            _shotProfiles.Save(profile);
+            RefreshShotProfiles(profile.Id, chooseFirst: false);
+            ShotProfileStatus.Text = $"Saved {profile.Name}. Vision will use this shot configuration; assistance is not armed.";
+        }
+        catch (Exception error) { ShotProfileStatus.Text = $"Could not save the shot profile. {error.Message}"; }
+    }
+
+    private void RevertShotProfileClicked(object sender, RoutedEventArgs args)
+    {
+        if (_shotDraftOriginal is not { } original) return;
+        LoadShotDraft(original, saved: _selectedShotProfile is not null);
+        ShotProfileChanged?.Invoke(SelectedShotProfile);
+        ShotProfileStatus.Text = "Shot profile edits reverted. Assistance remains off.";
+    }
+
+    private void DuplicateShotProfileClicked(object sender, RoutedEventArgs args)
+    {
+        if (_shotDraftDirty || _selectedShotProfile is not { } selected) return;
+        try
+        {
+            string name = ShotCopyName(selected.Name);
+            var copy = _shotProfiles.Duplicate(selected.Id, name);
+            RefreshShotProfiles(copy.Id, chooseFirst: false);
+            ShotProfileStatus.Text = $"Created {copy.Name}. Edit its settings and save when ready.";
+        }
+        catch (Exception error) { ShotProfileStatus.Text = $"Could not duplicate the shot profile. {error.Message}"; }
+    }
+
+    private string ShotCopyName(string original)
+    {
+        for (int number = 1; ; number++)
+        {
+            string suffix = number == 1 ? " copy" : $" copy {number}";
+            string prefix = original[..Math.Min(original.Length, 80 - suffix.Length)].TrimEnd();
+            if (prefix.Length != 0 && char.IsHighSurrogate(prefix[^1])) prefix = prefix[..^1];
+            string candidate = prefix + suffix;
+            if (!_savedShotProfiles.Any(profile => string.Equals(profile.Name, candidate, StringComparison.OrdinalIgnoreCase))) return candidate;
+        }
+    }
+
+    private async void DeleteShotProfileClicked(object sender, RoutedEventArgs args)
+    {
+        if (_shotDraftDirty || _shotProfileOperation || _selectedShotProfile is not { } selected || XamlRoot is not { } root)
+            return;
+        _shotProfileOperation = true;
+        UpdateShotProfileActions();
+        try
+        {
+            if (!await StudioDialog.ConfirmDeletionAsync(root, ActualTheme, "shot", selected.Name,
+                    "This removes the saved build and jump-shot settings. Recorded gameplay and model files remain on disk.") || !IsLoaded)
+                return;
+            _shotProfiles.Delete(selected.Id);
+            RefreshShotProfiles(null, chooseFirst: true);
+            ShotProfileStatus.Text = $"Deleted {selected.Name}.";
+        }
+        catch (Exception error) { ShotProfileStatus.Text = $"Could not delete the shot profile. {error.Message}"; }
+        finally { _shotProfileOperation = false; UpdateShotProfileActions(); }
     }
 
     internal void SetProfile(StudioProfile profile)

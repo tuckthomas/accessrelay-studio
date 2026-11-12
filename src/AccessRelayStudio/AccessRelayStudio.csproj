@@ -10,7 +10,7 @@
     <AssemblyTitle>AccessRelay Studio</AssemblyTitle>
     <Description>Assistive controller input and voice access for Windows</Description>
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
-    <Version>1.8.19</Version>
+    <Version>1.9.0-experimental.1</Version>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -20,7 +20,7 @@
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\AccessRelayStudio.ico</ApplicationIcon>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Verification\**;Input\Probe\**;Viewer\node_modules\**;Audio\VirtualMicHost\target\**;Audio\NeuralHost\**;Run\**;docs\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Verification\**;WindowsVerification\**;Input\Probe\**;Viewer\node_modules\**;Audio\VirtualMicHost\target\**;Audio\NeuralHost\**;Run\**;docs\**</DefaultItemExcludes>
     <_VirtualMicIdentityFile>AccessRelay.VirtualMicUsbId.txt</_VirtualMicIdentityFile>
     <_VirtualMicHostFile>AccessRelay.VirtualMicHost.exe</_VirtualMicHostFile>
     <_VirtualMicSourceDirectory>$(MSBuildProjectDirectory)\Audio\VirtualMicHost\</_VirtualMicSourceDirectory>
@@ -30,17 +30,17 @@
     <PackageReference Include="MoonSharp" Version="2.0.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" Version="1.31.1" GeneratePathProperty="true" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <None Update="Audio\DialogueSeparation\*.md;Audio\DialogueSeparation\*.txt">
       <TargetPath>DialogueSeparation\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
-    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\LICENSE" Condition="'$(PkgMicrosoft_ML_OnnxRuntime)' != ''"
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime_Gpu_Windows)\LICENSE" Condition="'$(PkgMicrosoft_ML_OnnxRuntime_Gpu_Windows)' != ''"
           TargetPath="DialogueSeparation\ONNX-RUNTIME-LICENSE.txt"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)\ThirdPartyNotices.txt" Condition="'$(PkgMicrosoft_ML_OnnxRuntime)' != ''"
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime_Gpu_Windows)\ThirdPartyNotices.txt" Condition="'$(PkgMicrosoft_ML_OnnxRuntime_Gpu_Windows)' != ''"
           TargetPath="DialogueSeparation\ONNX-RUNTIME-NOTICES.txt"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Audio\VirtualMicHost\AccessRelay.VirtualMicHost.exe;Audio\VirtualMicHost\AccessRelay.VirtualMicUsbId.txt;Audio\VirtualMicHost\PlaySignal.VirtualMicHost.LICENSE.txt;Audio\VirtualMicHost\usbip-audio.LICENSE.txt;Audio\VirtualMicHost\windows-rs.LICENSE.txt;Audio\VirtualMicHost\README.md">

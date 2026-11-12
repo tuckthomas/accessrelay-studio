@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "displayName": "UNTRAINED example - supply reviewed model and evidence",
+  "modelVersion": "untrained-example-v1",
+  "modelFile": "animation-model.onnx",
+  "modelSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "inputName": "frames",
+  "outputName": "observation",
+  "preprocessing": "bgra8-player-crop-nearest256-bilinear-rgb-unit-ntchw-v2",
+  "inputWidth": 160,
+  "inputHeight": 160,
+  "historyLength": 4,
+  "historyIntervalMs": 16.6666667,
+  "maximumPredictionHorizonMs": 2000,
+  "rgbMean": [0, 0, 0],
+  "rgbStandardDeviation": [1, 1, 1],
+  "animationProfile": "replace-with-selected-shot-profile-fingerprint",
+  "gameVersion": "unvalidated",
+  "cameraConfiguration": "unvalidated",
+  "license": "Review actual model and training-data rights",
+  "validation": null
+}

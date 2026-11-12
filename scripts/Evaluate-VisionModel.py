@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Offline ONNX evaluation on reviewed recorded sessions; never certifies hardware timing.
+
+Uses the CPU execution provider deliberately as a numerical reference, not as AccessRelay's production runtime.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import math
+from pathlib import Path
+import sys
+
+from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--sessions", required=True, type=Path, nargs="+")
+    parser.add_argument("--split", choices=("validation", "held-out"), required=True)
+    parser.add_argument("--locked-thresholds", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    args = parser.parse_args()
+    if (args.out / "accuracy-report.json").exists() or (args.out / "predictions.jsonl").exists():
+        raise ValueError("Choose a fresh evaluation directory to preserve prior reports")
+    import numpy as np
+    import onnxruntime as ort
+
+    spec = importlib.util.spec_from_file_location("vision_training", Path(__file__).with_name("Train-VisionModel.py"))
+    training = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(training)
+    manifest = training.read_json(args.manifest)
+    if manifest.get("preprocessing") != PREPROCESSING_ID:
+        raise ValueError("Evaluation requires the same canonical v2 preprocessing contract as the runtime")
+    thresholds = training.read_json(args.locked_thresholds)
+    confidence = training.finite(thresholds.get("minimumConfidence"), "minimumConfidence")
+    uncertainty = training.finite(thresholds.get("maximumUncertaintyMs"), "maximumUncertaintyMs")
+    frame_age_limit = training.finite(thresholds.get("maximumFrameAgeMs"), "maximumFrameAgeMs")
+    if not 0 < confidence <= 1 or not 0 < uncertainty <= 500 or not 0 < frame_age_limit <= 1000:
+        raise ValueError("Locked thresholds are outside the runtime contract")
+    if thresholds.get("animationProfile") != manifest["animationProfile"] or not thresholds.get("datasetId") or not thresholds.get("calibrationProcedureVersion"):
+        raise ValueError("Threshold file must bind the exact profile, dataset and calibration procedure")
+    if args.split == "held-out" and thresholds.get("lockedBeforeFinalEvaluation") is not True:
+        raise ValueError("Lock thresholds using validation/calibration before evaluating the final held-out set")
+    model_path = training.child_file(args.manifest.parent, manifest["modelFile"])
+    actual_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    if actual_hash != manifest["modelSha256"]:
+        raise ValueError("Model SHA-256 differs from the manifest")
+    run = training.read_json(args.manifest.with_name("training-run.json"))
+    if run.get("diagnosticFixture") or run.get("modelSha256") != actual_hash:
+        raise ValueError("Diagnostic/untrained fixtures cannot produce validation evidence")
+    loaded = training.load_sessions(args.sessions, args.split, manifest["historyLength"], manifest["historyIntervalMs"])
+    sessions, samples, session_ids, fingerprint = loaded
+    if manifest["animationProfile"] != "nba2k27:" + fingerprint:
+        raise ValueError("Evaluation sessions use a different shot profile")
+    if args.split == "held-out" and session_ids & set(run.get("trainingSessionIds", []) + run.get("validationSessionIds", [])):
+        raise ValueError("Final held-out sessions overlap training or validation")
+    session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+    expected = [1, manifest["historyLength"], 3, manifest["inputHeight"], manifest["inputWidth"]]
+    if len(session.get_inputs()) != 1 or session.get_inputs()[0].shape != expected or session.get_outputs()[0].shape != [1, 5]:
+        raise ValueError("Exported ONNX shapes differ from the fixed runtime contract")
+    accepted, last_times, identity_correct, observation_count = {}, {}, 0, 0
+    for session_index, indices, target in samples:
+        directory, recording = sessions[session_index]
+        frames = []
+        for index in indices:
+            frame = recording["frames"][index]
+            with training.child_file(directory, frame["file"]).open("rb") as source:
+                source.seek(frame["offsetBytes"])
+                raw = source.read(frame["byteLength"])
+            bgra = np.frombuffer(raw, dtype=np.uint8).reshape(recording["storedHeight"], recording["storedWidth"], 4)
+            frames.append(resize_stored_bgra(bgra, manifest["inputHeight"], manifest["inputWidth"],
+                                            manifest["rgbMean"], manifest["rgbStandardDeviation"]))
+        output = session.run([manifest["outputName"]], {manifest["inputName"]: np.stack(frames)[None]})[0].reshape(-1)
+        if output.shape != (5,) or not np.isfinite(output).all() or np.any(output[[0, 1, 4]] < 0) or np.any(output[[0, 1, 4]] > 1) or np.any(output[2:4] < 0) or np.any(output[2:4] > manifest["maximumPredictionHorizonMs"]):
+            raise ValueError("Model returned invalid observation values")
+        observation_count += 1
+        identity_correct += int((output[0] >= confidence) == (target[0] > .5))
+        last = recording["frames"][indices[-1]]["captureTicks"]
+        labels = training.read_json(directory / "labels.json")
+        matching = [shot for shot in labels["shots"] if shot["startTicks"] <= last <= shot["endTicks"]]
+        if len(matching) != 1:
+            raise ValueError("Evaluation intervals must not overlap")
+        shot = matching[0]
+        key = (recording["sessionId"], shot["shotId"])
+        last_times[key] = last
+        # Offline frames have no live transport age. Live freshness/deadline compliance is evaluated separately.
+        if key not in accepted and min(output[0], output[1]) >= confidence and output[3] <= uncertainty:
+            error = float(output[2] - target[2]) if shot["isTargetShot"] else None
+            accepted[key] = {"sessionId": key[0], "shotId": key[1], "captureTicks": last,
+                             "signedPredictionErrorMs": error, "confidence": float(min(output[0], output[1])),
+                             "uncertaintyMs": float(output[3]), "isTargetShot": shot["isTargetShot"]}
+    target_shots, negative_shots, accepted_targets, false_releases = 0, 0, 0, 0
+    errors = []
+    capture_configuration = None
+    for directory, recording in sessions:
+        configuration = (recording["captureWidth"], recording["captureHeight"], recording["crop"])
+        if capture_configuration is not None and configuration != capture_configuration:
+            raise ValueError("One report must use a single capture size and player crop")
+        capture_configuration = configuration
+        labels = training.read_json(directory / "labels.json")
+        for shot in labels["shots"]:
+            key = (recording["sessionId"], shot["shotId"])
+            if shot["isTargetShot"]:
+                target_shots += 1
+                if key in accepted:
+                    accepted_targets += 1
+                    errors.append(abs(accepted[key]["signedPredictionErrorMs"]))
+            else:
+                negative_shots += 1
+                false_releases += int(key in accepted)
+    if not target_shots or not negative_shots or not observation_count:
+        raise ValueError("Evaluation requires target and negative intervals with usable temporal samples")
+    errors.sort()
+    report = {
+        "schemaVersion": 1, "datasetId": thresholds["datasetId"], "split": args.split,
+        "modelSha256": actual_hash, "modelVersion": manifest["modelVersion"], "animationProfile": manifest["animationProfile"],
+        "gameVersion": manifest["gameVersion"], "cameraConfiguration": manifest["cameraConfiguration"],
+        "calibrationProcedureVersion": thresholds["calibrationProcedureVersion"],
+        "meterOff": thresholds.get("meterOff") is True, "noPlayerIconRequired": thresholds.get("noPlayerIconRequired") is True,
+        "thresholdsLockedBeforeEvaluation": thresholds.get("lockedBeforeFinalEvaluation") is True,
+        "minimumConfidence": confidence, "maximumUncertaintyMs": uncertainty, "maximumFrameAgeMs": frame_age_limit,
+        "targetShots": target_shots, "negativeShots": negative_shots, "evaluatedPredictions": accepted_targets,
+        "targetCoverage": accepted_targets / target_shots, "identityAccuracy": identity_correct / observation_count,
+        "predictionP99ErrorMs": errors[max(0, math.ceil(.99 * len(errors)) - 1)] if errors else None,
+        "falseReleaseRate": false_releases / negative_shots,
+        "captureWidth": capture_configuration[0], "captureHeight": capture_configuration[1], "playerCrop": capture_configuration[2],
+        "hardwareValidated": False, "hardwareDescription": "", "remotePlayClient": "",
+        "hardwareSessionMinutes": 0, "hardwareAttempts": 0, "deadlineMissRate": 0
+    }
+    args.out.mkdir(parents=True, exist_ok=True)
+    (args.out / "accuracy-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    with (args.out / "predictions.jsonl").open("w", encoding="utf-8") as output:
+        for prediction in accepted.values():
+            output.write(json.dumps(prediction) + "\n")
+    print(json.dumps(report, indent=2))
+    print("Offline accuracy only: hardwareValidated=false. Automatic release remains gated.")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (ValueError, OSError, KeyError, ImportError) as error:
+        print(f"FAILURE {error}", file=sys.stderr)
+        raise SystemExit(2)

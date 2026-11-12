@@ -6,6 +6,7 @@ public sealed partial class MainWindow
 {
     private bool SaveLuaScript(LuaControllerScript script, ControlId? control)
     {
+        if (BlockDuringVisionTraining()) return false;
         if (RecorderInUse())
         {
             Status.Text = "Finish and save or discard the recording before saving a Lua script.";
@@ -27,6 +28,7 @@ public sealed partial class MainWindow
 
     private async Task<bool> DeleteLuaScript(LuaControllerScript script)
     {
+        if (BlockDuringVisionTraining()) return false;
         if (RecorderInUse())
         {
             Status.Text = "Finish and save or discard the recording before deleting a Lua script.";
@@ -37,6 +39,7 @@ public sealed partial class MainWindow
             "The script and its control assignments will be removed from this macro profile.", "Delete Lua script?")
             || _closing || _draft != expected || RecorderInUse())
             return false;
+        if (BlockDuringVisionTraining()) return false;
         _draft = _draft.WithoutLuaScript(script.Id);
         if (!SaveDraft())
         {

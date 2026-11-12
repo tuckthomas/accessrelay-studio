@@ -20,6 +20,9 @@ internal sealed class StudioRuntime : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Thread _worker;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private readonly ControllerOutputArbiter _vision = new(Stopwatch.Frequency);
+    private readonly ReleaseScheduler _releaseScheduler;
+    private StudioProfile _visionProfile;
     private StickDeadzone _stickDeadzone;
     private IControllerOutput? _output;
     private string _outputStatus = "Virtual output off";
@@ -30,11 +33,73 @@ internal sealed class StudioRuntime : IDisposable
     private long _recordingConnection;
     private long _recordingBeganAt;
     private int _selectionVersion;
+    private bool _visionTrainingRecording;
 
     public RuntimeSample? Latest => Volatile.Read(ref _latest);
     public bool HasOutput { get { lock (_sync) return _output is not null; } }
     public bool ScriptsEnabled => _engine.ScriptsEnabled;
+    public bool IsVisionTrainingRecording { get { lock (_sync) return _visionTrainingRecording; } }
     public double? RecentOutputHandoffMs { get { lock (_sync) return (_output as UsbipXboxOutput)?.RecentHandoffMs; } }
+    public VisionStatusSnapshot VisionStatus { get { lock (_sync) return _vision.Status; } }
+
+    public void ConfigureVision(VisionSettings settings)
+    {
+        lock (_sync) _vision.Configure(settings);
+        _releaseScheduler.Signal();
+    }
+
+    public long BeginVisionSession()
+    {
+        long generation;
+        lock (_sync) generation = _vision.BeginSession();
+        _releaseScheduler.Signal();
+        return generation;
+    }
+
+    public void InvalidateVisionSession(string reason)
+    {
+        lock (_sync) _vision.Invalidate(reason, sourceLost: true, disarm: true);
+        _releaseScheduler.Signal();
+    }
+
+    public bool SetVisionArmed(bool armed)
+    {
+        bool accepted;
+        lock (_sync)
+        {
+            if (armed && (_output?.IsAvailable != true || _latest?.Input.IsConnected != true || _recorder is not null
+                || VisionMacroConflict()))
+            {
+                InvalidateVisionLocked("Arming requires available input/output and no recording or conflicting macro.");
+                return false;
+            }
+            accepted = _vision.SetArmed(armed);
+        }
+        _releaseScheduler.Signal();
+        return accepted;
+    }
+
+    public bool SubmitVisionPrediction(VisionPrediction prediction)
+    {
+        bool accepted;
+        lock (_sync) accepted = _vision.Submit(prediction, Stopwatch.GetTimestamp());
+        _releaseScheduler.Signal();
+        return accepted;
+    }
+
+    public void SetVisionTrainingRecording(bool recording)
+    {
+        lock (_sync)
+        {
+            // The entry check and all script/recording transitions share this lock, so training
+            // cannot race an enable request after VisionSession's earlier UI eligibility check.
+            if (recording && (_engine.ScriptsEnabled || _recorder is not null))
+                throw new InvalidOperationException("Turn off macro scripts and finish macro recording before recording manual gameplay training data.");
+            _visionTrainingRecording = recording;
+            _vision.SetTrainingRecording(recording);
+        }
+        _releaseScheduler.Signal();
+    }
 
     public RecorderState Recording
     {
@@ -51,19 +116,32 @@ internal sealed class StudioRuntime : IDisposable
     {
         _input = input;
         _stickDeadzone = stickDeadzone;
+        _visionProfile = initial;
         _engine.Apply(initial);
+        _releaseScheduler = new ReleaseScheduler(GetReleaseDeadline, AdvanceReleaseDeadline, HighResolutionReleaseTimer.TryCreate());
         _worker = new Thread(Poll) { IsBackground = true, Name = "Gamepad Studio input" };
         _worker.Start();
     }
 
     public void Apply(StudioProfile profile)
     {
-        lock (_sync) _engine.Apply(profile);
+        lock (_sync)
+        {
+            RequireTrainingStoppedLocked("applying or changing a macro profile");
+            _engine.Apply(profile);
+            _visionProfile = profile;
+            InvalidateVisionLocked("Macro profile changed. Arm vision again after releasing the shoot button.");
+        }
     }
 
     public void SetScriptsEnabled(bool enabled)
     {
-        lock (_sync) _engine.SetEnabled(enabled);
+        lock (_sync)
+        {
+            if (enabled) RequireTrainingStoppedLocked("enabling macro scripts");
+            _engine.SetEnabled(enabled);
+            InvalidateVisionLocked("Macro script state changed. Arm vision again when there is no conflict.");
+        }
     }
 
     public void SetStickDeadzone(StickDeadzone settings)
@@ -78,6 +156,7 @@ internal sealed class StudioRuntime : IDisposable
             _input.SelectDevice(id);
             Interlocked.Increment(ref _selectionVersion);
             _engine.Tick(default, PaddleButtons.None, false, _clock.ElapsedMilliseconds);
+            InvalidateVisionLocked("Physical controller selection changed.");
             _output?.Neutralize();
         }
     }
@@ -97,6 +176,7 @@ internal sealed class StudioRuntime : IDisposable
     {
         lock (_sync)
         {
+            RequireTrainingStoppedLocked("starting a macro recording");
             if (_recorder is not null)
                 return;
             if (_pending is not null && !replacePending)
@@ -109,6 +189,7 @@ internal sealed class StudioRuntime : IDisposable
             _recordingConnection = input.ConnectionVersion;
             _recordingBeganAt = _clock.ElapsedMilliseconds;
             _recordingNote = null;
+            InvalidateVisionLocked("Recording started. Vision release is disarmed.");
             _engine.Tick(default, PaddleButtons.None, false, _recordingBeganAt);
         }
     }
@@ -126,6 +207,7 @@ internal sealed class StudioRuntime : IDisposable
             _recorder = null;
             _pending = null;
             _recordingNote = null;
+            InvalidateVisionLocked("Recording state changed. Vision release is disarmed.");
         }
     }
 
@@ -135,6 +217,7 @@ internal sealed class StudioRuntime : IDisposable
             return;
         _pending = _recorder.Stop("Untitled recording", now);
         _recorder = null;
+        InvalidateVisionLocked("Recording finished. Vision release is disarmed.");
         _recordingNote = _pending is not null ? note
             : "No input was captured. Move an included physical control during recording, or choose All inputs and try again.";
     }
@@ -180,6 +263,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void DisconnectOutput(string status = "Virtual output off")
     {
+        InvalidateVisionLocked("Virtual output stopped. Vision release is disarmed.");
         var output = _output;
         _output = null;
         _outputStatus = status;
@@ -241,6 +325,7 @@ internal sealed class StudioRuntime : IDisposable
                     {
                         connection = input.ConnectionVersion;
                         _engine.Tick(default, PaddleButtons.None, false, now);
+                        InvalidateVisionLocked("Physical controller connection changed. Vision release is disarmed.");
                     }
                     ControllerState state;
                     if (_recorder is not null)
@@ -256,11 +341,14 @@ internal sealed class StudioRuntime : IDisposable
                             FinishRecording(now, "Recording limit reached. Review the take before saving.");
                         state = input.IsConnected ? input.State : default;
                     }
+                    else if (_visionTrainingRecording)
+                        state = input.IsConnected ? input.State : default;
                     else
                         state = _engine.Tick(input.State, input.HeldPaddles, input.IsConnected, now, input.PressedPaddles);
                     state = _stickDeadzone.Apply(state);
-                    if (_output is not null && !_output.TryWrite(state))
-                        DisconnectOutput(_output.Status);
+                    state = _vision.Sample(input.State, state, input.IsConnected, _output?.IsAvailable == true,
+                        _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp());
+                    WriteOutputLocked(state);
                     Volatile.Write(ref _latest, new(input, state, _output is not null, _outputStatus,
                         _engine.Status, mean, p95, p99, paddlePulse, lastPaddles, visible));
                 }
@@ -297,11 +385,61 @@ internal sealed class StudioRuntime : IDisposable
     {
         _stop.Cancel();
         _worker.Join();
+        _releaseScheduler.Dispose();
         try { StopOutput(stopScripts: true); }
         finally
         {
             _input.Dispose();
             _stop.Dispose();
         }
+    }
+
+    private bool VisionMacroConflict()
+    {
+        if (!_engine.ScriptsEnabled) return false;
+        var binding = _visionProfile.GetBinding(_vision.Settings.ShootButton);
+        return _engine.Status.IsActive || (binding.Enabled && binding.Script != ScriptKind.Passthrough);
+    }
+
+    private void RequireTrainingStoppedLocked(string action)
+    {
+        if (_visionTrainingRecording)
+            throw new InvalidOperationException($"Finish the gameplay training take before {action}. Training captures manual input only.");
+    }
+
+    private void InvalidateVisionLocked(string reason)
+    {
+        _vision.Invalidate(reason, disarm: true);
+        _releaseScheduler.Signal();
+    }
+
+    private long? GetReleaseDeadline()
+    {
+        lock (_sync) return _stop.IsCancellationRequested ? null : _vision.DeadlineTimestamp;
+    }
+
+    private void AdvanceReleaseDeadline(long timestamp)
+    {
+        lock (_sync)
+        {
+            if (_stop.IsCancellationRequested || !_vision.TryAdvanceDeadline(timestamp)) return;
+            try
+            {
+                WriteOutputLocked(_vision.Output);
+                if (_latest is { } previous)
+                    Volatile.Write(ref _latest, previous with { Output = _vision.Output, OutputActive = _output is not null });
+            }
+            catch (Exception)
+            {
+                try { DisconnectOutput("Vision release stopped after an output error."); }
+                catch { _outputStatus = "Vision release stopped after an output error."; }
+            }
+        }
+    }
+
+    private void WriteOutputLocked(ControllerState state)
+    {
+        // This is the sole report-writing path for polling and deadline wakes alike.
+        if (_output is not null && !_output.TryWrite(state)) DisconnectOutput(_output.Status);
     }
 }

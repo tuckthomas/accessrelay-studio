@@ -1,0 +1,8 @@
+# Offline development/evaluation only. No Python runtime is shipped with AccessRelay.
+# This combination was exercised on Windows/Python 3.11 with torch 2.10.0 CPU.
+torch==2.10.0
+numpy==2.2.4
+onnx==1.23.2
+onnxruntime==1.31.1
+protobuf==7.36.2
+ml_dtypes==0.6.0

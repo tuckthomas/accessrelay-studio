@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Vision deadlines, manual cancellation, release latch, generations, freshness and ownership", VisionVerification.Run),
+    ("NBA 2K27 player shot profile CRUD, selection, configuration hashes and bounded storage", Nba2K27ShotProfileVerification.Run),
     ("Lua timing, live input, state, cancellation, budgets and profile compatibility", LuaVerification.Run),
     ("Default bindings and manual passthrough", Defaults),
     ("Preview and runtime agree for all five variants", AllTrajectories),

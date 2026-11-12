@@ -1,0 +1,15 @@
+# Windows capture verification
+
+This independent Windows project exercises the real WGC/D3D11 capture path with a temporary synthetic application window. It does not connect to Xbox Remote Play or establish model accuracy or console latency.
+
+```powershell
+dotnet run --project ./src/AccessRelayStudio/WindowsVerification/WindowsVerification.csproj -c Release
+```
+
+Run it in an interactive Windows desktop session. It verifies nonempty BGRA readback, local QPC timestamps, resize generation changes, minimize/restore eligibility, window closure, row-pitch handling, bounded newest-frame replacement, outstanding lease ownership, and disposal. The test window closes after the checks. Dataset checks use an owned temporary directory to verify cropped pixel data, frame index offsets, shot-profile provenance, incomplete source changes and metadata-finalization failures. They remove their own test data afterwards.
+
+The project also compiles the actual runtime, macro engine, arbiter and timers with test-only simulated input/output devices. It verifies atomic training-entry conflicts with script activation and macro recording, profile-change guards, physical passthrough, allowed disable/stop actions and explicit resumption after training. The stand-ins never enumerate controllers or access a virtual-controller driver.
+
+For headless buffer, dataset and simulated-runtime checks, append `-- --no-capture`. To check buffer ownership alone, append `-- --buffer-only`. Neither mode certifies screen capture. Dataset checks require at least 512 MiB free in the Windows temporary directory because they exercise the production free-space guard.
+
+When workspace disk space is limited, pass `-p:BaseIntermediateOutputPath=<absolute C: directory>/obj/ -p:OutputPath=<absolute C: directory>/bin/` before the `--` separator. Keep outputs outside the source tree when needed.

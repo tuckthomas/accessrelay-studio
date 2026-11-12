@@ -1,7 +1,7 @@
 # Xbox Remote Play vision: implementation plan
 
 - Date: 2026-11-11
-- Status: agreed architecture; implementation and hardware validation pending
+- Status: experimental software implemented; gameplay data, trained weights and Xbox release validation pending
 - Repository: `tuckthomas/accessrelay-studio`
 - Feature branch: `codex/remote-play-vision`
 
@@ -13,7 +13,17 @@ The production implementation stays in C#/.NET and uses ONNX Runtime GPU, initia
 
 The application remains WinUI 3 on Windows x64. Reuse its physical-input handling, profiles, controller state, virtual Xbox output, and existing signed USB/IP transport. The controller helper remains a separate native process; choosing in-process C# vision does not remove that existing process boundary.
 
-This document authorizes a concrete implementation sequence, not a claim that the feature already works. No validated animation model, measured RTX 2070 inference time, Remote Play compatibility result for our virtual device, or release-accuracy result currently exists for this feature.
+This document records the implementation and the remaining acceptance gates. No validated gameplay animation model, trained-model RTX 2070 performance measurement, Remote Play compatibility result for our virtual device, or release-accuracy result currently exists for this feature. The untrained CUDA diagnostic establishes runtime compatibility only. See [implementation verification](remote-play-vision-validation.md) for the completed checks and their limits.
+
+### Experimental branch implementation
+
+The branch now contains actual window capture, bounded leased frame buffers, a CUDA-only ONNX integration, temporal preprocessing/tracking, the output arbiter and deadline scheduler, diagnostics, calibration helpers, settings persistence, and a Remote Play Vision page. Capture-only observation works without a model. Untrained or unvalidated models cannot arm automatic release.
+
+The NBA 2K27 plugin supports multiple saved player/shot profiles with create, edit, revert, duplicate, select and delete operations. Each stores player height, three-point rating, custom base, upper release 1, upper release 2, meter on/off, meter-specific release type, one of four shot-speed levels, and release blending. Release 2's percentage is the complement of release 1 so they always total 100%. Meter release type is not applicable when the meter is off. Gameplay fields feed a configuration fingerprint; changing them invalidates the prior model/calibration association.
+
+Opt-in ten-second training takes store cropped 256x256 BGRA frames, actual PC capture timestamps and the full selected shot profile. Bounded buffering and file size limits protect the controller path. Human-reviewed shot labels are required; capture does not infer an optimal release label. Offline training/export/evaluation tools are separate from the C# production application.
+
+Windows capture and dataset lifecycle tests, portable controller/profile tests, model/preprocessing tests, and a strict CUDA diagnostic on the RTX 2070 are part of verification. Synthetic windows, random diagnostic weights and synthetic training samples establish software integration only. A gameplay dataset, trained task model, held-out accuracy, calibration and real Xbox Remote Play controller/release validation remain outstanding until actual gameplay is captured and reviewed.
 
 ## 2. Scope
 

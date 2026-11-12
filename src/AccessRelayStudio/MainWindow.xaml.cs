@@ -21,7 +21,7 @@ public sealed partial class MainWindow : Window
 {
     private enum StudioPage
     {
-        Dashboard, Bindings, Parameters, Profiles, Calibration, Monitor, Sequences, Recorder, Lua, Plugins, Voice, Settings, Updates, Help, About
+        Dashboard, Bindings, Parameters, Profiles, Calibration, Monitor, Sequences, Recorder, Lua, Plugins, Vision, Voice, Settings, Updates, Help, About
     }
     private static readonly Brush ConnectedBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 54, 221, 93));
     private static readonly Brush WaitingBrush = new SolidColorBrush(ColorHelper.FromArgb(255, 169, 187, 209));
@@ -66,6 +66,7 @@ public sealed partial class MainWindow : Window
     private RecorderPanel? _recorderPanel;
     private LuaScriptPanel? _luaPanel;
     private Nba2K27PluginPanel? _nba2K27Plugin;
+    private VisionPanel? _visionPanel;
     private StackPanel? _savedMacroList;
     private StackPanel? _macroNameEditor;
     private MacroRecording? _replacementRecording;
@@ -147,6 +148,13 @@ public sealed partial class MainWindow : Window
         Root.Loaded += StartMonitoring;
         AppWindow.Closing += (_, args) =>
         {
+            if (_nba2K27Plugin?.HasUnsavedShotProfileChanges == true)
+            {
+                args.Cancel = true;
+                SelectPage(StudioPage.Plugins);
+                Status.Text = "Save or revert the NBA 2K27 shot profile before closing Studio.";
+                return;
+            }
             if (_luaPanel?.HasUnsavedChanges == true)
             {
                 args.Cancel = true;
@@ -174,6 +182,7 @@ public sealed partial class MainWindow : Window
             _refresh.Stop();
             _performanceRefresh.Stop();
             _performance?.Dispose();
+            _visionPanel?.Dispose();
             try { _voicePanel?.Dispose(); }
             finally
             {
@@ -386,7 +395,8 @@ public sealed partial class MainWindow : Window
         }
         else if (runtime.HasOutput)
         {
-            runtime.SetScriptsEnabled(true);
+            try { runtime.SetScriptsEnabled(true); }
+            catch (InvalidOperationException error) { Status.Text = _scriptsOutputError = error.Message; }
         }
         else if (!_openingOutput)
         {
@@ -630,6 +640,7 @@ public sealed partial class MainWindow : Window
 
     private bool SaveDraft()
     {
+        if (BlockDuringVisionTraining()) return false;
         if (_runtime?.Recording.IsRecording == true)
         {
             Status.Text = "Stop the recording before applying profile changes.";
@@ -670,6 +681,7 @@ public sealed partial class MainWindow : Window
 
     private void Revert(object sender, RoutedEventArgs args)
     {
+        if (BlockDuringVisionTraining()) return;
         _draft = _active;
         _runtime?.Apply(_active);
         ShowProfileNotice(DashboardMacroProfileNotice, "");
@@ -703,7 +715,8 @@ public sealed partial class MainWindow : Window
     {
         if (_syncing || sender is not ComboBox { SelectedItem: StudioProfile profile } || profile.Id == _active.Id)
             return;
-        string? blocker = RecorderInUse() ? "Finish and save or discard the recording before switching macro profiles."
+        string? blocker = _runtime?.IsVisionTrainingRecording == true ? "Finish the gameplay training take before switching macro profiles."
+            : RecorderInUse() ? "Finish and save or discard the recording before switching macro profiles."
             : _luaPanel?.HasUnsavedChanges == true ? "Save & apply or revert your Lua edits before switching macro profiles."
             : _draft != _active ? "Apply or revert your bindings draft before switching macro profiles."
             : null;
@@ -726,6 +739,7 @@ public sealed partial class MainWindow : Window
 
     private void ActivateProfile(StudioProfile profile, IReadOnlyList<StudioProfile>? profiles = null)
     {
+        RequireVisionTrainingStopped();
         profiles ??= _store.LoadAll();
         _runtime?.Apply(profile);
         if (_active.Id != profile.Id)
@@ -765,6 +779,7 @@ public sealed partial class MainWindow : Window
     {
         if (_runtime is not { } runtime || _openingOutput || _closing)
             return;
+        if (enableScripts && BlockDuringVisionTraining()) { RefreshFeatureControls(); return; }
         _openingOutput = true;
         _openingScriptsOutput = enableScripts;
         using var start = new CancellationTokenSource();
@@ -787,7 +802,12 @@ public sealed partial class MainWindow : Window
             output = null;
             if (enableScripts)
             {
-                if (runtime.HasOutput)
+                if (runtime.IsVisionTrainingRecording)
+                {
+                    _scriptsOutputError = "Virtual output connected. Macro scripts remain off until the gameplay training take finishes.";
+                    result = _scriptsOutputError;
+                }
+                else if (runtime.HasOutput)
                     runtime.SetScriptsEnabled(true);
                 else
                     _scriptsOutputError = available ? runtime.Latest?.OutputStatus ?? result : result;
@@ -823,6 +843,7 @@ public sealed partial class MainWindow : Window
 
     private void StopAll(object sender, RoutedEventArgs args)
     {
+        _visionPanel?.Stop();
         _outputStart?.Cancel();
         _openingScriptsOutput = false;
         _scriptsOutputError = null;
@@ -830,11 +851,13 @@ public sealed partial class MainWindow : Window
         _voicePanel?.Stop();
         RefreshFeatureControls();
         RefreshRecorder();
-        Status.Text = "Voice and scripts stopped · Virtual Xbox output disconnected";
+        Status.Text = "Vision, voice and scripts stopped · Virtual Xbox output disconnected";
     }
 
     private void RefreshMonitor(DispatcherQueueTimer sender, object args)
     {
+        _visionPanel?.SetProfile(_active.Id, _active.Name);
+        _visionPanel?.RefreshStatus();
         RefreshRecorder();
         var micBadge = _voicePanel?.UpdateStatus() == true ? Visibility.Visible : Visibility.Collapsed;
         if (VoiceLiveBadge.Visibility != micBadge)
@@ -1075,7 +1098,8 @@ public sealed partial class MainWindow : Window
             VirtualOutputMenuItem.IsEnabled = runtime is not null && !_openingOutput;
             VirtualOutputMenuItem.Text = _openingOutput ? "Starting virtual Xbox output…"
                 : output ? "Stop virtual Xbox output" : "Start virtual Xbox output";
-            EnableScripts.IsEnabled = DashboardScripts.IsEnabled = runtime is not null && (!_openingOutput || _openingScriptsOutput);
+            bool training = runtime?.IsVisionTrainingRecording == true;
+            EnableScripts.IsEnabled = DashboardScripts.IsEnabled = runtime is not null && !training && (!_openingOutput || _openingScriptsOutput);
             EnableScripts.IsOn = DashboardScripts.IsOn = scriptsEnabled || _openingScriptsOutput;
             if (CurrentPage != StudioPage.Dashboard)
                 return;
@@ -1083,6 +1107,7 @@ public sealed partial class MainWindow : Window
             string scriptsMessage = (runtime is not null, scriptsEnabled, output) switch
             {
                 (false, _, _) => "Controller monitor unavailable.",
+                _ when training => "Off during the gameplay training take. Only manual controller input is captured.",
                 _ when _openingScriptsOutput => "Starting the virtual Xbox controller for macros…",
                 _ when _outputStart?.IsCancellationRequested == true => "Cancelling virtual Xbox output startup…",
                 _ when _openingOutput => "Starting virtual Xbox output for controller passthrough…",
@@ -1190,7 +1215,7 @@ public sealed partial class MainWindow : Window
             performance.Enabled = page == StudioPage.Dashboard;
         MacroProfileActions.Visibility = page is StudioPage.Bindings or StudioPage.Parameters or StudioPage.Profiles
             or StudioPage.Calibration or StudioPage.Sequences or StudioPage.Recorder or StudioPage.Lua ? Visibility.Visible : Visibility.Collapsed;
-        bool fullWidth = page is StudioPage.Dashboard or StudioPage.Voice or StudioPage.Recorder or StudioPage.Lua or StudioPage.Plugins or StudioPage.Sequences;
+        bool fullWidth = page is StudioPage.Dashboard or StudioPage.Voice or StudioPage.Recorder or StudioPage.Lua or StudioPage.Plugins or StudioPage.Sequences or StudioPage.Vision;
         BindingsInspector.Visibility = fullWidth ? Visibility.Collapsed : Visibility.Visible;
         Grid.SetColumnSpan(WorkspacePanel, fullWidth ? 2 : 1);
         MapFooter.Visibility = fullWidth ? Visibility.Collapsed : Visibility.Visible;
@@ -1307,13 +1332,27 @@ public sealed partial class MainWindow : Window
                 break;
             case StudioPage.Plugins:
                 Heading("Plugins", "Tune your saved input sequences for specific games.");
-                _nba2K27Plugin ??= new Nba2K27PluginPanel(SavePluginTuning, VariantName);
+                if (_nba2K27Plugin is null)
+                {
+                    _nba2K27Plugin = new Nba2K27PluginPanel(SavePluginTuning, VariantName);
+                    _nba2K27Plugin.ShotProfileChanged += profile => _visionPanel?.SetShotProfile(profile);
+                }
                 _nba2K27Plugin.SetProfile(_active);
                 Details.Children.Add(_nba2K27Plugin);
                 break;
             case StudioPage.Voice:
                 Heading("Live Voice", "Process your microphone locally for communication in Windows apps.");
                 Details.Children.Add(GetVoicePanel());
+                break;
+            case StudioPage.Vision:
+                Heading("Remote Play Vision", "Experimental window capture, animation inference and timed controller release.");
+                _visionPanel ??= new VisionPanel(AppWindow.Id, () => _runtime, async () =>
+                {
+                    if (_runtime?.HasOutput != true) await StartOutputAsync(enableScripts: false);
+                }, () => SelectPage(StudioPage.Plugins));
+                _visionPanel.SetProfile(_active.Id, _active.Name);
+                if (_nba2K27Plugin is not null) _visionPanel.SetShotProfile(_nba2K27Plugin.SelectedShotProfile);
+                Details.Children.Add(_visionPanel);
                 break;
             case StudioPage.Settings:
                 Heading("Settings", "Manage local controller output and find your saved profiles.");
@@ -1461,8 +1500,23 @@ public sealed partial class MainWindow : Window
 
     private bool RecorderInUse() => _runtime?.Recording is { IsRecording: true } or { Pending: not null };
 
+    private void RequireVisionTrainingStopped()
+    {
+        if (_runtime?.IsVisionTrainingRecording == true)
+            throw new InvalidOperationException("Finish the gameplay training take before changing macro profiles, scripts, or recordings. Training captures manual input only.");
+    }
+
+    private bool BlockDuringVisionTraining()
+    {
+        if (_runtime?.IsVisionTrainingRecording != true) return false;
+        Status.Text = "Finish the gameplay training take before changing macro profiles, scripts, or recordings. Training captures manual input only.";
+        ShowProfileNotice(DashboardMacroProfileNotice, Status.Text);
+        return true;
+    }
+
     private void SavePluginTuning(StudioProfile expected, StudioProfile updated)
     {
+        RequireVisionTrainingStopped();
         if (_closing || _active != expected)
             throw new InvalidOperationException("The active macro profile changed. Open Plugins and load the macro again.");
         if (RecorderInUse())
@@ -1592,6 +1646,7 @@ public sealed partial class MainWindow : Window
 
     private void BeginRerecord(Guid id)
     {
+        if (BlockDuringVisionTraining()) return;
         if (RecorderInUse())
         {
             ShowRecordingError("Finish the current recording or discard it before re-recording a saved macro.");
@@ -1727,6 +1782,7 @@ public sealed partial class MainWindow : Window
 
     private void SaveRecording(string name, ControlId? paddle)
     {
+        RequireVisionTrainingStopped();
         if (_runtime?.Recording.Pending is not { } pending)
             return;
         var replacement = _replacementRecording;
@@ -1859,6 +1915,7 @@ public sealed partial class MainWindow : Window
 
     private void SaveMacroName(StudioProfile profile, Guid id, string name, bool duplicate)
     {
+        RequireVisionTrainingStopped();
         if (_closing || _active != profile || RecorderInUse())
             throw new InvalidOperationException("The macro profile or recorder state changed. Reopen the macro action and try again.");
 
@@ -1895,6 +1952,7 @@ public sealed partial class MainWindow : Window
 
     private async Task DeleteRecordingAsync(Guid id)
     {
+        if (BlockDuringVisionTraining()) return;
         if (RecorderInUse())
         {
             ShowRecordingError("Finish or discard the current recording before deleting a saved macro.");
@@ -1912,6 +1970,8 @@ public sealed partial class MainWindow : Window
                     title: "Delete macro?") || _closing || _active.Id != profile.Id || RecorderInUse() ||
                 !_active.Recordings.TryGetValue(id, out var current) || current != recording)
                 return;
+
+            RequireVisionTrainingStopped();
 
             var saved = _active.WithoutRecording(id);
             var draft = _draft == _active ? saved : _draft.WithoutRecording(id);
@@ -2020,6 +2080,7 @@ public sealed partial class MainWindow : Window
     {
         if (_deletingMacroProfile || _closing || Root.XamlRoot is not { } root)
             return;
+        if (BlockDuringVisionTraining()) return;
         if (RecorderInUse() || _draft != _active)
         {
             Status.Text = RecorderInUse() ? "Finish and save or discard the recording before deleting a macro profile."
@@ -2038,6 +2099,8 @@ public sealed partial class MainWindow : Window
             bool confirmed = await StudioDialog.ConfirmDeletionAsync(root, Root.ActualTheme, "macro", profile.Name, detail);
             if (!confirmed || _closing || _active.Id != profile.Id || RecorderInUse() || _draft != _active)
                 return;
+
+            RequireVisionTrainingStopped();
 
             remaining = _store.LoadAll().Where(candidate => candidate.Id != profile.Id).ToArray();
             StudioProfile? replacement = null;
@@ -2075,6 +2138,7 @@ public sealed partial class MainWindow : Window
 
     private void SaveNamed(StudioProfile profile)
     {
+        if (BlockDuringVisionTraining()) return;
         if (RecorderInUse())
         {
             Status.Text = "Finish and save or discard the recording before changing profiles.";
@@ -2105,6 +2169,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
+                if (BlockDuringVisionTraining()) return;
                 if (RecorderInUse())
                 {
                     Status.Text = "Finish and save or discard the recording before importing.";
@@ -2119,7 +2184,10 @@ public sealed partial class MainWindow : Window
                 picker.FileTypeFilter.Add(".json");
                 var file = await picker.PickSingleFileAsync();
                 if (file is not null)
+                {
+                    RequireVisionTrainingStopped();
                     ActivateProfile(_store.Import(file.Path));
+                }
             }
         }
         catch (Exception error) { Status.Text = error.Message; }

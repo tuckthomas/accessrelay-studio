@@ -16,7 +16,7 @@
         </Style>
         <Style x:Key="PluginHint" TargetType="TextBlock">
             <Setter Property="Foreground" Value="#B5C0CF" />
-            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontSize" Value="14" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
         <Style x:Key="FeedbackBadge" TargetType="RadioButton">
@@ -76,6 +76,74 @@
     </UserControl.Resources>
 
     <StackPanel Spacing="12" Margin="3,4,10,5" MaxWidth="900">
+        <Border Style="{StaticResource PluginCard}">
+            <StackPanel Spacing="10">
+                <TextBlock Text="NBA 2K27 shot profiles" FontSize="22" Style="{StaticResource PluginHeading}" />
+                <TextBlock Text="Save the player build and jump-shot creator settings for each shot. Vision keeps training and calibration tied to this configuration. Selecting a profile does not arm assistance."
+                           Style="{StaticResource PluginHint}" />
+                <ComboBox x:Name="ShotProfilePicker" Header="Saved shot profile" PlaceholderText="Create a shot profile"
+                          DisplayMemberPath="Name" FontSize="14" HorizontalAlignment="Stretch" MinWidth="0"
+                          AutomationProperties.Name="Saved NBA 2K27 shot profile" SelectionChanged="ShotProfileSelectionChanged" />
+                <StackPanel x:Name="ShotProfileFields" Spacing="10">
+                    <TextBox x:Name="ShotProfileName" Header="Profile name" MaxLength="80" FontSize="14"
+                             AutomationProperties.Name="Shot profile name" TextChanged="ShotTextChanged" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                        <NumberBox x:Name="ShotPlayerHeight" Header="Player height (total inches)" Minimum="36" Maximum="108"
+                                   SmallChange="1" LargeChange="12" SpinButtonPlacementMode="Compact" FontSize="14" MinWidth="0"
+                                   AutomationProperties.Name="Player height in whole inches" ValueChanged="ShotNumberChanged" />
+                        <NumberBox x:Name="ShotThreePointRating" Grid.Column="1" Header="Three-point rating" Minimum="0" Maximum="100"
+                                   SmallChange="1" LargeChange="5" SpinButtonPlacementMode="Compact" FontSize="14" MinWidth="0"
+                                   AutomationProperties.Name="Three point rating from zero to one hundred" ValueChanged="ShotNumberChanged" />
+                    </Grid>
+                    <TextBlock x:Name="ShotHeightHint" Style="{StaticResource PluginHint}" />
+                    <TextBox x:Name="ShotBase" Header="Base" PlaceholderText="Enter the base exactly as configured in the game"
+                             MaxLength="120" FontSize="14" AutomationProperties.Name="Jump shot base" TextChanged="ShotTextChanged" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                        <TextBox x:Name="ShotUpperRelease1" Header="Upper release 1" MaxLength="120" FontSize="14" MinWidth="0"
+                                 AutomationProperties.Name="Upper release one" TextChanged="ShotTextChanged" />
+                        <TextBox x:Name="ShotUpperRelease2" Grid.Column="1" Header="Upper release 2" MaxLength="120" FontSize="14" MinWidth="0"
+                                 AutomationProperties.Name="Upper release two" TextChanged="ShotTextChanged" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                        <NumberBox x:Name="ShotRelease1Percent" Header="Upper release 1 blend (%)" Minimum="0" Maximum="100"
+                                   SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" FontSize="14" MinWidth="0"
+                                   AutomationProperties.Name="Upper release one blend percentage" ValueChanged="ShotBlend1Changed" />
+                        <NumberBox x:Name="ShotRelease2Percent" Grid.Column="1" Header="Upper release 2 blend (%)" Minimum="0" Maximum="100"
+                                   SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" FontSize="14" MinWidth="0"
+                                   AutomationProperties.Name="Upper release two blend percentage" ValueChanged="ShotBlend2Changed" />
+                    </Grid>
+                    <TextBlock Text="The two upper-release percentages always total 100%. Changing either value updates the other."
+                               Style="{StaticResource PluginHint}" />
+                    <ComboBox x:Name="ShotSpeed" Header="Shot speed" FontSize="14" HorizontalAlignment="Stretch"
+                              AutomationProperties.Name="Shot speed from one to four" SelectionChanged="ShotSpeedChanged">
+                        <ComboBoxItem Content="1 of 4 (slowest)" />
+                        <ComboBoxItem Content="2 of 4" />
+                        <ComboBoxItem Content="3 of 4" />
+                        <ComboBoxItem Content="4 of 4 (fastest)" />
+                    </ComboBox>
+                    <ToggleSwitch x:Name="ShotUsesMeter" Header="Use shot meter" OnContent="Meter on" OffContent="Meter off"
+                                  FontSize="14" AutomationProperties.Name="Use a shot meter for this shot profile" Toggled="ShotMeterChanged" />
+                    <TextBox x:Name="ShotMeterReleaseType" Header="Meter release type" MaxLength="120" FontSize="14"
+                             PlaceholderText="Enter the release type configured for the meter"
+                             AutomationProperties.Name="Release type used with the shot meter" TextChanged="ShotTextChanged" />
+                    <TextBlock Text="Release type applies only while the shot meter is on. Meter-free animation analysis remains available with the meter off."
+                               Style="{StaticResource PluginHint}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="NewShotProfileButton" Content="New profile" FontSize="14" Click="NewShotProfileClicked" />
+                    <Button x:Name="SaveShotProfileButton" Content="Save profile" FontSize="14" Click="SaveShotProfileClicked"
+                            Style="{StaticResource AccentButtonStyle}" />
+                    <Button x:Name="RevertShotProfileButton" Content="Revert edits" FontSize="14" Click="RevertShotProfileClicked" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="DuplicateShotProfileButton" Content="Duplicate profile" FontSize="14" Click="DuplicateShotProfileClicked" />
+                    <Button x:Name="DeleteShotProfileButton" Content="Delete profile…" FontSize="14" Click="DeleteShotProfileClicked" />
+                </StackPanel>
+                <TextBlock x:Name="ShotProfileStatus" Style="{StaticResource PluginHint}"
+                           AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
+        </Border>
+
         <Border Style="{StaticResource PluginCard}">
             <StackPanel Spacing="9">
                 <TextBlock Text="NBA 2K27 Rhythm Shooting" FontSize="22" Style="{StaticResource PluginHeading}" />
