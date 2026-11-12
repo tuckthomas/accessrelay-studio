@@ -53,6 +53,7 @@ public sealed record StudioProfile
     public string Name { get; init; } = "";
     public bool ScriptsEnabled { get; init; }
     public ImmutableHashSet<ControlId> StickyControls { get; init; } = ImmutableHashSet<ControlId>.Empty;
+    public StickSmoothing Smoothing { get; init; } = StickSmoothing.Off;
     public ImmutableDictionary<ControlId, ScriptBinding> Bindings { get; init; } =
         ImmutableDictionary<ControlId, ScriptBinding>.Empty;
     public ImmutableDictionary<ShotVariant, ScriptTiming> Timings { get; init; } = Defaults;
@@ -128,6 +129,8 @@ public sealed record StudioProfile
     {
         if (StickyControls is null || StickyControls.Any(control => !StickyButtons.Supports(control)))
             throw new InvalidDataException("Sticky controls must be gamepad buttons or triggers.");
+        if (Smoothing is null) throw new InvalidDataException("Stick smoothing settings are missing.");
+        Smoothing.Validate();
         if (Id == Guid.Empty)
             throw new InvalidDataException("The profile needs an ID.");
         if (string.IsNullOrWhiteSpace(Name) || Name.Length > 80 || Name.Any(char.IsControl))

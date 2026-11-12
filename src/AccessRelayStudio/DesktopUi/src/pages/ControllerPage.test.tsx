@@ -6,6 +6,20 @@ afterEach(cleanup);
 const setup = () => structuredClone(previewState.controller);
 
 describe('controller workflows', () => {
+  it('saves independent smoothing settings without losing unsaved sticky choices', async () => {
+    const state = setup(), command = vi.fn().mockResolvedValue(null);
+    render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Accessibility' }));
+    expect((screen.getByLabelText('Left stick smoothing') as HTMLInputElement).value).toBe('0');
+    fireEvent.click(screen.getByLabelText('B button'));
+    fireEvent.change(screen.getByLabelText('Left stick smoothing'), { target: { value: '25' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save smoothing' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('smoothingSave', { settings: { leftTimeConstantMs: 25, rightTimeConstantMs: 0 } }));
+    await screen.findByText('Stick smoothing saved.');
+    expect((screen.getByLabelText('B button') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: 'Button mapping' }));
+    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
+  });
   it('keeps sticky edits through status updates and guards navigation until saved or discarded', async () => {
     const state = setup(), command = vi.fn().mockResolvedValue(null);
     const { rerender } = render(<ControllerPage state={state} status={state.status} command={command} />);

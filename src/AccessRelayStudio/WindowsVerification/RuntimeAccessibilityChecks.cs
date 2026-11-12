@@ -13,7 +13,7 @@ internal static class RuntimeAccessibilityChecks
         var profile = StudioProfile.CreateDefault() with { StickyControls = ImmutableHashSet.Create(ControlId.A) };
         using var runtime = new StudioRuntime(input, profile, new StickDeadzone(0, 0));
         runtime.Attach(new UsbipXboxOutput());
-        Wait(() => runtime.Latest?.Input.IsConnected == true, "Input did not connect.");
+        Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Input/output did not connect.");
         var down = default(ControllerState) with { Buttons = (ushort)ControlId.A };
         input.SetState(down);
         Wait(() => runtime.Latest?.Output.Buttons == down.Buttons, "Sticky press did not reach output.");
@@ -22,7 +22,7 @@ internal static class RuntimeAccessibilityChecks
             "Sticky release was not retained.");
         runtime.StopOutput(stopScripts: true);
         runtime.Attach(new UsbipXboxOutput());
-        Wait(() => runtime.Latest?.Output.Buttons == 0, "Stop/restart resumed a sticky hold.");
+        Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Output.Buttons == 0, "Stop/restart resumed a sticky hold.");
         input.SetState(down);
         Wait(() => runtime.Latest?.Output.Buttons == down.Buttons, "New sticky press was ignored.");
         runtime.SelectController(null);
@@ -51,6 +51,44 @@ internal static class RuntimeAccessibilityChecks
         Wait(() => runtime.Latest is { } sample && sample.Input.IsConnected && sample.Output.Buttons == 0,
             "Reconnect latched a held control.");
         Console.WriteLine("SUCCESS: real runtime sticky composition, Stop, profile/device changes, disconnect and raw recording with simulated devices.");
+        Smoothing();
+    }
+
+    private static void Smoothing()
+    {
+        using var input = new EliteInputMonitor();
+        var profile = StudioProfile.CreateDefault() with { Smoothing = new(100, 100) };
+        using var runtime = new StudioRuntime(input, profile, new StickDeadzone(5, 5));
+        runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Smoothing input/output did not connect.");
+        var step = default(ControllerState) with { RightX = short.MaxValue };
+        input.SetState(step);
+        Wait(() => runtime.Latest is { } sample && sample.Input.State == step && sample.Output.RightX is > 0 and < short.MaxValue,
+            "Manual stick output was not smoothed.");
+        input.SetState(step with { RightX = 100 });
+        Wait(() => runtime.Latest is { } sample && sample.Input.State.RightX == 100 && sample.Output.RightX == 0,
+            "Returning to the deadzone left a filter tail.");
+        runtime.StartRecording(RecordingChannels.All);
+        input.SetState(step);
+        Wait(() => runtime.Latest?.Output.RightX == short.MaxValue, "Recording changed physical stick input.");
+        input.SetState(default);
+        Wait(() => runtime.Latest?.Input.State == default(ControllerState), "Neutral recording sample was not observed.");
+        runtime.StopRecording(); runtime.DiscardRecording();
+        runtime.SetVisionTrainingRecording(true);
+        input.SetState(step); Wait(() => runtime.Latest?.Output.RightX == short.MaxValue, "Training smoothed manual input.");
+        input.SetState(default); Wait(() => runtime.Latest?.Output.RightX == 0, "Training neutralization failed.");
+        runtime.SetVisionTrainingRecording(false);
+        runtime.SetScriptsEnabled(true);
+        var baseline = runtime.Latest;
+        Wait(() => !ReferenceEquals(runtime.Latest, baseline), "Scripts did not observe released controls.");
+        input.SetState(default, PaddleButtons.LargeRight);
+        Wait(() => runtime.Latest is { } sample && sample.Macro.IsActive && sample.Output.RightY == short.MinValue + 1,
+            "Smoothing altered the timed sequence output.");
+        runtime.SetScriptsEnabled(false);
+        input.SetState(default); Wait(() => runtime.Latest?.Output == default(ControllerState), "Disabling scripts retained output.");
+        runtime.StopOutput(stopScripts: true); runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest?.Output == default(ControllerState), "Output restart retained smoothing history.");
+        Console.WriteLine("SUCCESS: real runtime smoothing, immediate deadzone neutralization, raw recording/training and unsmoothed sequences with simulated devices.");
     }
 
     private static void Wait(Func<bool> condition, string message)

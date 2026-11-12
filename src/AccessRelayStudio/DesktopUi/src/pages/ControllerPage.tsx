@@ -57,7 +57,8 @@ export function ControllerPage({ state, status, command }: PageProps) {
     {tab === 'sequences' && <Sequences state={state} status={live} command={command} />}
     {tab === 'lua' && <LuaEditor state={state} status={live} command={command} />}
     {tab === 'input' && <InputResponse state={state} status={live} command={command} />}
-    {tab === 'accessibility' && <StickyInput key={profile.id} state={state} status={live} command={command} />}
+    {tab === 'accessibility' && <div className="page-stack"><StickyInput key={'sticky-' + profile.id} state={state} status={live} command={command} />
+      <SmoothingInput key={'smoothing-' + profile.id} state={state} status={live} command={command} /></div>}
     <details className="details-section"><summary>Manage controller setups</summary><div className="row"><Button onClick={() => nameAction('profileRename')}><Icon name="pencil" size={16} />Rename</Button>
       <Button onClick={() => transition(() => nameAction('profileDuplicate'))}><Icon name="copy" size={16} />Duplicate</Button><Button onClick={() => transition(() => perform('profileImport'))}><Icon name="upload" size={16} />Import setup</Button>
       <Button onClick={() => perform('profileExport')}><Icon name="download" size={16} />Export setup</Button><Button variant="ghost" disabled={(state.profiles || []).length < 2} onClick={() => setDeleteProfile(true)}><Icon name="trash" size={16} />Delete setup</Button></div></details>
@@ -95,6 +96,31 @@ function StickyInput({ state, status, command }: PageProps) {
         catch (e) { setError(e instanceof Error ? e.message : String(e)); }
         finally { setBusy(false); }
       }}>Save sticky controls</Button><Button disabled={!dirty || locked} onClick={() => { setSelected(JSON.parse(saved)); setBaseline(saved); setError(''); }}>Discard edits</Button></div>
+    </div>
+  </Card>;
+}
+
+function SmoothingInput({ state, status, command }: PageProps) {
+  const saved = JSON.stringify(state.activeProfile?.smoothing || { leftTimeConstantMs: 0, rightTimeConstantMs: 0 });
+  const [settings, setSettings] = useState(JSON.parse(saved)), [baseline, setBaseline] = useState(saved);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
+  const dirty = JSON.stringify(settings) !== baseline;
+  useUnsavedChanges(dirty);
+  useEffect(() => { if (!dirty) { setSettings(JSON.parse(saved)); setBaseline(saved); } }, [saved]);
+  const locked = busy || status.training || status.recording?.isRecording || !!status.recording?.pending;
+  return <Card title="Tremor smoothing" description="Soften small changes in manual stick movement. Both sticks are unfiltered by default.">
+    <div className="stack"><p className="subtle">Higher values smooth more and add response delay. At the selected time constant, output covers about 63% of a sudden movement; allow about three times that value to reach 95%. Returning to the deadzone is immediate. Sequences and recordings are not smoothed.</p>
+      <div className="field-grid">{(['left', 'right'] as const).map(side => <Field key={side} label={side === 'left' ? 'Left stick smoothing' : 'Right stick smoothing'}
+        hint={settings[side + 'TimeConstantMs'] === 0 ? 'Off' : settings[side + 'TimeConstantMs'] + ' ms time constant'}>
+        <input type="range" min={0} max={100} step={1} value={settings[side + 'TimeConstantMs']} disabled={locked}
+          onChange={event => { setSettings((value: any) => ({ ...value, [side + 'TimeConstantMs']: Number(event.target.value) })); setMessage(''); }} />
+      </Field>)}</div>
+      {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
+      <div className="row"><Button variant="primary" busy={busy} disabled={!dirty || locked} onClick={async () => {
+        const submitted = { ...settings }; setBusy(true); setError('');
+        try { await command('smoothingSave', { settings: submitted }); setBaseline(JSON.stringify(submitted)); setMessage('Stick smoothing saved.'); }
+        catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+      }}>Save smoothing</Button><Button disabled={!dirty || locked} onClick={() => { setSettings(JSON.parse(saved)); setBaseline(saved); setError(''); }}>Discard smoothing edits</Button></div>
     </div>
   </Card>;
 }

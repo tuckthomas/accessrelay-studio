@@ -54,6 +54,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         {
             _active.Id, _active.Name,
             stickyControls = _active.StickyControls.OrderBy(control => (uint)control),
+            _active.Smoothing,
             bindings = ControlMap.All.Select(control =>
             {
                 var binding = _active.GetBinding(control);
@@ -171,6 +172,13 @@ internal sealed class DesktopControllerService : IDesktopModule
                     throw new InvalidDataException("Choose gamepad buttons or triggers for sticky input.");
                 Save(_active with { StickyControls = controls.ToImmutableHashSet() });
                 _notice = "Sticky controls saved. Release the controls before pressing to latch.";
+                break;
+            }
+            case "smoothingSave":
+            {
+                var settings = args.GetProperty("settings").Read<StickSmoothing>();
+                settings.Validate(); Save(_active with { Smoothing = settings });
+                _notice = "Stick smoothing saved. Stronger smoothing adds response delay.";
                 break;
             }
             case "timingSave":

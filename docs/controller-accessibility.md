@@ -28,3 +28,18 @@ the earlier format appropriate to the setup's other features.
 
 Portable tests and Windows checks with simulated devices verify state transitions and
 composition. Physical controller/trigger behavior and comfort still need device testing.
+
+## Tremor smoothing
+
+Use **Controller → Accessibility → Tremor smoothing** to set each stick's time constant
+from 0 (off) to 100 ms. Save the choices with the controller setup. Larger values reduce
+rapid changes but delay intentional movements: a sustained change reaches about 63% of
+its target after one time constant and 95% after three. These are mathematical filter
+response times, not a measured hardware latency guarantee.
+
+The filter uses elapsed time rather than assuming a fixed polling rate. It runs on
+manual input before sequences/Lua; script output remains unsmoothed. Returning to the
+existing deadzone immediately neutralizes the stick. Stop/output changes, disconnect,
+device/profile/deadzone changes, and recording transitions reset its history. A large
+polling gap or clock rollback starts a fresh sample. Recording paths retain physical
+input. Smoothing uses the same profile format 4 compatibility rules as sticky buttons.

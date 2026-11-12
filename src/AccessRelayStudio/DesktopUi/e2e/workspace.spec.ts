@@ -1,4 +1,19 @@
 import { expect, test } from '@playwright/test';
+test('smoothing saves independently per stick and persists across workspace navigation', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('tab', { name: 'Accessibility' }).click();
+  const left = page.getByLabel('Left stick smoothing', { exact: true });
+  await expect(left).toHaveValue('0');
+  await left.fill('25');
+  await page.getByRole('button', { name: 'Save smoothing', exact: true }).click();
+  await expect(page.getByText('Stick smoothing saved.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('tab', { name: 'Accessibility' }).click();
+  await expect(left).toHaveValue('25');
+  await expect(page.getByLabel('Right stick smoothing', { exact: true })).toHaveValue('0');
+});
 test('sticky controls save with the setup and remain editable after navigating away', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Controller', exact: true }).click();

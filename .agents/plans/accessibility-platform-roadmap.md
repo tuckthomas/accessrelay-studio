@@ -70,26 +70,31 @@ microphone hardware test is claimed.
       require a fresh press before reactivation.
 - [x] Test edges, simultaneous controls, precedence, persistence compatibility, and resets.
 - [ ] Validate portable logic and Windows bridge/output behavior before completion.
-- [ ] Push implementation and record its commit SHA and validation here.
+- [x] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending push. Portable controller verification, 51 frontend
+Implementation commit: `14fd7f40f8262df58ce9b60d8d48f03cbecd7d57`. Portable controller verification, 51 frontend
 unit tests, TypeScript/Vite build, existing browser checks, and Windows verification
 cross-compilation passed. Native runtime tests use simulated devices and are added
-to Windows CI. Real physical device validation remains open. See
+to Windows CI and passed: https://github.com/tuckthomas/accessrelay-studio/actions/runs/43255058465.
+Real physical device validation remains open. See
 `docs/controller-accessibility.md` for precedence, trigger behavior and profile v4 compatibility.
 
 ## 4. Tremor smoothing
 
-- [ ] Add an opt-in stateful stick filter separate from stateless deadzone calculation.
-- [ ] Use elapsed-time-based smoothing with configurable strength and clear UI guidance
+- [x] Add an opt-in stateful stick filter separate from stateless deadzone calculation.
+- [x] Use elapsed-time-based smoothing with configurable strength and clear UI guidance
       about the responsiveness tradeoff; preserve default input behavior.
-- [ ] Reset history on Stop, disconnect, profile/device changes, and disabling;
+- [x] Reset history on Stop, disconnect, profile/device changes, and disabling;
       define prompt neutralization without residual stick output.
-- [ ] Test varying sample rates, neutral input, bounds, independent sticks, and resets.
+- [x] Test varying sample rates, neutral input, bounds, independent sticks, and resets.
 - [ ] Measure latency and validate the native input path before completion.
 - [ ] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: pending.
+Implementation commit: pending push. Portable filter/controller checks, 52 frontend
+unit tests, TypeScript/Vite build, browser suite and smoothing workflow, and Windows
+verification cross-compilation passed. Deterministic response checks verify the
+20 ms time constant and sample-rate invariance; these are not device latency measurements.
+Windows runtime and physical comfort/latency validation remain open.
 
 ## 5. Switch and controller navigation
 

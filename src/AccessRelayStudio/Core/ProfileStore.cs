@@ -172,7 +172,7 @@ public sealed class ProfileStore
         profile.Validate();
         WriteAtomically(path, stream =>
         {
-            int version = profile.StickyControls.Count != 0 ? AccessibilityVersion
+            int version = profile.StickyControls.Count != 0 || profile.Smoothing != StickSmoothing.Off ? AccessibilityVersion
                 : profile.LuaScripts.Count != 0 ? LuaVersion : profile.Recordings.Count == 0 ? OriginalVersion : RecordingVersion;
             JsonSerializer.Serialize(stream, new ProfileDocument(version, profile), Format);
             if (stream.Length > MaxFileBytes)
