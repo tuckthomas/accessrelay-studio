@@ -36,6 +36,8 @@ internal sealed class VisionSession : IDisposable
     private VisionPreview? _preview;
     private VisionSessionStatus _status = new(false, false, false, "Observation is off.", 0, 0, 0, 0, 0);
     private readonly FrameMetric[] _metrics = new FrameMetric[2048];
+    private readonly VisionPerformanceBuffer _performance = new();
+    private long _performanceReplacedFrames, _performanceDropBaseline, _performanceReleaseBaseline, _performanceMissBaseline;
     private int _metricIndex, _metricCount;
     private bool _disposed;
     private readonly record struct FrameMetric(long Sequence, long CaptureTicks, long CompletedTicks,
@@ -44,6 +46,27 @@ internal sealed class VisionSession : IDisposable
 
     internal VisionSession(StudioRuntime runtime) => _runtime = runtime;
     internal VisionSessionStatus Status { get { lock (_gate) return _status; } }
+    internal VisionPerformanceSnapshot Performance
+    {
+        get
+        {
+            long replaced, releaseBaseline, missBaseline; bool training;
+            lock (_gate)
+            {
+                replaced = _performanceReplacedFrames; releaseBaseline = _performanceReleaseBaseline;
+                missBaseline = _performanceMissBaseline; training = _trainingInhibited;
+            }
+            var output = _runtime.VisionStatus;
+            return _performance.Snapshot(replaced, Math.Max(0, output.AutomatedReleases - releaseBaseline),
+                Math.Max(0, output.MissedDeadlines - missBaseline), _runtime.RecentOutputHandoffMs, output.Armed, training);
+        }
+    }
+    internal VisionPerformanceRun SavePerformanceRun(string label)
+    {
+        var snapshot = Performance;
+        if (snapshot.TotalFrames == 0) throw new InvalidOperationException("Observe a source before saving a performance run.");
+        return new() { Label = string.IsNullOrWhiteSpace(label) ? snapshot.ExecutionProvider + " observation" : label.Trim(), Snapshot = snapshot };
+    }
     internal string TrainingStatus { get { lock (_gate) return _recorder?.Message ?? "No training take is recording."; } }
     internal bool IsRecordingTraining { get { lock (_gate) return _recorder?.IsRecording == true; } }
     internal VisionPreview? TakePreview() { lock (_gate) { var value = _preview; _preview = null; return value; } }
@@ -63,6 +86,11 @@ internal sealed class VisionSession : IDisposable
             _runtime.InvalidateVisionSession("Preparing capture and model.");
             _status = new(true, false, false, "Starting window capture…", 0, 0, 0, 0, 0);
             _metricCount = _metricIndex = 0;
+            _performance.Reset(new("Capture only", null, settings.AnimationProfile, settings.CameraView,
+                settings.Crop, 0, 0, VisionPerformanceBuffer.Fingerprint(settings)));
+            _performanceReplacedFrames = _performanceDropBaseline = 0;
+            _performanceReleaseBaseline = _runtime.VisionStatus.AutomatedReleases;
+            _performanceMissBaseline = _runtime.VisionStatus.MissedDeadlines;
             _modelHash = null; _lastModelEvents = [];
             _preview?.Dispose(); _preview = null;
             _worker = new Thread(() => Run(hwnd, settings, cancellation))
@@ -138,6 +166,16 @@ internal sealed class VisionSession : IDisposable
                             sourceReady = false;
                             sourceGeneration = frame.SourceGeneration;
                             model?.ResetTracking();
+                            var contextOutput = _runtime.VisionStatus;
+                            lock (_gate)
+                            {
+                                _performance.Reset(new(model?.ExecutionProvider ?? "Capture only", model?.ManifestHash,
+                                    settings.AnimationProfile, settings.CameraView, settings.Crop, frame.Width, frame.Height,
+                                    VisionPerformanceBuffer.Fingerprint(settings)));
+                                _performanceDropBaseline = source.DroppedFrames; _performanceReplacedFrames = 0;
+                                _performanceReleaseBaseline = contextOutput.AutomatedReleases;
+                                _performanceMissBaseline = contextOutput.MissedDeadlines;
+                            }
                         }
                         // Readiness invalidation from profile/controller/Stop all must never auto-rearm output.
                         if (fresh && model?.CanArm == true && !sourceReady)
@@ -147,11 +185,13 @@ internal sealed class VisionSession : IDisposable
                             observedStatus = _runtime.VisionStatus;
                         }
                         bool accepted = false;
+                        bool hasDecision = false;
                         if (model is not null)
                         {
                             var prediction = model.PushFrame(frame, observedStatus);
                             if (prediction is { } observation && !cancellation.IsCancellationRequested)
                             {
+                                hasDecision = true;
                                 predictions++;
                                 if (fresh && sourceReady && model.CanArm)
                                     accepted = _runtime.SubmitVisionPrediction(observation);
@@ -159,6 +199,8 @@ internal sealed class VisionSession : IDisposable
                         }
                         long completed = Stopwatch.GetTimestamp();
                         double processingMs = Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
+                        double? preprocessingMs = null, inferenceMs = null;
+                        model?.Diagnostics.FrameTimings(frame.Sequence, out preprocessingMs, out inferenceMs);
                         frames++;
                         lock (_gate)
                         {
@@ -167,6 +209,11 @@ internal sealed class VisionSession : IDisposable
                                 GC.CollectionCount(0) - gen0, GC.CollectionCount(1) - gen1, GC.CollectionCount(2) - gen2);
                             _metricIndex = (_metricIndex + 1) % _metrics.Length;
                             _metricCount = Math.Min(_metricCount + 1, _metrics.Length);
+                            _performanceReplacedFrames = Math.Max(0, source.DroppedFrames - _performanceDropBaseline);
+                            _performance.Record(new(frame.Sequence, frame.CaptureTicks, started, completed, hasDecision && inferenceMs.HasValue,
+                                preprocessingMs, inferenceMs, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
+                                Math.Max(0, GC.CollectionCount(0) - gen0), Math.Max(0, GC.CollectionCount(1) - gen1),
+                                Math.Max(0, GC.CollectionCount(2) - gen2), _trainingInhibited));
                             // A low-rate preview copy does not retain a leased capture resource.
                             if (Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200)
                             {
@@ -193,6 +240,7 @@ internal sealed class VisionSession : IDisposable
         }
         finally
         {
+            _performance.Finish();
             _runtime.InvalidateVisionSession("Vision observation is stopped.");
             lock (_gate)
             {
@@ -244,12 +292,12 @@ internal sealed class VisionSession : IDisposable
         double Percentile(double quantile) => samples.Length == 0 ? 0 : samples[Math.Max(0, (int)Math.Ceiling(samples.Length * quantile) - 1)];
         var report = new
         {
-            version = 1, exportedAtUtc = DateTimeOffset.UtcNow, stopwatchFrequency = Stopwatch.Frequency,
+            version = 2, exportedAtUtc = DateTimeOffset.UtcNow, stopwatchFrequency = Stopwatch.Frequency,
             timingScope = "PC capture, processing and local controller handoff. Xbox render and applied input times are not measured.",
             gcScope = "Collection counts during a frame correlate with GC activity; they are not measured pause durations. Allocation bytes cover the vision worker thread only.",
             sampleCount = samples.Length, p50Ms = Percentile(.5), p95Ms = Percentile(.95), p99Ms = Percentile(.99),
             maximumMs = samples.LastOrDefault(), status, output = _runtime.VisionStatus, frames = metrics,
-            modelManifestHash = modelHash, modelEvents
+            modelManifestHash = modelHash, modelEvents, performance = Performance
         };
         File.WriteAllText(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
     }

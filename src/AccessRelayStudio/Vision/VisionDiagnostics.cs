@@ -17,6 +17,7 @@ internal sealed class VisionDiagnostics
     private readonly VisionDiagnosticEvent[] _events = new VisionDiagnosticEvent[512];
     private int _next, _count;
     private long _frames, _inferences, _rejected;
+    private long _preprocessingSequence = -1, _inferenceSequence = -1;
     private double _preprocessing, _inference, _player, _shot, _uncertainty, _phase;
     private string _status = "Waiting for temporal history";
 
@@ -31,7 +32,8 @@ internal sealed class VisionDiagnostics
                 captureTimestamp, timeToTargetMs);
             _next = (_next + 1) % _events.Length;
             _count = Math.Min(_count + 1, _events.Length);
-            if (kind == VisionDiagnosticKind.Preprocessed) _preprocessing = duration;
+            if (kind == VisionDiagnosticKind.Preprocessed) { _preprocessing = duration; _preprocessingSequence = sequence; }
+            if (kind == VisionDiagnosticKind.InferenceCompleted) _inferenceSequence = sequence;
             if (kind == VisionDiagnosticKind.ObservationRejected) _rejected++;
         }
     }
@@ -50,6 +52,14 @@ internal sealed class VisionDiagnostics
     }
 
     internal void SetStatus(string status) { lock (_gate) _status = status; }
+    internal void FrameTimings(long sequence, out double? preprocessingMs, out double? inferenceMs)
+    {
+        lock (_gate)
+        {
+            preprocessingMs = _preprocessingSequence == sequence ? _preprocessing : null;
+            inferenceMs = _inferenceSequence == sequence ? _inference : null;
+        }
+    }
     internal VisionDiagnosticsSnapshot Snapshot()
     {
         lock (_gate) return new(_frames, _inferences, _rejected, _preprocessing, _inference,

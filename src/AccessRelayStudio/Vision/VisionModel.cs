@@ -5,7 +5,7 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace EliteScriptStudio.Vision;
 
-/// <summary>One-thread CUDA session with reusable host tensors and explicit native GPU transfers.</summary>
+/// <summary>Explicit CPU or CUDA session with reusable host tensors; CUDA transfers are measured.</summary>
 /// <remarks>Load, PushFrame and Dispose run on the vision worker. RequestStop may be called from another thread.</remarks>
 internal sealed class VisionModel : IDisposable
 {
@@ -20,6 +20,7 @@ internal sealed class VisionModel : IDisposable
 
     internal VisionModelManifest Manifest { get; }
     internal string ManifestHash { get; }
+    internal string ExecutionProvider { get; }
     internal bool CanArm { get; }
     internal string ValidationSummary { get; }
     internal VisionDiagnostics Diagnostics { get; } = new();
@@ -30,6 +31,7 @@ internal sealed class VisionModel : IDisposable
     {
         Manifest = manifest;
         ManifestHash = manifestHash;
+        ExecutionProvider = settings.ExecutionProviderName;
         _session = session;
         _runOptions = runOptions;
         _input = input;
@@ -40,7 +42,7 @@ internal sealed class VisionModel : IDisposable
         _inputNames = [manifest.InputName];
         _outputNames = [manifest.OutputName];
         CanArm = blocker.Length == 0;
-        ValidationSummary = CanArm ? $"Validation gates pass for {manifest.AnimationProfile}; {manifest.GameVersion}; {manifest.CameraConfiguration}. Confirm this source configuration and calibration before arming." : blocker;
+        ValidationSummary = CanArm ? $"Validation gates pass for {manifest.AnimationProfile}; {manifest.GameVersion}; {manifest.CameraConfiguration}; {ExecutionProvider}. Confirm this source configuration and calibration before arming." : blocker;
         _tracker = new ShotTracker(manifest, settings, _input, RunInference, Diagnostics);
     }
 
@@ -64,27 +66,22 @@ internal sealed class VisionModel : IDisposable
         }
         cancellation.ThrowIfCancellationRequested();
 
-        string[] providers = OrtEnv.Instance().GetAvailableProviders();
-        if (!providers.Contains("CUDAExecutionProvider", StringComparer.Ordinal))
-            throw new InvalidOperationException("The loaded ONNX Runtime does not provide CUDA. Install the matching GPU runtime; automatic CPU vision is disabled.");
-
-        using var cuda = new OrtCUDAProviderOptions();
-        cuda.UpdateOptions(new Dictionary<string, string>
+        string provider = settings.ExecutionProviderName;
+        if (settings.ExecutionProvider == VisionExecutionProvider.Cuda) PrepareLocalCudaRuntime();
+        string[] providers;
+        try { providers = OrtEnv.Instance().GetAvailableProviders(); }
+        catch (Exception error) when (error is DllNotFoundException or BadImageFormatException or TypeInitializationException)
         {
-            ["device_id"] = "0",
-            ["gpu_mem_limit"] = "2147483648",
-            ["arena_extend_strategy"] = "kSameAsRequested",
-            ["cudnn_conv_algo_search"] = "HEURISTIC",
-            ["do_copy_in_default_stream"] = "1"
-        });
-        using var options = SessionOptions.MakeSessionOptionWithCudaProvider(cuda);
-        options.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
-        options.AddSessionConfigEntry("session.disable_cpu_ep_fallback", "1");
+            throw new InvalidOperationException($"The {provider} backend could not initialize ONNX Runtime. Verify the bundled native runtime matches the managed runtime and Windows x64 architecture. No alternative backend was selected.", error);
+        }
+        if (!providers.Contains(provider, StringComparer.Ordinal))
+            throw new InvalidOperationException($"The loaded ONNX Runtime does not provide {provider}. Select a supported backend explicitly; no automatic backend fallback is enabled.");
         InferenceSession? session = null;
         RunOptions? run = null;
         OrtValue? inputValue = null, outputValue = null;
         try
         {
+            using var options = CreateSessionOptions(settings.ExecutionProvider);
             // Session creation may perform native compilation. It is deliberately outside the armed loop.
             session = new InferenceSession(modelPath, options);
             RequireMetadata(session.InputMetadata, manifest.InputName,
@@ -119,7 +116,10 @@ internal sealed class VisionModel : IDisposable
         }
         catch (OnnxRuntimeException error)
         {
-            throw new InvalidOperationException("The CUDA-only vision session could not load or warm this model. Verify ONNX Runtime/CUDA/cuDNN versions and fully supported GPU operators. No CPU fallback was enabled.", error);
+            string detail = settings.ExecutionProvider == VisionExecutionProvider.Cuda
+                ? "Verify ONNX Runtime/CUDA/cuDNN versions and fully supported GPU operators. No CPU fallback was enabled."
+                : "Verify the CPU runtime and CPU-supported model operators. No CUDA backend was registered.";
+            throw new InvalidOperationException($"The {provider} vision session could not load or warm this model. {detail}", error);
         }
         finally
         {
@@ -128,6 +128,57 @@ internal sealed class VisionModel : IDisposable
             run?.Dispose();
             session?.Dispose();
         }
+    }
+
+    private static readonly object CudaPathGate = new();
+    private static bool _localCudaPrepared;
+    private static void PrepareLocalCudaRuntime()
+    {
+        lock (CudaPathGate)
+        {
+            if (_localCudaPrepared) return;
+            string root = Path.Combine(AppContext.BaseDirectory, "CudaRuntime");
+            if (Directory.Exists(root))
+            {
+                // App-local optional NVIDIA redistributables. Only this process and its children
+                // receive the path; no system PATH, driver or Python environment is changed.
+                string[] directories = Directory.EnumerateFiles(root, "*.dll", SearchOption.AllDirectories)
+                    .Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray();
+                if (directories.Length != 0)
+                    Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, directories) +
+                        Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"), EnvironmentVariableTarget.Process);
+            }
+            _localCudaPrepared = true;
+        }
+    }
+
+    private static SessionOptions CreateSessionOptions(VisionExecutionProvider provider)
+    {
+        if (provider == VisionExecutionProvider.Cpu)
+        {
+            var cpu = new SessionOptions
+            {
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                IntraOpNumThreads = Math.Clamp(Environment.ProcessorCount, 1, 4),
+                InterOpNumThreads = 1,
+                ExecutionMode = ExecutionMode.ORT_SEQUENTIAL
+            };
+            // Leave idle execution threads available to controller input and the streaming client.
+            cpu.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
+            cpu.AddSessionConfigEntry("session.inter_op.allow_spinning", "0");
+            return cpu;
+        }
+        using var cuda = new OrtCUDAProviderOptions();
+        cuda.UpdateOptions(new Dictionary<string, string>
+        {
+            ["device_id"] = "0", ["gpu_mem_limit"] = "2147483648",
+            ["arena_extend_strategy"] = "kSameAsRequested", ["cudnn_conv_algo_search"] = "HEURISTIC",
+            ["do_copy_in_default_stream"] = "1"
+        });
+        var gpu = SessionOptions.MakeSessionOptionWithCudaProvider(cuda);
+        gpu.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
+        gpu.AddSessionConfigEntry("session.disable_cpu_ep_fallback", "1");
+        return gpu;
     }
 
     internal VisionPrediction? PushFrame(CapturedVisionFrame frame, VisionStatusSnapshot snapshot)

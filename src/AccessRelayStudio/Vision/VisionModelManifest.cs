@@ -80,6 +80,8 @@ internal sealed record VisionModelManifest
         try
         {
             evidence.Validate();
+            if (evidence.ExecutionProvider != settings.ExecutionProviderName)
+                return "The locked validation evidence was measured with a different execution provider than the selected backend.";
             if (!string.Equals(settings.AnimationProfile.Trim(), AnimationProfile, StringComparison.Ordinal))
                 return "The selected animation profile does not match the model's validated profile.";
             if (settings.MinimumConfidence < evidence.MinimumConfidence ||
@@ -98,7 +100,7 @@ internal sealed record VisionModelManifest
             if (blocker.Length == 0) acceptedReport = report;
             return blocker;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException)
         {
             return $"Observation only: validation evidence could not be accepted. {error.Message}";
         }
@@ -135,6 +137,7 @@ internal sealed record VisionValidationEvidence
     public string ReportSha256 { get; init; } = "";
     public string DatasetId { get; init; } = "";
     public string CalibrationProcedureVersion { get; init; } = "";
+    public string ExecutionProvider { get; init; } = "";
     public int MinimumTargetShots { get; init; }
     public int MinimumNegativeShots { get; init; }
     public double MinimumConfidence { get; init; }
@@ -149,6 +152,8 @@ internal sealed record VisionValidationEvidence
 
     internal void Validate()
     {
+        if (ExecutionProvider is not ("CPUExecutionProvider" or "CUDAExecutionProvider"))
+            throw new InvalidDataException("Validation evidence must explicitly bind CPUExecutionProvider or CUDAExecutionProvider.");
         if (!VisionModelManifest.IsSha256(ReportSha256) || string.IsNullOrWhiteSpace(ReportFile) ||
             string.IsNullOrWhiteSpace(DatasetId) || string.IsNullOrWhiteSpace(CalibrationProcedureVersion) ||
             MinimumTargetShots < 1 || MinimumNegativeShots < 1 ||
@@ -176,6 +181,7 @@ internal sealed record VisionValidationReport
     public string GameVersion { get; init; } = "";
     public string CameraConfiguration { get; init; } = "";
     public string CalibrationProcedureVersion { get; init; } = "";
+    public string ExecutionProvider { get; init; } = "";
     public bool MeterOff { get; init; }
     public bool NoPlayerIconRequired { get; init; }
     public bool ThresholdsLockedBeforeEvaluation { get; init; }
@@ -201,6 +207,8 @@ internal sealed record VisionValidationReport
 
     internal string Check(VisionModelManifest model, VisionValidationEvidence gates)
     {
+        if (ExecutionProvider is not ("CPUExecutionProvider" or "CUDAExecutionProvider") || ExecutionProvider != gates.ExecutionProvider)
+            return "The held-out and hardware report must explicitly match the locked execution provider.";
         if (SchemaVersion != 1 || Split != "held-out" || !ThresholdsLockedBeforeEvaluation || !MeterOff || !NoPlayerIconRequired ||
             DatasetId != gates.DatasetId || !string.Equals(ModelSha256, model.ModelSha256, StringComparison.OrdinalIgnoreCase) ||
             ModelVersion != model.ModelVersion || AnimationProfile != model.AnimationProfile || GameVersion != model.GameVersion ||

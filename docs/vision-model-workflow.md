@@ -2,7 +2,7 @@
 
 The application has a C# capture/inference integration. It does **not** include a trained NBA 2K no-meter release model. A model, reviewed gameplay labels, independent accuracy evidence and Remote Play hardware trials remain required. Capture-only observation and dataset recording are useful before those artifacts exist.
 
-Production uses ONNX Runtime CUDA in C#. Python below is an **offline** training/export/evaluation tool, not a running service used by AccessRelay.
+The live application uses ONNX Runtime in C# with an explicit **CPU** or **CUDA** provider selection. CUDA is the default. Python below is an **offline** training/export/evaluation tool, not a running service used by AccessRelay.
 
 ## Current runtime contract
 
@@ -13,9 +13,9 @@ Production uses ONNX Runtime CUDA in C#. Python below is an **offline** training
 - One `float32` output, normally `observation`, shape `[1,5]`: player identity confidence `[0,1]`, shot confidence `[0,1]`, time-to-target milliseconds `[0,maximumPredictionHorizonMs]`, uncertainty milliseconds in that range, and normalized shot phase `[0,1]`.
 - Time-to-target is relative to the game state represented by the newest frame, not prediction completion time. The output arbiter accounts for measured local processing and calibrated video/input delay.
 - Output uncertainty is a learned estimate that must be checked against observed held-out error. It is not a mathematically guaranteed error bound.
-- `VisionModel` reuses host `OrtValue` buffers. ORT uploads/downloads them for CUDA execution; inference timings include these transfers. This version does not claim zero-copy D3D11-to-CUDA interop.
+- `VisionModel` reuses host `OrtValue` buffers. CPU mode uses CPU execution; CUDA mode uploads/downloads those host buffers and inference timings include these transfers. This version does not claim zero-copy D3D11-to-CUDA interop.
 - `ShotTracker` compares the actual preprocessed player-region pixels with one reusable previous-frame buffer. An unchanged region exceeding `MaximumFrameAgeMs` emits a negative player observation that cancels an existing release deadline, even if browser overlays outside the region keep repainting. Changed player pixels require a fresh temporal history; the controller arbiter still requires physical release/new press after a cancelled attempt. Exact equality is a conservative freeze heuristic, not proof that every changing image is current gameplay.
-- CUDA registration and strict `session.disable_cpu_ep_fallback=1` are required. Unsupported GPU graphs fail visibly. Capture-only operation remains available.
+- Selecting CUDA requires CUDA registration and strict `session.disable_cpu_ep_fallback=1`. Unsupported GPU graphs fail visibly. Selecting CPU is a separate explicit mode and does not initialize CUDA. Capture-only operation remains available without a model. Validation evidence must name the actual selected provider as `CPUExecutionProvider` or `CUDAExecutionProvider`; missing legacy provider metadata cannot arm output.
 
 The native ONNX Runtime 1.31.1 Windows CUDA provider used during implementation imports CUDA **13** cuBLAS DLLs. Use the actual provider's dependency checks rather than older documentation assuming CUDA 12. The GPU Windows NuGet replaces the CPU-native package; do not load two incompatible `onnxruntime.dll` builds in one process. Existing CPU audio inference can use the same GPU runtime's CPU execution provider.
 
@@ -105,19 +105,22 @@ This deliberately exports random, **untrained** weights. It is useful for loadin
 
 ## Independent offline evaluation
 
-Install the Python ONNX Runtime CPU package in the offline environment. Evaluation deliberately uses CPU inference as a numerical reference; it is not a production CPU fallback.
+Install the Python ONNX Runtime CPU package in the offline environment. Evaluation deliberately uses CPU inference as a numerical reference, independently of the selected live target. It does not certify live CPU or CUDA latency, frame freshness or controller timing.
 
-Choose thresholds from development/validation/calibration results. Save `locked-thresholds.json` with schema 1, `datasetId`, the exact `animationProfile`, matching `cameraConfiguration` (`2K`, `2K Low`, or `2K Legacy`), `calibrationProcedureVersion`, `minimumConfidence`, `maximumUncertaintyMs`, `maximumFrameAgeMs`, `meterOff`, `noPlayerIconRequired`, and `lockedBeforeFinalEvaluation`. Set the last flag only after freezing these choices for the final held-out run. Maintain the dated configuration and dataset provenance; the flag alone cannot prove that process was followed.
+Choose thresholds from development/validation/calibration results. Save `locked-thresholds.json` with schema 1, `datasetId`, the exact `animationProfile`, matching `cameraConfiguration` (`2K`, `2K Low`, or `2K Legacy`), `executionProvider` (`CPUExecutionProvider` or `CUDAExecutionProvider`), `calibrationProcedureVersion`, `minimumConfidence`, `maximumUncertaintyMs`, `maximumFrameAgeMs`, `meterOff`, `noPlayerIconRequired`, and `lockedBeforeFinalEvaluation`. Set the last flag only after freezing these choices for the final held-out run. Maintain the dated configuration and dataset provenance; the flag alone cannot prove that process was followed.
 
 ```powershell
 python ./scripts/Evaluate-VisionModel.py `
   --manifest C:/VisionModels/candidate-01/manifest.json `
   --sessions C:/VisionData/heldout-take-01 C:/VisionData/heldout-take-02 `
   --split held-out --locked-thresholds C:/VisionData/locked-thresholds.json `
+  --target-provider CUDAExecutionProvider `
   --out C:/VisionEvaluation/final-01
 ```
 
 The evaluator rejects diagnostic fixtures, model-hash changes, overlapping training/held-out sessions, profile mismatches, overlapping shot intervals and inconsistent source crops. It evaluates the first threshold-accepted prediction per interval and reports target coverage, frame-level identity classification, absolute prediction-error p99, negative-interval false-release rate, and raw per-shot predictions. Inspect raw results and failures; these metrics describe the specified offline policy, not console-side timing or a success guarantee.
+
+`--target-provider` declares the intended live hardware target and must match the locked `executionProvider`; it defaults to `CUDAExecutionProvider`. Use `CPUExecutionProvider` for a CPU deployment. The report records this target, while `evaluation-provenance.json` separately identifies `CPUExecutionProvider` as the offline numerical reference. Changing the declaration does not turn CPU reference measurements into CUDA measurements or validate either live backend.
 
 The generated `accuracy-report.json` always has `hardwareValidated=false`. Offline evaluation cannot certify live frame freshness, local deadlines, Remote Play input acceptance, or when the Xbox applied the release.
 
@@ -128,16 +131,28 @@ A deployment manifest's optional `validation` object declares **locked** report 
 Runtime acceptance requires all of the following:
 
 1. Model SHA-256 and report SHA-256 match the files.
-2. Model version, profile fingerprint, game/camera configuration, dataset and calibration procedure match.
+2. Model version, profile fingerprint, game/camera configuration, actual selected execution provider, dataset and calibration procedure match. Manifest evidence and report must both explicitly name the same provider. Old reports missing this field remain observation-only.
 3. The report is a final held-out evaluation with meter off, no mandatory player icon, locked matching thresholds, sufficient target/negative samples, acceptable coverage, identity accuracy, prediction error and false-release rate.
 4. A separately reviewed actual hardware report establishes the virtual-controller route, the configured local-deadline miss rate, sufficient attempts and at least the declared hardware session duration (minimum 30 minutes).
 5. The source dimensions and selected player crop match the validated report. Runtime settings cannot weaken its confidence, uncertainty or freshness thresholds.
 
 Merge verified hardware measurements into the report only after actual trials, then recalculate the report hash and update the manifest. Keep the underlying evidence and measurement scope. Do not mark `hardwareValidated=true` merely to unlock the UI. Hashes detect mismatched/changed files; they do not authenticate the truth of self-authored accuracy claims or replace human review.
 
+Treat CPU and CUDA as separate deployment contexts. Switching the UI backend must not inherit the other provider's live hardware acceptance; collect and bind matching evidence before arming again. Numerical equivalence on offline clips is useful but does not prove equal live latency or jitter.
+
 Calibration helper `VisionCalibration.Estimate` accepts reviewed **measured signed millisecond errors**, where positive means late. It proposes `newCorrection = previousCorrection - medianError` and reports residual p95. Five samples produce only a provisional estimate, not a release gate. Coarse early/late labels are rejected. Bind saved calibration to manifest hash, source size/crop, animation, game/camera and procedure; invalidate after those change.
 
-In the UI, observe the selected source with the candidate manifest, then stop observation and use **Export calibration template**. The JSON envelope contains `schemaVersion`, `modelManifestHash`, `animationProfile`, `gameVersion`, `cameraConfiguration`, `captureWidth`, `captureHeight`, `crop`, `previousCorrectionMs`, `estimatedVideoDelayMs`, `estimatedInputDelayMs`, `procedureVersion` and `attempts`. Fill in the actual measurement procedure and reviewed attempts such as `{ "shotId": "unique-id", "reviewed": true, "hasMeasuredSignedError": true, "signedReleaseErrorMs": 12 }`. **Review measured calibration** rejects mismatched context and requires confirmation of the resulting estimate before saving. Raw unbound attempt arrays are not accepted. Changing the source, model, crop, shoot control or delay settings clears the previous correction; manually entered correction values are tuning settings, not validated accuracy evidence.
+In the UI, observe the selected source with the candidate manifest, then stop observation and use **Export calibration template**. The JSON envelope contains `schemaVersion`, `modelManifestHash`, `animationProfile`, `gameVersion`, `cameraConfiguration`, `executionProvider`, `captureWidth`, `captureHeight`, `crop`, `previousCorrectionMs`, `estimatedVideoDelayMs`, `estimatedInputDelayMs`, `procedureVersion` and `attempts`. Fill in the actual measurement procedure and reviewed attempts such as `{ "shotId": "unique-id", "reviewed": true, "hasMeasuredSignedError": true, "signedReleaseErrorMs": 12 }`. **Review measured calibration** rejects mismatched context, including a missing or different provider, and requires confirmation of the resulting estimate before saving. Raw unbound attempt arrays are not accepted. Changing the source, model, provider, crop, shoot control or delay settings clears the previous correction; manually entered correction values are tuning settings, not validated accuracy evidence.
+
+## In-app performance measurements
+
+Start observation to populate the **Live vision performance** panel. It shows the actual inference provider and model context, processed frames/rate, model decisions/inferences, replaced capture frames, automated releases and missed deadlines. Capture-only mode can measure local capture/processing; model-decision and inference statistics remain unavailable without their respective samples. A stale/frozen-region policy rejection that runs no inference counts only as frame processing, not a model decision or a sample toward the 100-decision comparison gate.
+
+Five timing rows report samples, latest, p50, p95, p99 and maximum milliseconds over bounded recent windows of up to 2,048 samples: local frame age when processing starts, frame to model decision, processing of all frames, player preprocessing, and inference including transfers. Frame age begins at the PC's capture timestamp, not the Xbox render time. Budget exceedances use the same recent decision window. Worker allocated bytes and observed process GC counts help investigate jitter; collection counts do not measure GC pause lengths. Helper output handoff remains a latest queue-to-pipe-flush estimate with no percentile sample history, and does not establish Xbox receipt.
+
+Use **Save performance run** to write a local JSON snapshot with configuration context, and **Load performance run** to select a baseline. Comparisons require at least 100 model decisions in each run and matching non-provider context; selecting a different backend is allowed for comparison. Preserve the same model, source/crop, shot profile, camera and timing settings. Different live scenes remain uncontrolled inputs, so reported p95/p99 changes are observed differences, not a controlled benchmark or gameplay-accuracy result. Capture-only snapshots cannot establish model performance. Raw gameplay frames are not part of a performance snapshot.
+
+The planned gamertag-assisted moving crop is not implemented by these metrics. Current inference and training use the manually selected fixed crop. A future camera-aware tracker needs resolution/scale-relative body regions, temporal stabilization, identity-loss cancellation and matching per-frame dataset provenance before its performance or accuracy can be compared fairly.
 
 ## Verification
 

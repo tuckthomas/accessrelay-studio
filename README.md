@@ -5,7 +5,7 @@ AccessRelay Studio is a Windows accessibility app for adaptive controller input 
 - **Adaptive input** supports Windows gamepads over USB or Bluetooth, live control feedback, configurable bindings, and a recorder that can include or ignore individual controls and axes.
 - **Lua scripts** add programmable controller logic with live input reads, timed output, persistent numeric state, a source editor, and syntax checks. [Controller API and examples](docs/lua-scripting.md)
 - **NBA 2K27 shot profiles** save player height, three-point rating, base and upper releases, meter-specific release type, four shot-speed levels, a linked 100% release blend, and camera view (**2K**, **2K Low**, **2K Legacy**). Create, edit, duplicate and select profiles in **Plugins**. Camera changes invalidate the previous model/calibration association.
-- **Remote Play Vision (experimental)** captures a selected window, records bounded player-crop training takes, and integrates temporal CUDA inference with cancellable controller release deadlines. No trained gameplay model is bundled; observation and training capture work before automatic release is validated. [Model and training workflow](docs/vision-model-workflow.md) · [Implementation plan](docs/remote-play-vision-implementation-plan.md)
+- **Remote Play Vision (experimental)** captures a selected window, records bounded player-crop training takes, and integrates selectable CPU or CUDA temporal inference with cancellable controller release deadlines. Live timing statistics and saved run comparisons help assess local pipeline performance. No trained gameplay model is bundled; observation and training capture work before automatic release is validated. [Model and training workflow](docs/vision-model-workflow.md) · [Implementation plan](docs/remote-play-vision-implementation-plan.md)
 - **Voice access** offers pitch and tone effects, headphone preview, waveform trimming, and optional local reference-voice models and dialogue isolation.
 - **Dashboard** gives controller scripts and live voice separate switches and profile selectors. Live performance metrics include CPU, RAM, GPU, VRAM, controller polling, and virtual output handoff.
 
@@ -17,6 +17,8 @@ Use Windows 11 x64 with the [.NET 10 SDK](https://dotnet.microsoft.com/download/
 dotnet publish .\src\AccessRelayStudio\AccessRelayStudio.csproj -c Release -o .\artifacts\Run
 .\artifacts\Run\AccessRelayStudio.exe
 ```
+
+For an installed beta with an explicit version label and optional desktop shortcut, use [Publish-Beta.ps1](scripts/Publish-Beta.ps1). It preserves installed voice assets and their links, can retain the old Run folder as a stable backup, and can point the usual Run path at the new installation. Close the old app before activating that path. `-DeferRunActivation` installs and creates the shortcut while leaving the old app/path untouched; a later `-ActivateOnly` switches the checked path without rebuilding. Optional NVIDIA DLLs can be placed in the installation's `CudaRuntime` folder for process-local lookup; CPU inference needs no CUDA initialization. Model weights and runtime dependency binaries remain outside Git.
 
 The source build includes the controller monitor, binding editor, macro recorder, built-in voice effects, and headphone preview. To add virtual Xbox output or a virtual microphone, follow the [virtual device setup](docs/virtual-devices.md) before publishing. The signed USB/IP transport requires Windows administrator approval for its initial driver installation. The app and its helpers run with standard permissions after setup.
 
@@ -30,7 +32,7 @@ Install [optional voice models](docs/voice-models.md) into the publish folder wh
 
 Run the controller logic checks with `dotnet run --project .\src\AccessRelayStudio\Verification\Verification.csproj -c Release`.
 
-This experimental branch uses the Windows GPU ONNX Runtime package. Capture-only observation and the existing CPU audio path do not require initializing CUDA. Loading a vision model requires compatible CUDA 13/cuDNN 9 dependencies for the pinned ONNX Runtime build. The scoped [experimental launcher](scripts/Start-VisionExperiment.ps1) changes dependency lookup only for its child process. Python is used by offline training/evaluation tools, not by the production vision loop.
+This experimental branch uses the Windows GPU ONNX Runtime package, which also supplies CPU inference. Choose **CPU** or **CUDA** explicitly for vision; CUDA is the default and fails visibly if unavailable. CPU vision, capture-only observation and the existing CPU audio path do not initialize CUDA. CUDA vision requires compatible CUDA 13/cuDNN 9 dependencies for the pinned ONNX Runtime build. The scoped [experimental launcher](scripts/Start-VisionExperiment.ps1) changes dependency lookup only for its child process. Backend changes require matching validation/calibration context before automatic release can arm. Python is used by offline training/evaluation tools, not by the production vision loop.
 
 ## License
 

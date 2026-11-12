@@ -9,6 +9,11 @@ if (args is ["--gpu-fixture", var manifestPath])
     GpuFixture(manifestPath);
     return;
 }
+if (args is ["--cpu-fixture", var cpuManifestPath])
+{
+    InferenceFixture(cpuManifestPath, VisionExecutionProvider.Cpu);
+    return;
+}
 if (args is ["--preprocessing-fixture", var outputDirectory])
 {
     CanonicalPreprocessing(outputDirectory);
@@ -21,9 +26,11 @@ var tests = new (string Name, Action Test)[]
     ("Canonical nearest256 recording and live crop preprocessing agree", () => CanonicalPreprocessing(null)),
     ("Manifest/model output rejects invalid dimensions and nonfinite results", InvalidModels),
     ("Arming requires hashed matching held-out and hardware evidence", ArmingEvidence),
+    ("CPU/CUDA settings are explicit, persisted and bound to validation evidence", ExecutionProviders),
     ("Temporal history rejects old frames and preserves observation tokens", TemporalHistory),
     ("Frozen player ROI cancels a scheduled release despite changing outside pixels", FrozenPlayerRegion),
-    ("Calibration sign, reviewed measurements and bounded diagnostics", CalibrationAndDiagnostics)
+    ("Calibration sign, reviewed measurements and bounded diagnostics", CalibrationAndDiagnostics),
+    ("Performance metrics remain bounded, honest and comparable", PerformanceVerification.Run)
 };
 foreach (var test in tests) { test.Test(); Console.WriteLine($"SUCCESS {test.Name}"); }
 
@@ -121,6 +128,7 @@ static void ArmingEvidence()
             SchemaVersion = 1, DatasetId = "fixture-not-production", Split = "held-out", ModelSha256 = manifest.ModelSha256,
             ModelVersion = manifest.ModelVersion, AnimationProfile = manifest.AnimationProfile, GameVersion = manifest.GameVersion,
             CameraConfiguration = manifest.CameraConfiguration, CalibrationProcedureVersion = "test", MeterOff = true,
+            ExecutionProvider = "CUDAExecutionProvider",
             NoPlayerIconRequired = true, ThresholdsLockedBeforeEvaluation = true, MinimumConfidence = .9,
             MaximumUncertaintyMs = 5, MaximumFrameAgeMs = 80, TargetShots = 100, NegativeShots = 100,
             EvaluatedPredictions = 90, TargetCoverage = .9, IdentityAccuracy = 1, PredictionP99ErrorMs = 2,
@@ -132,6 +140,7 @@ static void ArmingEvidence()
         {
             ReportFile = "report.json", ReportSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)),
             DatasetId = report.DatasetId, CalibrationProcedureVersion = "test", MinimumTargetShots = 100, MinimumNegativeShots = 100,
+            ExecutionProvider = "CUDAExecutionProvider",
             MinimumConfidence = .9, MaximumUncertaintyMs = 5, MaximumFrameAgeMs = 80, MaximumPredictionP99ErrorMs = 3,
             MaximumFalseReleaseRate = 0, MinimumIdentityAccuracy = .99, MinimumTargetCoverage = .8,
             MaximumDeadlineMissRate = .01, MinimumHardwareSessionMinutes = 30
@@ -141,10 +150,76 @@ static void ArmingEvidence()
             "Offline accuracy evidence bypassed the hardware gate.");
         Require(manifest.CheckArmingEvidence(Path.Combine(directory, "manifest.json"), settings with { MinimumConfidence = .1 }).Contains("weaker"),
             "A weakened runtime threshold bypassed the locked gate.");
+        Require(manifest.CheckArmingEvidence(Path.Combine(directory, "manifest.json"), settings with { ExecutionProvider = VisionExecutionProvider.Cpu })
+            .Contains("execution provider", StringComparison.OrdinalIgnoreCase), "A CUDA validation report could arm a CPU-selected session.");
+        Require((manifest with { Validation = gates with { ExecutionProvider = "" } }).CheckArmingEvidence(
+            Path.Combine(directory, "manifest.json"), settings).Length > 0, "Missing legacy provider evidence was accepted.");
+        Require((report with { ExecutionProvider = "CPUExecutionProvider" }).Check(manifest, gates)
+            .Contains("execution provider", StringComparison.OrdinalIgnoreCase), "The report's provider was not compared with its locked gates.");
         File.AppendAllText(Path.Combine(directory, "report.json"), " ");
         Require(manifest.CheckArmingEvidence(Path.Combine(directory, "manifest.json"), settings).Contains("SHA-256"), "Report tampering was not detected.");
+
+        // Synthetic report fixture proves provider matching, not actual hardware/gameplay validation.
+        var cpuReport = report with
+        {
+            ExecutionProvider = "CPUExecutionProvider", HardwareValidated = true,
+            CaptureWidth = 1920, CaptureHeight = 1080, PlayerCrop = settings.Crop,
+            HardwareDescription = "Synthetic verification fixture only", RemotePlayClient = "Synthetic fixture",
+            HardwareSessionMinutes = 30, HardwareAttempts = 100, DeadlineMissRate = 0
+        };
+        bytes = JsonSerializer.SerializeToUtf8Bytes(cpuReport, VisionModelManifest.Json);
+        File.WriteAllBytes(Path.Combine(directory, "report.json"), bytes);
+        var cpuManifest = manifest with { Validation = gates with
+        {
+            ExecutionProvider = "CPUExecutionProvider", ReportSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes))
+        } };
+        Require(cpuManifest.CheckArmingEvidence(Path.Combine(directory, "manifest.json"), settings with { ExecutionProvider = VisionExecutionProvider.Cpu }).Length == 0,
+            "Matching explicit CPU evidence was not accepted by the provider-binding gate.");
+        Require(cpuManifest.CheckArmingEvidence(Path.Combine(directory, "manifest.json"), settings).Length > 0,
+            "CPU evidence could arm a CUDA-selected session.");
+        var cudaReport = cpuReport with { ExecutionProvider = "CUDAExecutionProvider" };
+        bytes = JsonSerializer.SerializeToUtf8Bytes(cudaReport, VisionModelManifest.Json);
+        File.WriteAllBytes(Path.Combine(directory, "report.json"), bytes);
+        var cudaManifest = manifest with { Validation = gates with
+        {
+            ReportSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes))
+        } };
+        Require(cudaManifest.CheckArmingEvidence(Path.Combine(directory, "manifest.json"), settings).Length == 0,
+            "Matching explicit CUDA evidence was not accepted by the provider-binding gate.");
     }
     finally { Directory.Delete(directory, recursive: true); }
+}
+
+static void ExecutionProviders()
+{
+    Require(VisionSettings.Default.ExecutionProvider == VisionExecutionProvider.Cuda, "Legacy/default settings must explicitly select CUDA.");
+    Require(VisionSettings.Default.ExecutionProviderName == "CUDAExecutionProvider", "CUDA provider identity is incorrect.");
+    var cpu = VisionSettings.Default with { ExecutionProvider = VisionExecutionProvider.Cpu };
+    cpu.Validate();
+    Require(cpu.ExecutionProviderName == "CPUExecutionProvider", "CPU provider identity is incorrect.");
+    Throws(() => (cpu with { ExecutionProvider = (VisionExecutionProvider)99 }).Validate());
+    string directory = Path.Combine(Path.GetTempPath(), "AccessRelay.Provider.Verify." + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var store = new VisionSettingsStore(directory);
+        var id = Guid.NewGuid();
+        store.Save(id, cpu);
+        Require(store.Load(id).ExecutionProvider == VisionExecutionProvider.Cpu, "Explicit CPU selection did not round-trip.");
+        string path = Path.Combine(directory, id.ToString("N") + ".json");
+        var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        Require(document["settings"]!["executionProvider"]!.GetValue<string>() == "cpu", "Backend setting is not stored as an explicit name.");
+        document["settings"]!.AsObject().Remove("executionProvider");
+        File.WriteAllText(path, document.ToJsonString());
+        Require(store.Load(id).ExecutionProvider == VisionExecutionProvider.Cuda, "Legacy settings missing backend did not default to CUDA.");
+    }
+    finally
+    {
+        if (Directory.Exists(directory))
+        {
+            foreach (string file in Directory.EnumerateFiles(directory)) File.Delete(file);
+            Directory.Delete(directory);
+        }
+    }
 }
 
 static void TemporalHistory()
@@ -233,6 +308,7 @@ static void CalibrationAndDiagnostics()
     {
         ModelManifestHash = hash, AnimationProfile = manifest.AnimationProfile, GameVersion = manifest.GameVersion,
         CameraConfiguration = manifest.CameraConfiguration, ProcedureVersion = "measured-test", CaptureWidth = 1920,
+        ExecutionProvider = settings.ExecutionProviderName,
         CaptureHeight = 1080, Crop = settings.Crop, PreviousCorrectionMs = 10, Attempts = attempts.ToArray()
     };
     imported.ValidateContext(hash, manifest, settings, 1920, 1080);
@@ -244,6 +320,18 @@ static void CalibrationAndDiagnostics()
     Throws(() => imported.ValidateContext(hash, manifest, settings, 1280, 720));
     Throws(() => (imported with { GameVersion = "other-game" }).ValidateContext(hash, manifest, settings, 1920, 1080));
     Throws(() => imported.ValidateContext(hash, manifest, settings with { CameraView = "2K Legacy" }, 1920, 1080));
+    Throws(() => imported.ValidateContext(hash, manifest, settings with { ExecutionProvider = VisionExecutionProvider.Cpu }, 1920, 1080));
+    Throws(() => (imported with { ExecutionProvider = "" }).ValidateContext(hash, manifest, settings, 1920, 1080));
+    (imported with { ExecutionProvider = "CPUExecutionProvider" }).ValidateContext(hash, manifest,
+        settings with { ExecutionProvider = VisionExecutionProvider.Cpu }, 1920, 1080);
+    var calibration = new VisionCalibrationRecord
+    {
+        ModelManifestHash = hash, AnimationProfile = settings.AnimationProfile, ExecutionProvider = settings.ExecutionProviderName,
+        CaptureWidth = 1920, CaptureHeight = 1080, Crop = settings.Crop, ProcedureVersion = "measured-test", Estimate = estimate
+    };
+    Require(calibration.Matches(hash, settings, 1920, 1080) &&
+        !calibration.Matches(hash, settings with { ExecutionProvider = VisionExecutionProvider.Cpu }, 1920, 1080),
+        "Saved CUDA calibration could be reused by a CPU session.");
     var diagnostics = new VisionDiagnostics();
     for (int index = 0; index < 600; index++) diagnostics.Record(VisionDiagnosticKind.Preprocessed, index, 1, 1);
     var events = diagnostics.ExportEvents();
@@ -257,17 +345,20 @@ static void Throws(Action action)
     throw new InvalidOperationException("An invalid model/crop/evidence value was accepted.");
 }
 
-static void GpuFixture(string path)
+static void GpuFixture(string path) => InferenceFixture(path, VisionExecutionProvider.Cuda);
+
+static void InferenceFixture(string path, VisionExecutionProvider backend)
 {
     var manifest = VisionModelManifest.Read(path).Manifest;
-    var settings = VisionSettings.Default with { AnimationProfile = manifest.AnimationProfile, MaximumFrameAgeMs = 1000 };
+    var settings = VisionSettings.Default with { AnimationProfile = manifest.AnimationProfile, MaximumFrameAgeMs = 1000, ExecutionProvider = backend };
     using var model = VisionModel.Load(path, settings);
+    Require(model.ExecutionProvider == settings.ExecutionProviderName, "The reported execution provider differs from the explicit selection.");
     Require(!model.CanArm, "The untrained diagnostic fixture unexpectedly passed arming validation.");
     byte[] pixels = new byte[64 * 64 * 4];
     for (int index = 0; index < pixels.Length; index += 4) { pixels[index] = 32; pixels[index + 1] = 64; pixels[index + 2] = 128; pixels[index + 3] = 255; }
     long step = (long)(Stopwatch.Frequency * manifest.HistoryIntervalMs / 1000);
     long baseline = Stopwatch.GetTimestamp() - step * 20;
-    var status = new VisionStatusSnapshot(VisionRunState.Observing, false, false, "GPU fixture only", 1, 0, 0,
+    var status = new VisionStatusSnapshot(VisionRunState.Observing, false, false, "Untrained backend compatibility fixture only", 1, 0, 0,
         false, null, 0, 0, 0, 0, 0, 0);
     int predictions = 0;
     for (int index = 0; index < 20; index++)
@@ -275,13 +366,13 @@ static void GpuFixture(string path)
         using var frame = new CapturedVisionFrame(pixels, 64, 64, baseline + index * step, index + 1, 1, () => { });
         if (model.PushFrame(frame, status) is { } prediction)
         {
-            Require(double.IsFinite(prediction.TimeToReleaseMs) && prediction.SessionGeneration == 1, "GPU result is invalid.");
+            Require(double.IsFinite(prediction.TimeToReleaseMs) && prediction.SessionGeneration == 1, "Inference result is invalid.");
             predictions++;
         }
     }
     var diagnostics = model.Diagnostics.Snapshot();
-    Require(predictions > 0 && diagnostics.Inferences > 0, "No CUDA inference completed.");
-    Console.WriteLine("SUCCESS actual CUDA-only session load/warm-up and temporal inference completed on the installed GPU.");
+    Require(predictions > 0 && diagnostics.Inferences > 0, "No selected-backend inference completed.");
+    Console.WriteLine($"SUCCESS actual {model.ExecutionProvider} session load/warm-up and temporal inference completed.");
     Console.WriteLine($"Diagnostic observations: {predictions}; last inference including host transfers: {diagnostics.LastInferenceWithTransfersMs:F3} ms.");
     Console.WriteLine($"CanArm={model.CanArm}; {model.ValidationSummary}");
     Console.WriteLine("Synthetic fixture: this proves runtime compatibility only, not gameplay accuracy or Remote Play timing.");

@@ -15,6 +15,7 @@ internal sealed record VisionCalibrationImport
     public string AnimationProfile { get; init; } = "";
     public string GameVersion { get; init; } = "";
     public string CameraConfiguration { get; init; } = "";
+    public string ExecutionProvider { get; init; } = "";
     public string ProcedureVersion { get; init; } = "";
     public int CaptureWidth { get; init; }
     public int CaptureHeight { get; init; }
@@ -30,6 +31,7 @@ internal sealed record VisionCalibrationImport
             ModelManifestHash != manifestHash || AnimationProfile != settings.AnimationProfile ||
             AnimationProfile != manifest.AnimationProfile || GameVersion != manifest.GameVersion ||
             CameraConfiguration != manifest.CameraConfiguration || string.IsNullOrWhiteSpace(ProcedureVersion) ||
+            ExecutionProvider != settings.ExecutionProviderName ||
             (settings.CameraView.Length != 0 && settings.CameraView != CameraConfiguration) ||
             width <= 0 || height <= 0 || CaptureWidth != width || CaptureHeight != height || Crop != settings.Crop ||
             PreviousCorrectionMs != settings.CorrectionMs || EstimatedVideoDelayMs != settings.EstimatedVideoDelayMs ||
@@ -46,6 +48,7 @@ internal sealed record VisionCalibrationRecord
     public string AnimationProfile { get; init; } = "";
     public string GameVersion { get; init; } = "";
     public string CameraConfiguration { get; init; } = "";
+    public string ExecutionProvider { get; init; } = "";
     public string ProcedureVersion { get; init; } = "";
     public int CaptureWidth { get; init; }
     public int CaptureHeight { get; init; }
@@ -55,6 +58,7 @@ internal sealed record VisionCalibrationRecord
 
     internal bool Matches(string manifestHash, VisionSettings settings, int width, int height) =>
         SchemaVersion == 1 && ModelManifestHash == manifestHash && AnimationProfile == settings.AnimationProfile &&
+        ExecutionProvider == settings.ExecutionProviderName &&
         CaptureWidth == width && CaptureHeight == height && Crop == settings.Crop &&
         !string.IsNullOrWhiteSpace(ProcedureVersion) && Estimate.ReviewedAttempts >= 5 &&
         double.IsFinite(Estimate.RecommendedCorrectionMs) && Math.Abs(Estimate.RecommendedCorrectionMs) <= 1000;
@@ -93,6 +97,7 @@ internal static class VisionCalibration
     internal static void Save(string path, VisionCalibrationRecord record)
     {
         if (record.SchemaVersion != 1 || !VisionModelManifest.IsSha256(record.ModelManifestHash) ||
+            record.ExecutionProvider is not ("CPUExecutionProvider" or "CUDAExecutionProvider") ||
             record.CaptureWidth <= 0 || record.CaptureHeight <= 0 || string.IsNullOrWhiteSpace(record.ProcedureVersion))
             throw new InvalidDataException("The calibration record lacks a bound model, capture configuration or procedure.");
         record.Crop.Validate();

@@ -1,6 +1,7 @@
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Vision;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -32,10 +33,12 @@ internal sealed class VisionPanel : UserControl, IDisposable
     private readonly TextBlock _shotProfileInfo = Text("Select a saved NBA 2K27 player/shot profile in Plugins before collecting training data.");
     private readonly TextBlock _trainingInfo = Text("Training takes contain player-crop images and timestamps. Targets must be labeled after capture.");
     private readonly TextBlock _status = Text("Observation is off.");
-    private readonly TextBlock _metrics = Text("Local timing measurements appear after capture starts.");
+    private readonly VisionPerformancePanel _performance;
     private readonly TextBlock _notice = Text("Experimental · no trained animation model is bundled. Capture and diagnostics work without one.");
     private readonly ComboBox _source = new() { Header = "Remote Play window", HorizontalAlignment = HorizontalAlignment.Stretch, DisplayMemberPath = "Title" };
     private readonly TextBox _manifest = new() { Header = "Animation model manifest (.json)", PlaceholderText = "Choose a local model manifest" };
+    private readonly ComboBox _executionProvider = new() { Header = "Inference execution provider", FontSize = 14,
+        HorizontalAlignment = HorizontalAlignment.Stretch, ItemsSource = new[] { "CUDA", "CPU" }, SelectedIndex = 0 };
     private readonly TextBox _animation = new() { Header = "Game / camera / animation configuration", Text = "Default", MaxLength = 80 };
     private readonly ComboBox _shoot = new() { Header = "Shoot button", ItemsSource = new[] { ControlId.X, ControlId.A, ControlId.B, ControlId.Y, ControlId.RightBumper, ControlId.LeftBumper } };
     private readonly NumberBox _left = Number("Player crop left (%)", 0, 0, 99);
@@ -56,10 +59,12 @@ internal sealed class VisionPanel : UserControl, IDisposable
     private WriteableBitmap? _bitmap;
     private bool _refreshing, _busy, _disposed, _populating;
     private nint _lastObservedSource;
+    private long _performanceRefreshedAt;
 
     internal VisionPanel(Microsoft.UI.WindowId windowId, Func<StudioRuntime?> runtime, Func<Task> connectOutput, Action openShotProfiles)
     {
         _runtime = runtime; _windowId = windowId; _connectOutput = connectOutput;
+        _performance = new VisionPerformancePanel(SavePerformanceRun, LoadPerformanceRun);
         Content = _content;
         _content.Children.Add(_profile);
         _content.Children.Add(_shotProfileInfo);
@@ -82,6 +87,8 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _content.Children.Add(controls);
         _content.Children.Add(_preview);
         _content.Children.Add(_manifest);
+        _content.Children.Add(_executionProvider);
+        _content.Children.Add(Text("Stop observation before changing CPU or CUDA. Starting a session uses the selected provider; an unavailable provider does not silently switch to another."));
         var models = Row();
         AddButton(models, "Browse manifest…", BrowseManifest);
         AddButton(models, "Import settings…", ImportSettings);
@@ -111,7 +118,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
             if (_armed.IsOn && _session?.Status.CanArm != true)
             {
                 runtime?.SetVisionArmed(false);
-                _notice.Text = "A fresh capture and compatible validated GPU model are required before arming.";
+                _notice.Text = "A fresh capture and compatible validated model are required before arming.";
             }
             else if (runtime?.SetVisionArmed(_armed.IsOn) != true && _armed.IsOn)
                 _notice.Text = runtime?.VisionStatus.Message ?? "Controller monitor unavailable.";
@@ -119,7 +126,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
         };
         _content.Children.Add(_armed);
         _content.Children.Add(_status);
-        _content.Children.Add(_metrics);
+        _content.Children.Add(_performance);
         _content.Children.Add(Text("Training data · manual gameplay only"));
         _content.Children.Add(Text("Record 10-second takes of the intended player. Each take stores cropped 256×256 BGRA frames, real capture timestamps and the selected player/shot configuration. Automatic release is disarmed during recording. Review the frames and label intended release targets before training."));
         var training = Row();
@@ -133,10 +140,12 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _animation.TextChanged += (_, _) => InvalidateCorrection();
         _source.SelectionChanged += (_, _) => InvalidateCorrection();
         _shoot.SelectionChanged += (_, _) => InvalidateCorrection();
+        _executionProvider.SelectionChanged += (_, _) => InvalidateCorrection();
         foreach (var field in new[] { _left, _top, _width, _height, _videoDelay, _inputDelay })
             field.ValueChanged += (_, _) => InvalidateCorrection();
         AutomationProperties.SetName(_preview, "Remote Play capture preview");
         AutomationProperties.SetName(_armed, "Arm experimental vision release");
+        AutomationProperties.SetName(_executionProvider, "Vision inference provider: CPU or CUDA");
         RefreshWindows();
         try
         {
@@ -214,10 +223,13 @@ internal sealed class VisionPanel : UserControl, IDisposable
     }
     private VisionSettings ReadSettings()
     {
+        if (_executionProvider.SelectedIndex is < 0 or > 1)
+            throw new InvalidDataException("Choose CPU or CUDA for inference.");
         var settings = _loadedSettings with
         {
             ModelManifestPath = _manifest.Text.Trim(), AnimationProfile = _shotProfile is { } profile ? "nba2k27:" + profile.ConfigurationFingerprint : _animation.Text.Trim(),
             CameraView = _shotProfile?.CameraView ?? _loadedSettings.CameraView,
+            ExecutionProvider = _executionProvider.SelectedIndex == 1 ? VisionExecutionProvider.Cpu : VisionExecutionProvider.Cuda,
             ShootButton = _shoot.SelectedItem is ControlId button ? button : ControlId.X,
             Crop = new(_left.Value / 100, _top.Value / 100, _width.Value / 100, _height.Value / 100),
             MinimumConfidence = _confidence.Value / 100, MaximumUncertaintyMs = _uncertainty.Value,
@@ -234,6 +246,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
         {
             _loadedSettings = settings;
             _manifest.Text = settings.ModelManifestPath; _animation.Text = settings.AnimationProfile; _shoot.SelectedItem = settings.ShootButton;
+            _executionProvider.SelectedIndex = settings.ExecutionProvider == VisionExecutionProvider.Cpu ? 1 : 0;
             _left.Value = settings.Crop.Left * 100; _top.Value = settings.Crop.Top * 100;
             _width.Value = settings.Crop.Width * 100; _height.Value = settings.Crop.Height * 100;
             _confidence.Value = settings.MinimumConfidence * 100; _uncertainty.Value = settings.MaximumUncertaintyMs;
@@ -278,17 +291,22 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _armed.IsEnabled = session?.CanArm == true && runtime.HasValue;
         _start.IsEnabled = !_busy && session?.Running != true;
         _save.IsEnabled = session?.Running != true;
-        foreach (var control in new Control[] { _source, _manifest, _animation, _shoot, _left, _top, _width, _height,
+        foreach (var control in new Control[] { _source, _manifest, _executionProvider, _animation, _shoot, _left, _top, _width, _height,
             _confidence, _uncertainty, _frameAge, _videoDelay, _inputDelay, _correction, _lateness })
             control.IsEnabled = session?.Running != true;
         _refreshing = false;
         _status.Text = session?.Message ?? "Observation is off.";
         if (runtime is { } output)
             _status.Text += "\n" + output.State + " · " + output.Message;
-        if (session is { } value)
-            _metrics.Text = $"Frames processed: {value.Frames} · replaced capture frames: {value.DroppedFrames} · predictions: {value.Predictions}\n" +
-                $"Last capture-to-processing work: {value.LastProcessingMs:F2} ms · local helper handoff: {_runtime()?.RecentOutputHandoffMs?.ToString("F2") ?? "unavailable"} ms\n" +
-                $"Automated releases: {runtime?.AutomatedReleases ?? 0} · missed deadlines: {runtime?.MissedDeadlines ?? 0}. Xbox receipt is not measured.";
+        // MainWindow refreshes preview/status frequently. Percentile snapshots allocate and sort
+        // only on this low-rate presentation path, never on each UI tick or capture frame.
+        long now = Stopwatch.GetTimestamp();
+        if (_performanceRefreshedAt == 0 || Stopwatch.GetElapsedTime(_performanceRefreshedAt, now).TotalMilliseconds >= 500)
+        {
+            _performanceRefreshedAt = now;
+            _performance.Update(_session?.Performance);
+        }
+        _performance.SetBusy(_busy);
         _trainingInfo.Text = _session?.TrainingStatus ?? "No training take is recording.";
         if (_session?.TakePreview() is { } preview)
         {
@@ -362,6 +380,47 @@ internal sealed class VisionPanel : UserControl, IDisposable
         catch (Exception error) { _notice.Text = error.Message; }
         finally { _busy = false; RefreshStatus(); }
     }
+    private async void SavePerformanceRun()
+    {
+        if (_busy || _session is null) return;
+        _busy = true; RefreshStatus();
+        try
+        {
+            string label = _performance.RunLabel;
+            var run = _session.SavePerformanceRun(label.Length == 0 ? "Vision performance run" : label);
+            if (run.Snapshot.TotalFrames == 0)
+                throw new InvalidOperationException("Observe a window before saving a performance run.");
+            var picker = new FileSavePicker(_windowId) { SuggestedFileName = "AccessRelay-Vision-Performance" };
+            picker.FileTypeChoices.Add("Vision performance run", [".json"]);
+            if (await picker.PickSaveFileAsync() is { } file)
+            {
+                await Task.Run(() => VisionPerformanceRuns.Write(file.Path, run));
+                if (_disposed) return;
+                _performance.RememberRun(run, selectAsBaseline: false);
+                _notice.Text = "Performance run saved. Choose a baseline to compare matching runs; a live comparison does not control the gameplay scene.";
+            }
+        }
+        catch (Exception error) { if (!_disposed) _notice.Text = error.Message; }
+        finally { _busy = false; RefreshStatus(); }
+    }
+    private async void LoadPerformanceRun()
+    {
+        if (_busy) return;
+        _busy = true; RefreshStatus();
+        try
+        {
+            var picker = new FileOpenPicker(_windowId); picker.FileTypeFilter.Add(".json");
+            if (await picker.PickSingleFileAsync() is { } file)
+            {
+                var run = await Task.Run(() => VisionPerformanceRuns.Read(file.Path));
+                if (_disposed) return;
+                _performance.RememberRun(run, selectAsBaseline: true);
+                _notice.Text = "Performance baseline loaded. Deltas require matching configuration and enough model decisions in both runs.";
+            }
+        }
+        catch (Exception error) { if (!_disposed) _notice.Text = error.Message; }
+        finally { _busy = false; RefreshStatus(); }
+    }
     private async void RecordTraining()
     {
         if (_busy || _session is null) return;
@@ -411,7 +470,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
                     "AccessRelayStudio", "Vision", "Calibration", _profileId.ToString("N") + ".json"), new VisionCalibrationRecord
                 {
                     ModelManifestHash = manifestHash, AnimationProfile = settings.AnimationProfile,
-                    GameVersion = manifest.GameVersion, CameraConfiguration = manifest.CameraConfiguration,
+                    GameVersion = manifest.GameVersion, CameraConfiguration = manifest.CameraConfiguration, ExecutionProvider = settings.ExecutionProviderName,
                     ProcedureVersion = imported.ProcedureVersion, CaptureWidth = source.Value.CaptureWidth,
                     CaptureHeight = source.Value.CaptureHeight, Crop = settings.Crop, CreatedAtUtc = DateTimeOffset.UtcNow,
                     Estimate = estimate
@@ -440,7 +499,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
             var template = new VisionCalibrationImport
             {
                 ModelManifestHash = hash, AnimationProfile = settings.AnimationProfile, GameVersion = manifest.GameVersion,
-                CameraConfiguration = manifest.CameraConfiguration, ProcedureVersion = "",
+                CameraConfiguration = manifest.CameraConfiguration, ExecutionProvider = settings.ExecutionProviderName, ProcedureVersion = "",
                 CaptureWidth = source.Value.CaptureWidth, CaptureHeight = source.Value.CaptureHeight, Crop = settings.Crop,
                 PreviousCorrectionMs = settings.CorrectionMs, EstimatedVideoDelayMs = settings.EstimatedVideoDelayMs,
                 EstimatedInputDelayMs = settings.EstimatedInputDelayMs

@@ -13,6 +13,9 @@ sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location("vision_training", SCRIPTS / "Train-VisionModel.py")
 training = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(training)
+evaluation_spec = importlib.util.spec_from_file_location("vision_evaluation", SCRIPTS / "Evaluate-VisionModel.py")
+evaluation = importlib.util.module_from_spec(evaluation_spec)
+evaluation_spec.loader.exec_module(evaluation)
 
 
 class DatasetValidationTests(unittest.TestCase):
@@ -136,6 +139,23 @@ class DatasetValidationTests(unittest.TestCase):
                 (self.directory / "session.json").write_text(json.dumps(metadata), encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "Top-level camera metadata differs"):
                     self.load([self.target, self.negative], assume_legacy_camera_2k=True)
+
+    def test_both_live_provider_targets_must_match_locked_thresholds(self):
+        for provider in ("CPUExecutionProvider", "CUDAExecutionProvider"):
+            with self.subTest(provider=provider):
+                self.assertEqual(evaluation.select_target_provider(provider, {"executionProvider": provider}), provider)
+
+    def test_legacy_thresholds_without_provider_are_not_silently_accepted(self):
+        with self.assertRaisesRegex(ValueError, "Locked thresholds must declare executionProvider"):
+            evaluation.select_target_provider("CUDAExecutionProvider", {})
+
+    def test_cpu_reference_cannot_relabel_a_locked_cuda_live_target(self):
+        with self.assertRaisesRegex(ValueError, "matching --target-provider"):
+            evaluation.select_target_provider("CPUExecutionProvider", {"executionProvider": "CUDAExecutionProvider"})
+
+    def test_unknown_provider_alias_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Target provider"):
+            evaluation.select_target_provider("cuda", {"executionProvider": "cuda"})
 
 
 if __name__ == "__main__":

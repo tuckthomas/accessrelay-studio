@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Offline ONNX evaluation on reviewed recorded sessions; never certifies hardware timing.
 
-Uses the CPU execution provider deliberately as a numerical reference, not as AccessRelay's production runtime.
+Uses CPU deliberately as an offline numerical reference. The declared live target is
+bound to locked thresholds; these offline results do not certify either live backend's timing.
 """
 from __future__ import annotations
 
@@ -15,6 +16,16 @@ import sys
 
 from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
 
+EXECUTION_PROVIDERS = ("CPUExecutionProvider", "CUDAExecutionProvider")
+
+
+def select_target_provider(requested: str, thresholds: dict) -> str:
+    if requested not in EXECUTION_PROVIDERS:
+        raise ValueError("Target provider must be CPUExecutionProvider or CUDAExecutionProvider")
+    if thresholds.get("executionProvider") != requested:
+        raise ValueError("Locked thresholds must declare executionProvider matching --target-provider; this is the intended live hardware target, not the offline CPU reference")
+    return requested
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -24,6 +35,8 @@ def main() -> int:
     parser.add_argument("--locked-thresholds", required=True, type=Path)
     parser.add_argument("--assume-legacy-camera-2k", action="store_true",
                         help="Explicitly allow reviewed legacy datasets missing cameraView as 2K")
+    parser.add_argument("--target-provider", choices=EXECUTION_PROVIDERS, default="CUDAExecutionProvider",
+                        help="Declared live hardware target bound to locked thresholds; offline numerical inference still uses CPU")
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
     if (args.out / "accuracy-report.json").exists() or (args.out / "predictions.jsonl").exists():
@@ -38,6 +51,7 @@ def main() -> int:
     if manifest.get("preprocessing") != PREPROCESSING_ID:
         raise ValueError("Evaluation requires the same canonical v2 preprocessing contract as the runtime")
     thresholds = training.read_json(args.locked_thresholds)
+    target_provider = select_target_provider(args.target_provider, thresholds)
     confidence = training.finite(thresholds.get("minimumConfidence"), "minimumConfidence")
     uncertainty = training.finite(thresholds.get("maximumUncertaintyMs"), "maximumUncertaintyMs")
     frame_age_limit = training.finite(thresholds.get("maximumFrameAgeMs"), "maximumFrameAgeMs")
@@ -125,6 +139,7 @@ def main() -> int:
     errors.sort()
     report = {
         "schemaVersion": 1, "datasetId": thresholds["datasetId"], "split": args.split,
+        "executionProvider": target_provider,
         "modelSha256": actual_hash, "modelVersion": manifest["modelVersion"], "animationProfile": manifest["animationProfile"],
         "gameVersion": manifest["gameVersion"], "cameraConfiguration": manifest["cameraConfiguration"],
         "calibrationProcedureVersion": thresholds["calibrationProcedureVersion"],
@@ -142,6 +157,7 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "accuracy-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     provenance = {"schemaVersion": 1, "datasetId": thresholds["datasetId"], "cameraConfiguration": recorded_camera,
+                  "targetExecutionProvider": target_provider, "referenceExecutionProvider": "CPUExecutionProvider",
                   "sessionIds": sorted(session_ids), "legacyCameraAssumptionSessionIds": sorted(
                       session["sessionId"] for _, session in sessions
                       if "shotProfile" not in session or "cameraView" not in session["shotProfile"])}
@@ -150,7 +166,7 @@ def main() -> int:
         for prediction in accepted.values():
             output.write(json.dumps(prediction) + "\n")
     print(json.dumps(report, indent=2))
-    print("Offline accuracy only: hardwareValidated=false. Automatic release remains gated.")
+    print(f"Offline CPU numerical reference only; declared live target={target_provider}. hardwareValidated=false; no live provider latency is certified.")
     return 0
 
 

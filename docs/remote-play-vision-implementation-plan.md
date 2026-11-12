@@ -9,11 +9,11 @@
 
 Add an optional vision-assisted release feature to AccessRelay Studio. Xbox Remote Play supplies console gameplay to a browser or supported Windows client. AccessRelay captures that window, analyzes the in-game player's shooting animation on the RTX 2070, predicts a release deadline, and modifies its existing virtual-controller output. Recognition must work with the shot meter disabled and without requiring a special player icon.
 
-The production implementation stays in C#/.NET and uses ONNX Runtime GPU, initially with the CUDA execution provider. A Python production worker is not required. Python may be used offline for dataset preparation, model training, export, and reference evaluation. TensorRT remains a later execution-provider option if the actual model benefits from it and a compatible deployment is validated.
+The production implementation stays in C#/.NET and uses ONNX Runtime with an explicit CPU or CUDA execution-provider selection; CUDA is the default. The Windows GPU runtime package supplies both providers. A Python production worker is not required. Python may be used offline for dataset preparation, model training, export, and reference evaluation. TensorRT remains a later execution-provider option if the actual model benefits from it and a compatible deployment is validated.
 
-The current CUDA-only inference choice is an implementation baseline, not proof that all inference requires a GPU. CPU work already includes crop/normalization, temporal bookkeeping, controller arbitration and scheduling. For gamertag-assisted tracking, benchmark CPU text recognition/tracking and CPU/GPU detection/animation inference using total frame-to-decision p95/p99 latency, copies, resource contention and deadline misses. Small models can favor CPU execution when GPU dispatch/copy costs outweigh computation savings. An explicit CPU inference mode would require implementation and matching hardware validation; it is not currently exposed. Window capture/composition and Remote Play video decoding may still use graphics hardware even if neural inference runs on the CPU.
+CPU work already includes crop/normalization, temporal bookkeeping, controller arbitration and scheduling. Compare explicitly selected CPU/CUDA inference using total frame-to-decision p95/p99 latency, copies, resource contention and deadline misses. Small models can favor CPU execution when GPU dispatch/copy costs outweigh computation savings; no backend winner is assumed for an untested task model. CUDA selection disables CPU fallback and fails visibly when its graph/dependencies cannot execute. Arming evidence must name the selected actual provider; changing providers invalidates the prior hardware association. Window capture/composition and Remote Play video decoding may still use graphics hardware even if neural inference runs on the CPU.
 
-The next tracking revision should use the visible gamertag to acquire player identity, associate it with a detected body, and maintain a stabilized moving player region through camera motion. This is a proposed replacement for manual fixed-region selection; the current runtime still uses a fixed region. That revision needs full-scene recording or sufficient scene context, per-frame body/tag boxes and track confidence, a versioned crop policy, and validation across the supported 2K, 2K Low and 2K Legacy views. The camera field added now records the selected view; it does not itself implement automatic player tracking.
+The next tracking revision should use the visible gamertag to acquire player identity, associate it with a detected body, and maintain a stabilized moving player region through camera motion. Camera-specific tag offsets and box proportions are acquisition priors, refined by body detection/scale and confidence checks; text recognition need not run on every frame. Define crop dimensions relative to source resolution and detected player scale, including at 2560×1440, rather than fixing a 160-pixel source box. Tag text may retain a fixed screen-space font size, so its height alone is not a proven player-depth estimate. Preserve hands/ball context, smooth crop motion, and invalidate deadlines on identity loss or reassignment. This is a proposed replacement for manual fixed-region selection; the current runtime still uses a fixed region. That revision needs full-scene recording or sufficient scene context, per-frame body/tag boxes and transforms, track confidence, a versioned crop policy, and validation across the supported 2K, 2K Low and 2K Legacy views. The camera field added now records the selected view; it does not itself implement automatic player tracking.
 
 The application remains WinUI 3 on Windows x64. Reuse its physical-input handling, profiles, controller state, virtual Xbox output, and existing signed USB/IP transport. The controller helper remains a separate native process; choosing in-process C# vision does not remove that existing process boundary.
 
@@ -21,7 +21,7 @@ This document records the implementation and the remaining acceptance gates. No 
 
 ### Experimental branch implementation
 
-The branch now contains actual window capture, bounded leased frame buffers, a CUDA-only ONNX integration, temporal preprocessing/tracking, the output arbiter and deadline scheduler, diagnostics, calibration helpers, settings persistence, and a Remote Play Vision page. Capture-only observation works without a model. Untrained or unvalidated models cannot arm automatic release.
+The branch now contains actual window capture, bounded leased frame buffers, selectable CPU/CUDA ONNX integration, temporal preprocessing/tracking, the output arbiter and deadline scheduler, diagnostics, calibration helpers, settings persistence, and a Remote Play Vision page. Capture-only observation works without a model. Untrained or unvalidated models cannot arm automatic release.
 
 The NBA 2K27 plugin supports multiple saved player/shot profiles with create, edit, revert, duplicate, select and delete operations. Each stores player height, three-point rating, custom base, upper release 1, upper release 2, meter on/off, meter-specific release type, one of four shot-speed levels, release blending, and camera view (2K, 2K Low or 2K Legacy). Release 2's percentage is the complement of release 1 so they always total 100%. Meter release type is not applicable when the meter is off. Gameplay fields feed a configuration fingerprint; changing them invalidates the prior model/calibration association. Older saved profiles missing camera view default to 2K. The fingerprint payload version advances so existing model/calibration bindings require review. Training metadata, model camera configuration, settings import and calibration review also check the camera selection.
 
@@ -83,7 +83,7 @@ Xbox gameplay
   -> Windows Graphics Capture
   -> newest-frame buffer
   -> crop / resize / normalize
-  -> ONNX Runtime CUDA inference
+  -> ONNX Runtime inference using the explicitly selected CPU or CUDA provider
   -> player tracking + temporal animation state
   -> predicted release deadline + uncertainty
   -> controller output arbiter and deadline scheduler
@@ -115,9 +115,9 @@ Capture timestamps provide the PC capture timeline. They do not identify the ori
 
 ## 6. GPU memory and ONNX execution
 
-Use a long-lived `InferenceSession` and reusable `OrtValue` inputs and outputs. Select a compatible ONNX Runtime GPU, CUDA, cuDNN, driver, and model combination for the RTX 2070; record that matrix in the implementation rather than assuming the current CPU package can simply be exchanged without consequences.
+Use a long-lived `InferenceSession` and reusable `OrtValue` inputs and outputs. Record the selected actual provider. For CUDA, select a compatible ONNX Runtime GPU, CUDA, cuDNN, driver, and model combination for the RTX 2070; record that matrix rather than assuming runtime packages can simply be exchanged without consequences. CPU mode is explicit, not a fallback from failed CUDA initialization, and requires its own matching live validation evidence.
 
-1. Verify the chosen GPU provider actually executes the intended model nodes. Record provider assignment and material CPU fallback.
+1. Verify the chosen provider actually executes the intended model nodes. CUDA mode rejects CPU fallback rather than silently changing the selected backend.
 2. Allocate reusable input/output resources for the supported fixed input size and known output shapes. Handle dynamic outputs with a documented bounded strategy.
 3. Keep the distinction between pinned managed RAM and GPU VRAM explicit. Pinning host arrays does not place them on the GPU.
 4. Implement and measure the D3D11 capture-to-CUDA transfer path. Cross-API resource sharing requires validated synchronization; do not describe it as zero-copy until demonstrated. A measured, bounded copy path is an acceptable initial implementation.
@@ -149,6 +149,8 @@ A reliable no-meter model is a required deliverable. A generic detector, pose-es
 The model and temporal tracker should supply: tracked player identity/confidence, shot-family estimate, shot phase, time-to-target estimate, and prediction uncertainty. A compact temporal model or tracked-feature sequence is a candidate; select the architecture after accuracy and performance evaluation. Single-frame generic pose output is not assumed to solve release prediction.
 
 Use physical shoot input as causal context and as permission to consider assistance. Provide a player/region selection and identity-acquisition step that uses ordinary gameplay imagery, then track and reacquire that player. Seeing another player shoot is not sufficient identity evidence. Track the animation across recent timestamped frames without waiting for a large batch of future frames. Declare the temporal history and warm-up behavior so its latency is visible.
+
+A later optimization may keep lightweight identity tracking/history active and run expensive animation inference only within a bounded physical-input-triggered attempt. Input alone cannot establish player identity, possession or that a shot occurred: the same control can have defensive or off-ball actions, and the displayed stream represents delayed gameplay. Keep visual identity/animation validation, cancellation and uncertainty gates. Do not require an unverified possession ring or custom player icon. Compare this optimization with continuous observation using the same model and workload; resetting history or warming inference only after button-down can erase the expected latency benefit. The current observation loop continues inference according to its temporal sampling policy; input gating is not implemented by this plan text.
 
 Export a validated ONNX model with preprocessing, input/output schema, precision, model version/hash, supported environments, and license. Compare exported predictions with the training/reference implementation before hardware trials. Import models through a bounded, versioned manifest and report unsupported schemas/operators without enabling output.
 
@@ -245,6 +247,10 @@ Report p50, p95, p99, maximum, sample count, measurement duration, and workload 
 6. estimated combined streaming/input correction and uncertainty;
 7. independently observed gameplay outcomes where available.
 
+The in-app performance panel reports bounded recent windows of up to 2,048 samples for local frame age at processing start, frame-to-model-decision latency, all-frame processing, preprocessing, and inference including transfers. Capture-only operation has no model decisions, so its decision/inference metrics remain unavailable. Rejection sentinels that run no inference count only as frame processing. Budget exceedances use the same recent model-decision window. Worker allocations within measured frame processing and process GC collection counts are diagnostics; counts are not pause durations. The existing helper handoff estimate remains a latest value only, without invented percentile history.
+
+Save/load opt-in local JSON performance runs to compare matching model/source dimensions/crop/profile/camera and timing context. Backend differences are allowed deliberately; report them prominently. Require at least 100 decisions per run before reporting timing deltas. Different live gameplay inputs remain uncontrolled, so these comparisons show observed differences rather than proving a controlled CPU/GPU benchmark or Xbox-side accuracy.
+
 Do not label helper stdin flush as Xbox receipt. Exact console-applied release error requires external validation or a trustworthy console acknowledgement that this capture/output design does not currently provide. When only local metrics or coarse game feedback are available, state that limit in reports.
 
 Raw gameplay recording and detailed export are opt-in and asynchronous. Keep credentials, account identifiers, raw clips, weights, and machine-specific private paths out of repository commits and routine logs. Bound recording storage and handle full disks without blocking controller output.
@@ -282,7 +288,7 @@ The current verification project links `Core/*.cs` into a portable `net10.0` exe
 | 2. Capture and instrument | User-selected window capture, bounded newest-frame handling, timestamps, resizing/freeze/loss handling, and observation-only diagnostics work. Measure the path on the actual Remote Play stream. |
 | 3. Implement arbitration and deadlines | Deterministic verification proves channel ownership, cancellation, release latching, queue ordering, and generation invalidation. Synthetic observations exercise the path without a trained model; mark them as synthetic. |
 | 4. Establish the model | Reviewed dataset, declared supported environments, held-out accuracy results, export agreement, model manifest, and initial inference measurements exist. No generic-model placeholder is treated as a finished detector. |
-| 5. Integrate GPU inference | Reusable memory and warm-up, provider verification, bounded processing, and timestamps work on RTX 2070. Record transfers, CPU fallback, memory use, and tails. |
+| 5. Integrate selected inference backend | Reusable memory and warm-up, explicit CPU/CUDA verification, bounded processing, and timestamps work on the target PC. For CUDA, verify the RTX 2070 path with fallback disabled. Record transfers, actual provider, memory use and tails separately for each backend. |
 | 6. Calibrate and run controlled trials | Combined-offset calibration, confidence thresholds, prediction deadlines, and manual override operate in a controlled practice environment. Record outcomes and failure cases across sessions. |
 | 7. Harden and publish | Accessible UI, persistence/import, packaged dependencies, audio coexistence, soak/fault tests, regression checks, and honest limitations are complete. Publish as experimental until the acceptance gates are supported by evidence. |
 
@@ -301,10 +307,10 @@ Do not enable automated release merely because capture reaches 60 FPS or an infe
 - Profile round trips and old-profile compatibility; malformed settings, incompatible manifests, and imported armed states are rejected or disabled.
 - Deterministic fake clocks and injected capture/output delays drive scheduler tests. Wall-clock sleep tests alone are insufficient for correctness.
 
-### Windows/GPU integration and performance
+### Windows/backend integration and performance
 
 - Exercise actual browser/client capture and our virtual device together on the RTX 2070 system. Include focus changes, physical-controller reconnects, window resize/minimize, stream reconnection, and output-driver failure.
-- Verify current-frame inference after repeated buffer updates; compare GPU results against the exported reference. Test actual device loss and orderly resource cleanup where practical.
+- Verify current-frame inference after repeated buffer updates; compare both CPU and CUDA outputs against the exported reference. Test actual device loss and orderly resource cleanup where practical. Hardware acceptance and calibration must match the selected provider.
 - Benchmark capture-only, inference-only, and the full path separately, both warm and cold. Cold work must complete before arming.
 - At a selected 60 FPS source, sustained full-frame analysis targets at most 16.67 ms per processed frame. This is an engineering throughput target, not a promised result or an accuracy guarantee. Falling behind must drop obsolete observations and suspend when freshness exceeds the validated limit.
 - Report deadline tails and misses under idle conditions and with UI activity, Lua/macros, live voice, recording, GPU contention, and network disturbances. Include a documented sustained session, initially at least 30 minutes.
@@ -337,7 +343,7 @@ Extend the verification project deliberately with explicit compile includes or a
 
 Publish the existing application source/documentation changes together with the updated implementation plan to `origin/main`. Include the tracked edits, intentional deletion, and new source/documentation files that were already present when the plan was requested. Review the publication scope and run the relevant existing verification and Release publish checks first. Keep ignored build outputs, models, recordings, credentials, and machine-specific configuration outside the source commit.
 
-The initial plan was already pushed separately and the feature branch was created. Complete the requested baseline by pushing the application changes normally to `main`, then fast-forwarding `codex/remote-play-vision` to that exact baseline commit. Push the feature branch, verify both remote refs and published content, and leave it checked out with its upstream set. Do not reset, stash, discard, or force-push existing work. Completion means the authorized application changes are committed and published, not left uncommitted in the working tree. This baseline publication does not mean the vision feature itself has been implemented.
+The initial plan was already pushed separately and the feature branch was created. Complete the requested baseline by pushing the application changes normally to `main`, then fast-forwarding `codex/remote-play-vision` to that exact baseline commit. Push the feature branch, verify both remote refs and published content, and leave it checked out with its upstream set. Do not reset, stash, discard, or force-push existing work. Completion means the authorized application changes are committed and published, not left uncommitted in the working tree. The experimental software is implemented; gameplay-model and Xbox-side acceptance remain separate unfinished gates.
 
 ## 18. Technical references
 

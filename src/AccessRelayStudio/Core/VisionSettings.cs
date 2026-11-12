@@ -1,6 +1,9 @@
 using System.IO;
+using System.Text.Json.Serialization;
 
 namespace EliteScriptStudio.Core;
+
+internal enum VisionExecutionProvider { Cpu, Cuda }
 
 internal readonly record struct VisionCrop(double Left, double Top, double Width, double Height)
 {
@@ -19,6 +22,14 @@ internal sealed record VisionSettings
     public string ModelManifestPath { get; init; } = "";
     public string AnimationProfile { get; init; } = "Default";
     public string CameraView { get; init; } = "";
+    public VisionExecutionProvider ExecutionProvider { get; init; } = VisionExecutionProvider.Cuda;
+    [JsonIgnore]
+    public string ExecutionProviderName => ExecutionProvider switch
+    {
+        VisionExecutionProvider.Cpu => "CPUExecutionProvider",
+        VisionExecutionProvider.Cuda => "CUDAExecutionProvider",
+        _ => throw new InvalidDataException("Choose CPU or CUDA as the inference backend.")
+    };
     public ControlId ShootButton { get; init; } = ControlId.X;
     public double MinimumConfidence { get; init; } = .9;
     public double MaximumUncertaintyMs { get; init; } = 5;
@@ -32,6 +43,8 @@ internal sealed record VisionSettings
     public void Validate()
     {
         Crop.Validate();
+        if (!Enum.IsDefined(ExecutionProvider))
+            throw new InvalidDataException("Choose CPU or CUDA as the inference backend.");
         if (!Enum.IsDefined(ShootButton) || (uint)ShootButton > ushort.MaxValue)
             throw new InvalidDataException("Vision release requires a digital controller button.");
         if (ModelManifestPath is null || ModelManifestPath.Length > 2048 || ModelManifestPath.Any(char.IsControl))

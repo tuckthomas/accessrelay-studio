@@ -14,7 +14,11 @@ internal sealed class VisionSettingsStore
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
-        Converters = { new JsonStringEnumConverter<ControlId>(JsonNamingPolicy.CamelCase, false) }
+        Converters =
+        {
+            new JsonStringEnumConverter<ControlId>(JsonNamingPolicy.CamelCase, false),
+            new JsonStringEnumConverter<VisionExecutionProvider>(JsonNamingPolicy.CamelCase, false)
+        }
     };
     private readonly string _directory;
 

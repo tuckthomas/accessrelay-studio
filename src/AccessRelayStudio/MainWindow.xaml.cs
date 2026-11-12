@@ -87,6 +87,9 @@ public sealed partial class MainWindow : Window
         _draft = _active;
         _stickDeadzone = _store.LoadStickDeadzone();
         InitializeComponent();
+        Title = BuildInfo.WindowTitle;
+        TitleBrand.Text = BuildInfo.ProductName;
+        TitleSubtitle.Text = BuildInfo.Subtitle;
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(StudioTitleBar);
         string icon = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AccessRelayStudio.ico");
@@ -1386,7 +1389,8 @@ public sealed partial class MainWindow : Window
                 DetailText("4. Turn on Macro scripts in Dashboard to start the virtual controller. To disconnect both outputs, open Studio actions and choose Stop voice, scripts, and output.");
                 break;
             case StudioPage.About:
-                Heading("About", $"AccessRelay Studio {BuildVersion} · Windows x64");
+                Heading("About", $"{BuildInfo.ProductName} {BuildVersion} · Windows x64");
+                DetailText($"Running build folder\n{AppContext.BaseDirectory}");
                 DetailText("3D control layout · CC0 Xbox One model adapted from CasperH2O");
                 DetailText("Elite reference images · Microsoft Store's Xbox Elite Wireless Controller Series 2 gallery");
                 DetailText("Virtual Xbox provider · USB/IP");
@@ -1405,7 +1409,7 @@ public sealed partial class MainWindow : Window
         PageCaption.Text = caption;
     }
 
-    private static string BuildVersion => typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "Local build";
+    private static string BuildVersion => BuildInfo.Version;
 
     private void AddStickDeadzoneControls()
     {
