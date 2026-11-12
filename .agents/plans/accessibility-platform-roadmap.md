@@ -14,8 +14,9 @@ Sections 5–7 are implemented and passed Windows CI with simulated inputs. Sect
 has local phrase/template recognition and bounded host arbitration implemented;
 Windows native CI and real microphone evaluation remain to be recorded.
 Section 10 has the session-provenance guard implemented; its conversion/data work
-remains open. Section 9 now has the NBA source/training extraction implemented; its pack SDK
-and host UI are next. Sections 11–12 are queued, not implemented.
+remains open. Section 9 now has NBA extraction and the versioned pack SDK/import/tuning UI
+implemented; native CI and Windows interaction acceptance remain to be recorded.
+Sections 11–12 are queued, not implemented.
 
 ## Delivery and evidence
 
@@ -195,30 +196,41 @@ ownership, raw microphone routing, queue/age limits, startup behavior and limita
 Portable synthetic-audio/fault/overload/cancellation checks, 57 frontend unit tests,
 19 Chromium browser workflows, TypeScript/Vite build, Windows runtime cross-compile
 and actual audio-source compilation passed. Windows runtime integration tests use
-simulated devices. Real microphone/SAPI operation, echo/noise/dysarthric accuracy and
+simulated devices. The Windows route scope fix is `a16dec9f42083b24b0c6f014a32d50a0802426d4`;
+Windows publish and simulated-device runtime CI passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43284553379.
+Real microphone/SAPI operation, echo/noise/dysarthric accuracy and
 physical delivery latency remain open; no such measurement is claimed.
 
 ## 9. Versioned game packs
 
-- [ ] Define bounded/versioned manifest, host action requests, typed vision adapters,
+- [x] Define bounded/versioned manifest, host action requests, typed vision adapters,
       declarative tuning controls, compatibility rules, and resource/trust restrictions.
-- [ ] Keep scheduling, freshness checks, generation tokens, cancellation, and final
+- [x] Keep scheduling, freshness checks, generation tokens, cancellation, and final
       controller ownership in the host. Never expose unrestricted output writes to Lua.
 - [x] Extract NBA-specific code/training into an in-repository pack incrementally,
       updating build/test paths and preserving existing saved profiles and model imports.
-- [ ] Add pack loading/import, tuning UI, bounded Lua behavior, and a second minimal
+- [x] Add pack loading/import, tuning UI, bounded Lua behavior, and a second minimal
       pack proving the contract is not tied to NBA; reject unsupported native plugins.
-- [ ] Test malformed manifests, path traversal, oversized assets, hashes, compatibility,
+- [x] Test malformed manifests, path traversal, oversized assets, hashes, compatibility,
       cancellation, and backward migration. A hash is integrity, not publisher authenticity.
+- [ ] Validate real Windows pack import/UI/model integration before completion.
 - [ ] Validate host integration before considering an `accessrelay-packs` repository;
       do not create/publish a marketplace or distribute third-party weights prematurely.
-- [ ] Push migration features separately and record section commit SHAs here.
+- [x] Push migration features separately and record section commit SHAs here.
 
 Implementation commits: NBA source/training extraction `ce2eee28aa3831ea8bb0e31488afbf797d26261f`. Validation: portable controller/profile/Lua tests,
 26 dataset tests, existing trainer/evaluator entry points, desktop evidence tests
 and Windows/vision verification compilation passed. Core contains no NBA-specific
 type references. Legacy profile JSON/fingerprints and model contracts are retained;
-release scheduling stays host-owned. Pack SDK/import/tuning is still in progress.
+release scheduling stays host-owned. Pack SDK/import/tuning commit: `d82bad724fe02662077e76916c7304cfcc76754f`.
+Validation: pack schema/path/hash/size/version/link/cancellation tests, real Lua
+output/tuning and profile-v5/legacy persistence checks, portable author CLI, 57
+frontend unit tests, 20 browser workflows, TypeScript/Vite build, desktop evidence
+checks and Windows/vision verification compilation passed. The second pack has no
+NBA/vision dependency. See `docs/game-packs.md` for exact bounds, typed adapter
+compatibility, trust limits and activation behavior. Native CI is next; real
+Windows UI/model/device acceptance remains open.
 Marketplace split: deferred until the contract is proven.
 
 ## 10. Dataset provenance and training interoperability
