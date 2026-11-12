@@ -77,6 +77,17 @@ describe('workspace draft and capture visibility', () => {
 describe('semantic hardware and model announcements', () => {
   const updates = () => screen.getByRole('status', { name: 'Studio status updates' });
   const errors = () => screen.getByRole('alert', { name: 'Studio errors' });
+  it('keeps command microphone visibility and announces command lifecycle/faults across pages', async () => {
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    emit({ type: 'status', status: { voice: { commands: { recognition: { running: true, ready: true }, output: { enabled: true } } } } });
+    await waitFor(() => expect(updates().textContent).toBe('Local voice commands are listening.'));
+    expect(screen.getByText('Mic live')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings', exact: true }));
+    expect(screen.getByText('Mic live')).toBeTruthy();
+    emit({ type: 'status', status: { voice: { commands: { recognition: { running: false, error: 'Local recognizer fell behind.' }, output: { enabled: false } } } } });
+    await waitFor(() => expect(errors().textContent).toBe('Local recognizer fell behind.'));
+    expect(screen.queryByText('Mic live')).toBeNull();
+  });
   it('announces feedback device failures without reading cue statistics', async () => {
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
     emit({ type: 'status', status: { controller: { feedback: { error: 'Audio cue unavailable: endpoint closed.', played: 0, dropped: 0 } } } });

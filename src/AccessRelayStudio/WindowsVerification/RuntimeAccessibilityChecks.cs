@@ -55,6 +55,41 @@ internal static class RuntimeAccessibilityChecks
         Navigation();
         Feedback();
         CoPilot();
+        VoiceCommands();
+    }
+
+    private static void VoiceCommands()
+    {
+        using var input = new EliteInputMonitor();
+        using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
+        runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest?.OutputActive == true && runtime.Latest?.Input.IsConnected == true, "Voice input/output did not connect.");
+        var binding = new VoiceCommandBinding { Control = ControlId.A, DurationMs = 100, RefractoryMs = 200 };
+        var settings = new VoiceCommandSettings { Bindings = [binding] };
+        long generation = runtime.ActivateVoiceCommands(settings);
+        long now = Stopwatch.GetTimestamp();
+        if (!runtime.EnqueueVoiceCommand(generation, new(binding.Id, .99, now, now, now))) throw new Exception("Fresh voice request rejected.");
+        Wait(() => runtime.Latest?.Output.Buttons == (ushort)ControlId.A, "Voice pulse was not composed by host.");
+        if (runtime.Latest?.Input.State.Buttons != 0) throw new Exception("Voice forged a physical input edge.");
+        input.SetState(default(ControllerState) with { Buttons = (ushort)ControlId.A });
+        Thread.Sleep(130);
+        if (runtime.Latest?.Output.Buttons != (ushort)ControlId.A) throw new Exception("Pulse expiration released a physical hold.");
+        input.SetState(default); Wait(() => runtime.Latest?.Output.Buttons == 0, "Voice pulse exceeded its duration.");
+        try { runtime.StartRecording(RecordingChannels.All); throw new Exception("Voice-contaminated recording was allowed."); }
+        catch (InvalidOperationException) { }
+        runtime.StopOutput(true); runtime.Attach(new UsbipXboxOutput());
+        now = Stopwatch.GetTimestamp();
+        if (runtime.EnqueueVoiceCommand(generation, new(binding.Id, .99, now, now, now))) throw new Exception("Stop accepted a stale recognizer.");
+        runtime.SetScriptsEnabled(true);
+        generation = runtime.ActivateVoiceCommands(settings with { Bindings = [binding with { Action = VoiceCommandAction.Sequence, Control = ControlId.LargeRight }] });
+        now = Stopwatch.GetTimestamp(); runtime.EnqueueVoiceCommand(generation, new(binding.Id, .99, now, now, now));
+        Wait(() => runtime.Latest?.Output.RightY != 0, "Voice did not trigger an existing mapped sequence.");
+        runtime.StopVoiceCommands(); Wait(() => runtime.Latest?.Output.RightY == 0, "Stopping voice left an external sequence active.");
+        generation = runtime.ActivateVoiceCommands(settings);
+        runtime.Apply(StudioProfile.CreateDefault());
+        now = Stopwatch.GetTimestamp();
+        if (runtime.EnqueueVoiceCommand(generation, new(binding.Id, .99, now, now, now))) throw new Exception("Profile change accepted an old vocabulary.");
+        Console.WriteLine("SUCCESS: host voice pulses/sequences, physical ownership, raw recording exclusion, Stop and profile cancellation with simulated devices.");
     }
 
     private static void CoPilot()

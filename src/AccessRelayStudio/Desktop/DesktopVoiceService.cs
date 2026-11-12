@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using EliteScriptStudio.Audio;
+using EliteScriptStudio.Core;
 using Microsoft.UI;
 using Microsoft.Windows.Storage.Pickers;
 
@@ -31,9 +32,36 @@ internal sealed class DesktopVoiceService : IDesktopModule
     private VoiceMusicRemoval.Result? _cleaned;
     private int _cleanedStartMs, _cleanedEndMs;
     private bool _useCleaned;
+    private readonly Func<StudioRuntime?> _runtime;
+    private readonly VoiceCommandStore _commandStore = new(DesktopEnvironment.DataDirectory("VoiceCommands"));
+    private VoiceCommandSettings _commandSettings = new();
+    private Guid _commandProfile;
+    private VoiceCommandSession? _commandSession;
+    private CancellationTokenSource? _commandLearning;
+    private long _commandGeneration;
+    private Task _commandRetiring = Task.CompletedTask;
+    private bool _commandStarting;
+    private string? _commandLoadError;
 
-    internal DesktopVoiceService(WindowId owner)
+    private void RefreshCommandProfile()
     {
+        var profile = _runtime()?.ActiveProfileId ?? Guid.Empty;
+        if (profile == _commandProfile) return;
+        StopCommands(); _commandProfile = profile; _commandLoadError = null;
+        try { _commandSettings = _commandStore.Load(profile); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        { _commandSettings = new(); _commandLoadError = "Voice commands could not be loaded: " + error.Message; }
+    }
+    private void StopCommands()
+    {
+        _runtime()?.StopVoiceCommands(); _commandLearning?.Cancel();
+        var previous = Interlocked.Exchange(ref _commandSession, null);
+        if (previous is not null) { previous.Dispose(); _commandRetiring = previous.Completion; }
+    }
+
+    internal DesktopVoiceService(WindowId owner, Func<StudioRuntime?> runtime)
+    {
+        _runtime = runtime;
         _owner = owner;
         try
         {
@@ -49,8 +77,12 @@ internal sealed class DesktopVoiceService : IDesktopModule
         catch (Exception error) { _message = "Voice setup could not be loaded. " + error.Message; }
     }
 
-    public object GetState() => new
+    public object GetState()
     {
+        RefreshCommandProfile();
+        return new
+    {
+        commands = new { profileId = _commandProfile, profileName = _runtime()?.ActiveProfileName, settings = _commandSettings, engines = VoiceCommandSession.Engines(), error = _commandLoadError },
         devices = _devices,
         models = _models.Select(model => new { id = ModelId(model), model.Name, model.Description, model.UsesReference, model.IsAvailable }),
         profiles = _availableProfiles.Select(profile => new { profile.Id, profile.Name, durationMs = profile.Duration.TotalMilliseconds,
@@ -68,12 +100,17 @@ internal sealed class DesktopVoiceService : IDesktopModule
         },
         status = GetStatus()
     };
+    }
 
     public object GetStatus()
     {
         var status = _session.Status;
+        if (_commandLearning is null && _commandSession is { Status.Running: false } && _runtime() is { } runtime
+            && runtime.VoiceCommandStatus is { Enabled: true } output && output.Generation == _commandGeneration)
+            runtime.StopVoiceCommands();
         return new
         {
+            commands = new { recognition = _commandSession?.Status, output = _runtime()?.VoiceCommandStatus, error = _commandLoadError },
             status.IsRunning, isStarting = _operationName is "start" or "switch",
             busy = _operation is not null, operation = _operationName,
             message = status.Error ?? (_operation is not null || !status.IsRunning ? _message : status.Message),
@@ -115,7 +152,61 @@ internal sealed class DesktopVoiceService : IDesktopModule
                 case "profileSelect": await SelectProfileAsync(args.Id()); return null;
                 case "profileClear": RequireStopped(); _selectedProfileId = null; _selectedModelId = "builtin"; SaveSelection(); return null;
                 case "start": await StartAsync(); return null;
+                case "commandsSave":
+                {
+                    RefreshCommandProfile();
+                    if (_commandLearning is not null || _commandStarting) throw new InvalidOperationException("Finish or stop template recording/recognizer startup before saving commands.");
+                    StopCommands(); var settings = args.GetProperty("settings").Read<VoiceCommandSettings>(); settings.Validate();
+                    _commandStore.Save(_commandProfile, settings); _commandSettings = settings; _commandLoadError = null; return null;
+                }
+                case "commandsStart":
+                {
+                    if (_commandLearning is not null || _commandStarting) throw new InvalidOperationException("Finish or stop template recording/recognizer startup before listening for commands.");
+                    RefreshCommandProfile(); StopCommands();
+                    if (!_commandRetiring.IsCompleted) throw new InvalidOperationException("The previous local recognizer is still stopping. Try again shortly.");
+                    var runtime = _runtime() ?? throw new InvalidOperationException("Controller runtime is unavailable.");
+                    if (_commandSettings.Bindings.Length == 0 || _commandSettings.Bindings.Any(binding => binding.Phrase.Length == 0 && binding.Templates.Length == 0))
+                        throw new InvalidOperationException("Each command needs a phrase or at least one recorded personal sound.");
+                    long generation = runtime.ActivateVoiceCommands(_commandSettings); _commandGeneration = generation;
+                    _commandStarting = true;
+                    try
+                    {
+                        var session = new VoiceCommandSession(args.Text("microphoneId"), _commandSettings,
+                            () => runtime.VoiceCommandStatus is { Enabled: true } output && output.Generation == generation,
+                            observation => runtime.EnqueueVoiceCommand(generation, observation), onStopped: () => runtime.StopVoiceCommands(generation));
+                        _commandSession = session;
+                        await session.Ready.WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                    catch { StopCommands(); throw; }
+                    finally { _commandStarting = false; }
+                    return null;
+                }
+                case "commandsStop": StopCommands(); return null;
+                case "commandLearn":
+                {
+                    RefreshCommandProfile();
+                    if (_commandLearning is not null || _commandStarting) throw new InvalidOperationException("Finish or stop the current sound recording/recognizer startup.");
+                    StopCommands(); Guid profile = _commandProfile, id = args.Id();
+                    if (!_commandRetiring.IsCompleted) throw new InvalidOperationException("The previous local recognizer is still stopping. Try again shortly.");
+                    if (!_commandSettings.Bindings.Any(binding => binding.Id == id)) throw new InvalidDataException("Save the command before recording a template.");
+                    using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10)); _commandLearning = cancellation;
+                    try
+                    {
+                        using var session = new VoiceCommandSession(args.Text("microphoneId"), _commandSettings,
+                            () => _runtime()?.ActiveProfileId == profile && !cancellation.IsCancellationRequested, null, learning: true);
+                        _commandSession = session;
+                        var template = await session.Learned.WaitAsync(cancellation.Token);
+                        cancellation.Token.ThrowIfCancellationRequested();
+                        if (_runtime()?.ActiveProfileId != profile) throw new InvalidOperationException("Controller setup changed during recording; template discarded.");
+                        var settings = _commandSettings with { Bindings = [.. _commandSettings.Bindings.Select(binding => binding.Id == id
+                            ? binding with { Templates = [.. binding.Templates.TakeLast(2), template] } : binding)] };
+                        _commandStore.Save(profile, settings); _commandSettings = settings;
+                        return new { message = "Personal sound saved locally. Test with background speech before enabling gameplay." };
+                    }
+                    finally { _commandLearning = null; _commandSession = null; }
+                }
                 case "stop":
+                    StopCommands();
                     _operation?.Cancel(); _clipPreview?.Pause(); _session.Stop();
                     _message = "Voice processing stopped."; return null;
                 case "cancel":
@@ -431,6 +522,7 @@ internal sealed class DesktopVoiceService : IDesktopModule
     {
         if (_disposed) return;
         _disposed = true;
+        StopCommands();
         try { _operation?.Cancel(); }
         finally
         {

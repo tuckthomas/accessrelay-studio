@@ -28,6 +28,16 @@ public sealed class MacroEngine
     private bool _enabled;
     private bool? _enabledOverride;
     private bool _nextMissLate;
+    private bool _externalRun;
+
+    internal void CancelExternal()
+    {
+        lock (_sync)
+        {
+            if (!_externalRun) return;
+            _lua?.Cancel(); _lua = null; _luaControl = null; _active = null; _status = default; _externalRun = false;
+        }
+    }
 
     public MacroStatus Status
     {
@@ -94,7 +104,7 @@ public sealed class MacroEngine
 
     /// <summary>Sample at a monotonic time in milliseconds, such as Environment.TickCount64.</summary>
     public ControllerState Tick(ControllerState input, PaddleButtons paddles, bool connected, long timestampMs,
-        PaddleButtons tapEdges = PaddleButtons.None, ControllerState? manualOutput = null)
+        PaddleButtons tapEdges = PaddleButtons.None, ControllerState? manualOutput = null, ControlId? externalTrigger = null)
     {
         lock (_sync)
         {
@@ -108,6 +118,8 @@ public sealed class MacroEngine
             uint rising = _hasSample ? (pressed & ~_previous) | ControlMap.PressedMask(default, tapEdges) : 0;
             _previous = pressed;
             _hasSample = true;
+            bool externalEdge = rising == 0 && externalTrigger is { } && Enum.IsDefined(externalTrigger.Value);
+            if (externalEdge) rising = (uint)externalTrigger!.Value;
             if (!_enabled)
                 return manualOutput ?? input;
 
@@ -119,7 +131,7 @@ public sealed class MacroEngine
             }
 
             if (rising != 0)
-                StartPressedShot(rising, timestampMs);
+                StartPressedShot(rising, timestampMs, externalEdge);
 
             ControllerState output = ControlMap.Consume(manualOutput ?? input, _consume);
             if (_lua is { } lua)
@@ -164,7 +176,7 @@ public sealed class MacroEngine
         }
     }
 
-    private void StartPressedShot(uint rising, long timestampMs)
+    private void StartPressedShot(uint rising, long timestampMs, bool external = false)
     {
         foreach (var control in ControlMap.TriggerOrder)
         {
@@ -173,6 +185,7 @@ public sealed class MacroEngine
             var binding = _profile.GetBinding(control);
             if (!binding.Enabled || binding.Script == ScriptKind.Passthrough)
                 continue;
+            _externalRun = external;
             _lua?.Cancel();
             _lua = null;
             _luaControl = null;
@@ -208,5 +221,6 @@ public sealed class MacroEngine
         _previous = 0;
         _hasSample = false;
         _nextMissLate = false;
+        _externalRun = false;
     }
 }

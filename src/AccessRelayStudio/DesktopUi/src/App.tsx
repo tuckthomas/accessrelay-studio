@@ -65,7 +65,7 @@ export function App() {
   const voiceStatus = status.voice || state?.voice?.status || {};
   const visionStatus = status.vision || state?.vision?.status || {};
   const announcement = useStatusAnnouncements(!!state, controllerStatus, voiceStatus, visionStatus, error);
-  const anythingRunning = controllerStatus.outputActive || voiceStatus.isRunning || visionStatus.running || visionStatus.session?.running;
+  const anythingRunning = controllerStatus.outputActive || voiceStatus.isRunning || voiceStatus.commands?.recognition?.running || visionStatus.running || visionStatus.session?.running;
   const currentLabel = page === 'settings' ? 'Settings' : navigation.find(item => item.id === page)?.label || 'Workspace';
   if (!state) return <main className="loading-shell"><div className="loading-content">
     <img src="./brand.png" alt="" /><h1>AccessRelay Studio</h1>
@@ -95,7 +95,7 @@ export function App() {
         <div className="topbar-breadcrumb"><span>Studio</span><Icon name="chevronRight" size={15} /><strong>{currentLabel}</strong></div>
         <div className="topbar-actions"><span className="local-indicator"><span className={'status-dot' + (anythingRunning ? ' live' : '')} />{anythingRunning ? 'Session active' : 'All quiet'}</span>
           <SwitchNavigation controller={state.controller} status={controllerStatus} command={controllerCommand} />
-          {voiceStatus.isRunning && <Badge tone="success"><Icon name="mic" size={15} />Mic live</Badge>}
+          {(voiceStatus.isRunning || voiceStatus.commands?.recognition?.running) && <Badge tone="success"><Icon name="mic" size={15} />Mic live</Badge>}
           <Badge>Beta</Badge>
           <Button variant="ghost" className="stop-everything" busy={stopping} onClick={async () => {
             window.dispatchEvent(new Event('accessrelay-stop-all'));

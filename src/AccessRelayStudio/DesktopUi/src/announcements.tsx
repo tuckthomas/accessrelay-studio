@@ -13,11 +13,13 @@ export function useStatusAnnouncements(ready: boolean, controller: any, voice: a
     const current = observe(controller, voice, vision, commandError), before = previous.current;
     previous.current = current;
     if (!before) {
-      const alert = [...new Set([current.feedbackError, current.voiceError, current.visionError, commandError].filter(Boolean))].join(' ');
+      const alert = [...new Set([current.commandRecognitionError, current.feedbackError, current.voiceError, current.visionError, commandError].filter(Boolean))].join(' ');
       if (alert) setAnnouncement(value => ({ polite: '', alert, commandError, sequence: value.sequence + 1 }));
       return;
     }
     const polite: string[] = [], alerts: string[] = [];
+    if (current.commandRecognitionError && current.commandRecognitionError !== before.commandRecognitionError) alerts.push(current.commandRecognitionError);
+    if (current.commandPhase !== before.commandPhase) polite.push(current.commandPhase === 'starting' ? 'Starting local voice commands.' : current.commandPhase === 'learning' ? 'Recording a personal sound template.' : current.commandPhase === 'listening' ? 'Local voice commands are listening.' : 'Local voice commands stopped.');
     if (current.feedbackError && current.feedbackError !== before.feedbackError) alerts.push(current.feedbackError);
     if (current.connected !== before.connected) polite.push(current.connected ? 'Controller connected.' : 'Controller disconnected.');
     if (current.voiceError && current.voiceError !== before.voiceError) alerts.push(current.voiceError);
@@ -44,6 +46,8 @@ function observe(controller: any, voice: any, vision: any, commandError: string)
   return {
     connected: !!controller.connected,
     feedbackError: String(controller.feedback?.error || ''),
+    commandPhase: voice.commands?.recognition?.running ? (voice.commands.recognition.ready === false ? 'starting' : voice.commands.recognition.learning ? 'learning' : voice.commands?.output?.enabled ? 'listening' : 'stopped') : 'stopped',
+    commandRecognitionError: String(voice.commands?.recognition?.error || voice.commands?.error || ''),
     voicePhase: voice.isStarting ? (voice.operation === 'switch' ? 'switching' : 'starting') : voice.isRunning ? 'running' : 'stopped',
     voiceMessage: String(voice.message || ''), voiceError: String(voice.error || voice.clipError || ''),
     running: !!(vision.running || session.running), modelReady: !!session.modelReady,

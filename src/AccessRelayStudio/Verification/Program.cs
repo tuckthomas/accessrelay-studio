@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Local voice command bounds, cancellation, synthetic acoustic templates, queue overload and recognizer faults", VoiceCommandVerification.Run),
     ("Co-pilot ownership, disconnects, conflicts, whole-vector axes, persistence and trace provenance", CoPilotVerification.Run),
     ("Feedback opt-in, bounded queue, deduplication, cancellation, faults and PCM limits", FeedbackVerification.Run),
     ("Switch navigation ordering, debounce, bounded history and fresh physical edges", SwitchNavigationVerification.Run),

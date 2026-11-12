@@ -98,7 +98,7 @@ public sealed partial class DesktopWindow : Window
                     }
                 }
                 catch (Exception error) { _startupError = "Controller monitoring is unavailable: " + error.Message; }
-                _voice ??= new DesktopVoiceService(AppWindow.Id);
+                _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync());
                 _started = true;
             }

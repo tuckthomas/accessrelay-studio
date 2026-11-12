@@ -20,6 +20,7 @@ internal sealed class StudioRuntime : IDisposable
     private readonly StickyButtons _sticky = new();
     private readonly StickSmoother _smoother = new();
     private readonly SwitchNavigationInput _navigation = new();
+    private readonly VoiceCommandArbiter _voiceCommands = new(Stopwatch.Frequency);
     private readonly FeedbackDispatcher? _feedback;
     private FeedbackIdentity? _lockedFeedback;
     private long _profileFeedbackToken, _testFeedbackToken, _lastReleaseFeedback;
@@ -54,6 +55,29 @@ internal sealed class StudioRuntime : IDisposable
     internal SwitchNavigationSnapshot NavigationStatus { get { lock (_sync) return _navigation.Snapshot(_clock.ElapsedMilliseconds, _latest?.Input.NavigationConnected == true); } }
     internal FeedbackStatus? FeedbackStatus => _feedback?.Status;
     internal CoPilotSettings CoPilotSettings => _input.CoPilotSettings;
+    internal Guid ActiveProfileId { get { lock (_sync) return _visionProfile.Id; } }
+    internal string ActiveProfileName { get { lock (_sync) return _visionProfile.Name; } }
+    internal VoiceCommandOutputStatus VoiceCommandStatus { get { lock (_sync) return _voiceCommands.Status; } }
+    internal long ActivateVoiceCommands(VoiceCommandSettings settings)
+    {
+        settings.Validate();
+        lock (_sync)
+        {
+            RequireTrainingStoppedLocked("activating voice commands");
+            if (_latest?.Input.IsConnected != true || _output?.IsAvailable != true || _recorder is not null
+                || _navigation.Enabled || _navigationNeedsNeutral || _inputNeedsNeutral)
+                throw new InvalidOperationException("Connect physical input and output, finish recording and navigation, and release controls before enabling voice commands.");
+            if (settings.Bindings.Any(binding => binding.Action == VoiceCommandAction.Sequence && (!_engine.ScriptsEnabled
+                || !_visionProfile.GetBinding(binding.Control).Enabled || _visionProfile.GetBinding(binding.Control).Script == ScriptKind.Passthrough)))
+                throw new InvalidOperationException("Map each sequence command to an enabled sequence/Lua control and enable sequences before listening.");
+            InvalidateVisionLocked("Voice commands enabled. Vision assistance is disarmed.");
+            return _voiceCommands.Activate(settings);
+        }
+    }
+    internal bool EnqueueVoiceCommand(long generation, VoiceCommandObservation observation)
+    { lock (_sync) return _voiceCommands.Enqueue(generation, observation, Stopwatch.GetTimestamp()); }
+    internal void StopVoiceCommands(long? generation = null)
+    { lock (_sync) { if (generation.HasValue && generation.Value != _voiceCommands.Generation) return; _voiceCommands.Reset("Voice commands stopped."); _engine.CancelExternal(); } }
     internal void ConfigureCoPilot(CoPilotSettings settings)
     {
         settings.Validate();
@@ -165,7 +189,7 @@ internal sealed class StudioRuntime : IDisposable
         {
             // The entry check and all script/recording transitions share this lock, so training
             // cannot race an enable request after VisionSession's earlier UI eligibility check.
-            if (recording && (_engine.ScriptsEnabled || _recorder is not null || _navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral))
+            if (recording && (_engine.ScriptsEnabled || _recorder is not null || _navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral || _voiceCommands.Enabled))
                 throw new InvalidOperationException("Turn off sequences and controller navigation, release controls, and finish macro recording before recording manual gameplay training data.");
             _visionTrainingRecording = recording;
             _sticky.Reset();
@@ -275,7 +299,7 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             RequireTrainingStoppedLocked("starting a macro recording");
-            if (_navigation.Enabled || _navigationNeedsNeutral || _inputNeedsNeutral)
+            if (_navigation.Enabled || _navigationNeedsNeutral || _inputNeedsNeutral || _voiceCommands.Enabled)
                 throw new InvalidOperationException("Exit controller navigation and release the controls before recording manual input.");
             if (_recorder is not null)
                 return;
@@ -470,8 +494,9 @@ internal sealed class StudioRuntime : IDisposable
                         bool manualActive = input.IsConnected && _output?.IsAvailable == true;
                         var manual = _smoother.Sample(_stickDeadzone.Apply(input.State), now, manualActive);
                         manual = _sticky.Sample(manual, manualActive);
-                        state = _engine.Tick(input.State, input.HeldPaddles, input.IsConnected, now, input.PressedPaddles,
-                            manual);
+                        var voice = _voiceCommands.Sample(Stopwatch.GetTimestamp());
+                        state = VoiceCommandArbiter.Compose(_engine.Tick(input.State, input.HeldPaddles, input.IsConnected, now, input.PressedPaddles,
+                            manual, voice.Sequence), voice.Pulse);
                     }
                     state = _stickDeadzone.Apply(state);
                     var beforeVision = _vision.Status;
@@ -528,7 +553,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private bool VisionMacroConflict()
     {
-        if (_navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral) return true;
+        if (_navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral || _voiceCommands.Enabled) return true;
         if (_visionProfile.StickyControls.Contains(_vision.Settings.ShootButton)) return true;
         if (!_engine.ScriptsEnabled) return false;
         var binding = _visionProfile.GetBinding(_vision.Settings.ShootButton);
@@ -544,6 +569,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void InvalidateVisionLocked(string reason)
     {
+        _voiceCommands.Reset(reason); _engine.CancelExternal();
         _feedback?.Stop();
         _vision.Invalidate(reason, disarm: true);
         _releaseScheduler.Signal();

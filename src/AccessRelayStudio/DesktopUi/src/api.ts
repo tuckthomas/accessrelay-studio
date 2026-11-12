@@ -94,6 +94,7 @@ export const previewState: StudioState = {
 async function previewCommand(method: string, args: any): Promise<any> {
   await new Promise(resolve => setTimeout(resolve, 80));
   const controller = previewState.controller;
+  const voice = previewState.voice;
   const action = method.split('.')[1];
   if (method === 'app.bootstrap') return structuredClone(previewState);
   if (method === 'app.page') return null;
@@ -132,6 +133,8 @@ async function previewCommand(method: string, args: any): Promise<any> {
     else if (['outputStart', 'scriptsSet', 'recordStart', 'deviceSelect'].includes(action)) throw new Error('This is a design preview. Device actions are available in the installed desktop app.');
     return null;
   }
+  if (method === 'voice.commandsSave') { voice.commands = { ...voice.commands, settings: args.settings }; return null; }
+  if (method === 'voice.commandsStop') return null;
   if (method.startsWith('app.')) throw new Error('This is a design preview. System actions are available in the installed desktop app.');
   throw new Error('This is a design preview. Capture and audio actions are available in the installed desktop app.');
 }

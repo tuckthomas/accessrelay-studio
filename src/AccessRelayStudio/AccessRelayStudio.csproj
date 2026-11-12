@@ -34,6 +34,7 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" Version="1.31.1" GeneratePathProperty="true" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="System.Speech" Version="10.0.0" />
     <None Update="Audio\DialogueSeparation\*.md;Audio\DialogueSeparation\*.txt">
       <TargetPath>DialogueSeparation\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

@@ -20,3 +20,11 @@ The root [0BSD license](LICENSE) covers original AccessRelay Studio code. The co
 | Optional voice models and native inference runtime | Obtain these separately under their own terms. MeanVC2’s upstream conversion includes CC BY-SA 3.0 speaker encoder components and Apache-2.0 core components. MioCodec V2 uses MIT source weights. The optional MRX export uses MIT. [Exact sources and licenses](docs/voice-models.md) |
 
 Xbox, DualShock, DualSense, and Switch Pro identify compatible devices or layouts. AccessRelay Studio is an independent project.
+
+## System.Speech
+
+Local phrase recognition uses Microsoft's `System.Speech` 10.0.0 NuGet package
+([source](https://github.com/dotnet/runtime/tree/main/src/libraries/System.Speech)),
+licensed under the [MIT license](src/AccessRelayStudio/Assets/SystemSpeech-LICENSE.md).
+Copyright (c) .NET Foundation and Contributors. Installed Windows desktop speech
+models remain licensed Windows components and are not distributed by this repository.

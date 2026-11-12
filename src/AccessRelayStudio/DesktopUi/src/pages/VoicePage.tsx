@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react';
-import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, useUnsavedChanges, type PageProps } from '../ui';
+import { VoiceCommands } from '../VoiceCommands';
+import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, hasUnsavedChanges, useUnsavedChanges, type PageProps } from '../ui';
 
 type VoiceSettings = { preset: string; pitchSemitones: number; gainDb: number; muted: boolean };
 const defaultSettings: VoiceSettings = { preset: 'clean', pitchSemitones: 0, gainDb: 0, muted: false };
@@ -78,7 +79,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
       action();
     });
   }
-  const changeTab = (next: string) => { if (next !== tab) transition(() => setTab(next), ['effects', 'clip']); };
+  const changeTab = (next: string) => { if (next !== tab) { if (tab === 'commands' && hasUnsavedChanges()) setNextAction(() => () => setTab(next)); else transition(() => setTab(next), ['effects', 'clip']); } };
   const closeEditor = () => { if (!blocked) transition(() => { setEditorOpen(false); void command('clipPause').catch(() => {}); }, ['clip']); };
   const closeEffects = () => { if (!blocked) transition(() => setEffectsOpen(false), ['effectsName']); };
   const closeName = () => { if (!blocked) transition(() => setNameAction(null), ['profileName']); };
@@ -103,7 +104,8 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
     <style>{voiceCss}</style>
     <SectionHeader eyebrow="YOUR VOICE" title="Make yourself heard." description="A voice you choose. A route you control. Everything stays on your PC."
       actions={<Button onClick={() => void run('refreshDevices')} disabled={blocked}><Icon name="refresh" size={17} />Refresh devices</Button>} />
-    <Tabs ariaLabel="Voice workspace" value={tab} onChange={changeTab} items={[{ id: 'live', label: 'Live voice' }, { id: 'library', label: 'Your voices', count: profiles.length }]} />
+    <Tabs ariaLabel="Voice workspace" value={tab} onChange={changeTab} items={[{ id: 'live', label: 'Live voice' }, { id: 'library', label: 'Your voices', count: profiles.length }, { id: 'commands', label: 'Voice commands' }]} />
+    {tab === 'commands' && <VoiceCommands state={state} status={status} command={command} />}
     {error && <Notice tone="danger">{error}</Notice>}
     {status.busy && <Notice title={status.message}>{status.operation === 'start' && neural ? 'Large reference models can take a moment to load.' : 'You can cancel this operation at any time.'}
       <Button variant="ghost" onClick={() => { void command('cancel').catch(e => setError(String(e))); }}>Cancel</Button></Notice>}
@@ -174,7 +176,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
           <div className="stack"><span className="saved-note">{effectsDirty ? 'Unapplied adjustments' : 'Adjustments applied'}</span><Button onClick={() => void run('settingsSave', { settings: { ...settings, muted: state.settings?.muted === true } })} disabled={blocked}>Apply adjustments</Button></div>
         </div>
       </Card>
-    </> : <>
+    </> : tab === 'library' ? <>
       <Card className="voice-library-intro"><div><span className="eyebrow">VOICE LIBRARY</span><h2>A collection that sounds like you.</h2>
         <p className="muted">Save a favorite effects mix, or create a reference voice from a short speech clip.</p></div>
         <div className="voice-library-actions"><Button variant="primary" onClick={importReference} disabled={blocked}><Icon name="plus" size={17} />Create reference voice</Button>
@@ -194,7 +196,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
           </ActionMenu></div>
       </Card>)}</div> : <Card><EmptyState icon="audio" title="Your first voice starts here" description="Built-in effects work immediately. Save a mix you like, or choose an audio or video clip to make a reference voice."
         action={<Button variant="primary" onClick={importReference} disabled={blocked}>Create reference voice</Button>} /></Card>}
-    </>}
+    </> : null}
 
     <Modal open={effectsOpen} onClose={closeEffects} title="Save your voice settings" description="Give this mix a name so you can come back to it."
       footer={<><Button onClick={closeEffects} disabled={blocked}>Cancel</Button><Button variant="primary" busy={busy === 'profileSaveEffects'} disabled={blocked || !effectsName.trim()} onClick={() => void execute('profileSaveEffects', async () => {
