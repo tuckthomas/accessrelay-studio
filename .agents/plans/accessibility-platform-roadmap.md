@@ -138,9 +138,9 @@ Real adaptive-switch/gamepad acceptance remains pending.
 - [x] Keep visual physical-input feedback separate from the new event feedback service.
 - [x] Test deduplication, cancellation, disabled behavior, and unsupported devices.
 - [ ] Validate audio/rumble timing and comfort on real Windows devices.
-- [ ] Push implementation and record its commit SHA and validation here.
+- [x] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: portable feedback/controller tests,
+Implementation commit: `01ade2ede11f0dcd591d72baf0f73cd569e23838`. Validation: portable feedback/controller tests,
 56 frontend unit tests, the existing 16 browser workflows plus the new feedback
 workflow, Windows verification cross-compilation, and compilation of real audio
 sources against NAudio passed. The bounded worker is tested with fake blocked/failing
