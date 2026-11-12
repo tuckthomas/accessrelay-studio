@@ -10,10 +10,10 @@ operator activation must remain compatible.
 
 Current checkpoint: sections 1–2 are complete. Sections 3–4 have shipped code and
 passing Windows CI with simulated devices; physical-device acceptance remains open.
-Section 5 is implemented and passed Windows CI with simulated inputs. Section 6
-implementation is being validated and pushed before continuing section 7.
+Sections 5–6 are implemented and passed Windows CI with simulated inputs. Section 7
+is implemented and has portable/browser validation; native simulated-device CI is next.
 Section 10 has the session-provenance guard implemented; its conversion/data work
-remains open. Sections 7–9 and 11–12 are queued, not implemented.
+remains open. Sections 8–9 and 11–12 are queued, not implemented.
 
 ## Delivery and evidence
 
@@ -143,22 +143,28 @@ Real adaptive-switch/gamepad acceptance remains pending.
 Implementation commit: `01ade2ede11f0dcd591d72baf0f73cd569e23838`. Validation: portable feedback/controller tests,
 56 frontend unit tests, the existing 16 browser workflows plus the new feedback
 workflow, Windows verification cross-compilation, and compilation of real audio
-sources against NAudio passed. The bounded worker is tested with fake blocked/failing
+sources against NAudio passed. Windows CI passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43275807798. The bounded worker is tested with fake blocked/failing
 devices; Windows runtime event-hook tests use simulated cue outputs. Actual sound,
 rumble capability, timing and comfort require real Windows devices.
 
 ## 7. Co-pilot input merging
 
-- [ ] Add explicit device selection and per-control ownership/conflict rules for two
+- [x] Add explicit device selection and per-control ownership/conflict rules for two
       or more physical inputs feeding one virtual output; exclude virtual feedback loops.
-- [ ] Define analog priority and button ownership so disconnecting one participant
+- [x] Define analog priority and button ownership so disconnecting one participant
       does not release another participant's held controls or leave stale output.
-- [ ] Integrate Stop, macros, vision, sticky buttons, and recording with one output owner.
-- [ ] Test merging, disconnect/reconnect, conflicts, and persistence compatibility.
+- [x] Integrate Stop, macros, vision, sticky buttons, and recording with one output owner.
+- [x] Test merging, disconnect/reconnect, conflicts, and persistence compatibility.
 - [ ] Validate with multiple physical/adaptive devices on Windows before completion.
-- [ ] Push implementation and record its commit SHA and validation here.
+- [x] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: pending.
+Implementation commit: `41c713870067036430bf6decab73e4614113d678`. Validation: portable
+merge/ownership/disconnect/conflict/persistence/provenance checks, 56 frontend unit
+tests, TypeScript/Vite build and 18 browser workflows (17 unchanged workflows plus
+the co-pilot workflow) passed. Actual Windows input/audio sources and runtime tests
+were cross-compiled. Native runtime tests with simulated contributors are queued for
+Windows CI. Physical multi-device acceptance remains open.
 
 ## 8. Local voice commands and personalized vocalizations
 
