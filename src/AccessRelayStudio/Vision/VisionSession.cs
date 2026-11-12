@@ -266,7 +266,8 @@ internal sealed class VisionSession : IDisposable
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception error)
         {
-            lock (_gate) _status = _status with { CaptureFailed = true, Message = "Observation stopped: " + error.Message };
+            lock (_gate) _status = _status with { CaptureFailed = !cancellation.IsCancellationRequested,
+                Message = cancellation.IsCancellationRequested ? "Observation stopped." : "Observation stopped: " + error.Message };
         }
         finally
         {
@@ -283,7 +284,7 @@ internal sealed class VisionSession : IDisposable
             {
                 if (model is not null) _lastModelEvents = model.Diagnostics.ExportEvents();
                 _model = null;
-                _status = _status with { Running = false, CanArm = false,
+                _status = _status with { Running = false, CanArm = false, CaptureFailed = !cancellation.IsCancellationRequested && _status.CaptureFailed,
                     Message = cancellation.IsCancellationRequested ? "Observation stopped." : _status.Message };
             }
             try { model?.Dispose(); }
