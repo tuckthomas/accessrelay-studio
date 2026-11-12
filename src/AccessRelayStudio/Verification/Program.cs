@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Bounded allocation-free runtime lock measurements, epochs, freeze and percentiles", RuntimeLockVerification.Run),
     ("Versioned game packs, resource integrity, bounded import, tuning, Lua output and legacy profile compatibility", GamePackVerification.Run),
     ("Local voice command bounds, cancellation, synthetic acoustic templates, queue overload and recognizer faults", VoiceCommandVerification.Run),
     ("Co-pilot ownership, disconnects, conflicts, whole-vector axes, persistence and trace provenance", CoPilotVerification.Run),

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace EliteScriptStudio.Vision;
 
@@ -24,11 +25,13 @@ internal sealed class LatestFrameBuffer : IDisposable
     internal void NoteDroppedFrame() => Interlocked.Increment(ref _dropped);
 
     internal bool PublishMapped(nint pixels, uint rowPitch, int width, int height,
-        long captureTicks, long sequence, long sourceGeneration)
+        long captureTicks, long sequence, long sourceGeneration, long? readbackStartedTicks = null)
     {
         int stride = checked(width * 4), bytes = checked(stride * height);
         if (width <= 0 || height <= 0 || bytes > MaximumFrameBytes || rowPitch < stride || pixels == 0)
             throw new InvalidDataException("The capture frame has an unsupported size or row layout. Resize the source window to 4K or smaller.");
+        if (readbackStartedTicks is { } begin && (begin <= 0 || begin > Stopwatch.GetTimestamp()))
+            throw new InvalidDataException("Readback measurement must start on the current QPC timeline.");
 
         Slot? slot;
         lock (_gate)
@@ -87,6 +90,7 @@ internal sealed class LatestFrameBuffer : IDisposable
                 slot.CaptureTicks = captureTicks;
                 slot.Sequence = sequence;
                 slot.Generation = sourceGeneration;
+                slot.ReadbackMs = readbackStartedTicks is { } start ? Stopwatch.GetElapsedTime(start).TotalMilliseconds : null;
                 slot.State = SlotState.Pending;
                 _pending = slot;
                 _latestFingerprint = fingerprint;
@@ -112,7 +116,7 @@ internal sealed class LatestFrameBuffer : IDisposable
             _pending = null;
             slot.State = SlotState.Leased;
             frame = new(slot.Buffer, slot.Width, slot.Height, slot.CaptureTicks,
-                slot.Sequence, slot.Generation, slot.Release);
+                slot.Sequence, slot.Generation, slot.Release, slot.ReadbackMs);
             return true;
         }
     }
@@ -162,6 +166,7 @@ internal sealed class LatestFrameBuffer : IDisposable
         internal SlotState State;
         internal int Width, Height;
         internal long CaptureTicks, Sequence, Generation;
+        internal double? ReadbackMs;
         internal Action Release { get; }
     }
 }

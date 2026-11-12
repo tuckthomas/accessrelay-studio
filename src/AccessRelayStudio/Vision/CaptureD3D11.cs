@@ -71,6 +71,7 @@ internal sealed class CaptureD3D11 : IDisposable
             if (checked((long)width * height * 4) > LatestFrameBuffer.MaximumFrameBytes)
                 throw new InvalidDataException("The capture window is larger than the supported 4K pixel budget. Resize it before starting vision.");
 
+            long readbackStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             if (_staging == 0 || description.Width != _stagingDescription.Width ||
                 description.Height != _stagingDescription.Height || description.Format != _stagingDescription.Format)
             {
@@ -84,7 +85,7 @@ internal sealed class CaptureD3D11 : IDisposable
             }
             _copy!(_context, _staging, texture);
             Marshal.ThrowExceptionForHR(_map!(_context, _staging, 0, 1, 0, out var mapped));
-            try { return destination.PublishMapped(mapped.Data, mapped.RowPitch, width, height, ticks, sequence, generation); }
+            try { return destination.PublishMapped(mapped.Data, mapped.RowPitch, width, height, ticks, sequence, generation, readbackStarted); }
             finally { _unmap!(_context, _staging, 0); }
         }
         finally

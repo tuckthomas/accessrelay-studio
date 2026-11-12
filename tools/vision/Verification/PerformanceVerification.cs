@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Vision;
 
@@ -13,6 +15,42 @@ internal static class PerformanceVerification
         RecordingDoesNotAllocate();
         FingerprintsAndComparisons();
         SavedRunsAndImports();
+        ReadbackAndMeasurementGenerations();
+        ReadbackLeaseMetadata();
+    }
+
+    private static void ReadbackLeaseMetadata()
+    {
+        nint pixels = Marshal.AllocHGlobal(16);
+        try
+        {
+            Marshal.Copy(new byte[16], 0, pixels, 16);
+            using var buffer = new LatestFrameBuffer();
+            Require(buffer.PublishMapped(pixels, 8, 2, 2, 100, 1, 1, Stopwatch.GetTimestamp()), "Measured frame was not published.");
+            Require(buffer.TryAcquireLatest(out var frame), "Measured frame lease was not acquired.");
+            Require(frame!.CaptureReadbackMs is >= 0, "Readback timing was lost from the frame lease."); frame.Dispose();
+            Require(buffer.PublishMapped(pixels, 8, 2, 2, 200, 2, 1), "Unmeasured frame was not published.");
+            Require(buffer.TryAcquireLatest(out frame), "Unmeasured frame lease was not acquired.");
+            Require(frame!.CaptureReadbackMs is null, "Reused pixel slot retained a previous frame's readback measurement."); frame.Dispose();
+            Throws(() => buffer.PublishMapped(pixels, 8, 2, 2, 300, 3, 1, long.MaxValue));
+        }
+        finally { Marshal.FreeHGlobal(pixels); }
+    }
+
+    private static void ReadbackAndMeasurementGenerations()
+    {
+        long now = 1000;
+        var buffer = new VisionPerformanceBuffer(1000, () => now);
+        buffer.Reset(Context() with { MeasurementGeneration = 2 });
+        Require(!buffer.Record(Frame(1) with { CaptureReadbackMs = double.NaN }), "Invalid readback timing was accepted.");
+        buffer.Record(Frame(1) with { CaptureReadbackMs = .75 }); buffer.Record(Frame(2));
+        var empty = new RuntimeLockStatistics(0, 0, 0, null, null, null, null, null);
+        var locks = new RuntimeLockSnapshot(2, false, empty, empty, empty, empty);
+        var result = buffer.Snapshot(runtimeLocks: locks);
+        Require(result.CaptureReadback.Samples == 1 && result.CaptureReadback.P95Ms == .75 && result.RuntimeLocks == locks,
+            "Readback must count measured frames only and preserve matching lock epochs.");
+        Require(buffer.Snapshot(runtimeLocks: locks with { Generation = 1 }).RuntimeLocks is null,
+            "A retired controller measurement run was attached to another capture context.");
     }
 
     private static VisionPerformanceContext Context(string provider = "CUDAExecutionProvider") =>
@@ -191,6 +229,13 @@ internal static class PerformanceVerification
             Require(restored == run && VisionPerformanceRuns.Compare(run, restored).Comparable,
                 "Saved metrics and context must round-trip without inventing samples.");
             string json = File.ReadAllText(path);
+            var legacy = JsonNode.Parse(json)!.AsObject(); legacy["version"] = 1;
+            foreach (string field in new[] { "captureReadback", "measurementGeneration", "runtimeLocks" }) legacy["snapshot"]!.AsObject().Remove(field);
+            File.WriteAllText(path, legacy.ToJsonString());
+            var old = VisionPerformanceRuns.Read(path);
+            Require(old.Version == 1 && old.Snapshot.CaptureReadback.Samples == 0 && old.Snapshot.RuntimeLocks is null,
+                "Legacy runs must load with unavailable stages, not manufactured zeros.");
+            Require(!VisionPerformanceRuns.Compare(old, run).Comparable, "Different instrumentation revisions were directly compared.");
             void Reject(Action<JsonObject> change)
             {
                 var modified = JsonNode.Parse(json)!.AsObject(); change(modified);
@@ -198,6 +243,7 @@ internal static class PerformanceVerification
                 Throws(() => VisionPerformanceRuns.Read(path));
             }
             Reject(node => node["unexpected"] = true);
+            Reject(node => node["version"] = 3);
             Reject(node => node["snapshot"]!["totalDecisions"] = 0);
             Reject(node => node["snapshot"]!["totalInferences"] = 0);
             Reject(node =>

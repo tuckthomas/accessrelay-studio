@@ -12,11 +12,11 @@ internal readonly record struct VisionLatencyStatistics(int Samples, double? Lat
 
 internal sealed record VisionPerformanceContext(string ExecutionProvider, string? ModelManifestHash,
     string AnimationProfile, string CameraView, VisionCrop Crop, int CaptureWidth, int CaptureHeight,
-    string SettingsFingerprint);
+    string SettingsFingerprint, long MeasurementGeneration = 0);
 
 internal readonly record struct VisionPerformanceFrame(long Sequence, long CaptureTimestamp, long StartedTimestamp,
     long CompletedTimestamp, bool HasDecision, double? PreprocessingMs, double? InferenceWithTransfersMs,
-    long AllocatedBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections, bool RecordingTraining);
+    long AllocatedBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections, bool RecordingTraining, double? CaptureReadbackMs = null);
 
 internal sealed record VisionPerformanceSnapshot
 {
@@ -40,6 +40,12 @@ internal sealed record VisionPerformanceSnapshot
     public VisionLatencyStatistics FrameToDecision { get; init; }
     public VisionLatencyStatistics Preprocessing { get; init; }
     public VisionLatencyStatistics InferenceWithTransfers { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public VisionLatencyStatistics CaptureReadback { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long MeasurementGeneration { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RuntimeLockSnapshot? RuntimeLocks { get; init; }
     public double DecisionBudgetMs { get; init; } = 1000d / 60;
     public int DecisionBudgetExceededCount { get; init; }
     public long AutomatedReleases { get; init; }
@@ -91,7 +97,7 @@ internal sealed class VisionPerformanceBuffer
         if (frame.CaptureTimestamp <= 0 || frame.StartedTimestamp < frame.CaptureTimestamp ||
             frame.CompletedTimestamp < frame.StartedTimestamp || frame.AllocatedBytes < 0 ||
             frame.Gen0Collections < 0 || frame.Gen1Collections < 0 || frame.Gen2Collections < 0 ||
-            !ValidOptional(frame.PreprocessingMs) || !ValidOptional(frame.InferenceWithTransfersMs))
+            !ValidOptional(frame.PreprocessingMs) || !ValidOptional(frame.InferenceWithTransfersMs) || !ValidOptional(frame.CaptureReadbackMs))
             return false;
         lock (_gate)
         {
@@ -108,7 +114,7 @@ internal sealed class VisionPerformanceBuffer
     }
 
     internal VisionPerformanceSnapshot Snapshot(long replacedCaptureFrames = 0, long automatedReleases = 0,
-        long missedDeadlines = 0, double? helperHandoffMs = null, bool armed = false, bool recordingTraining = false)
+        long missedDeadlines = 0, double? helperHandoffMs = null, bool armed = false, bool recordingTraining = false, RuntimeLockSnapshot? runtimeLocks = null)
     {
         var copy = ArrayPool<VisionPerformanceFrame>.Shared.Rent(Capacity);
         var values = ArrayPool<double>.Shared.Rent(Capacity);
@@ -135,7 +141,8 @@ internal sealed class VisionPerformanceBuffer
                         1 => Milliseconds(frame.CompletedTimestamp, frame.StartedTimestamp),
                         2 => frame.HasDecision ? Milliseconds(frame.CompletedTimestamp, frame.CaptureTimestamp) : null,
                         3 => frame.PreprocessingMs,
-                        _ => frame.InferenceWithTransfersMs
+                        4 => frame.InferenceWithTransfersMs,
+                        _ => frame.CaptureReadbackMs
                     };
                     if (value.HasValue) { values[used++] = value.Value; latest = value; }
                 }
@@ -163,6 +170,8 @@ internal sealed class VisionPerformanceBuffer
                 ReplacedCaptureFrames = replacedCaptureFrames, ProcessingFps = elapsed > 0 ? totalFrames / elapsed : 0,
                 FrameAge = Statistics(0), Processing = Statistics(1), FrameToDecision = Statistics(2),
                 Preprocessing = Statistics(3), InferenceWithTransfers = Statistics(4), DecisionBudgetMs = budget,
+                CaptureReadback = Statistics(5), MeasurementGeneration = context.MeasurementGeneration,
+                RuntimeLocks = runtimeLocks?.Generation == context.MeasurementGeneration ? runtimeLocks : null,
                 DecisionBudgetExceededCount = exceeded, AutomatedReleases = automatedReleases, MissedDeadlines = missedDeadlines,
                 WindowAllocatedBytes = allocated, WindowGen0Collections = gen0, WindowGen1Collections = gen1,
                 WindowGen2Collections = gen2, RecordingTraining = recordingTraining, Armed = armed,
@@ -180,7 +189,7 @@ internal sealed class VisionPerformanceBuffer
 
 internal sealed record VisionPerformanceRun
 {
-    public int Version { get; init; } = 1;
+    public int Version { get; init; } = 2;
     public Guid RunId { get; init; } = Guid.NewGuid();
     public string Label { get; init; } = "Performance run";
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
@@ -220,6 +229,7 @@ internal static class VisionPerformanceRuns
     internal static VisionPerformanceComparison Compare(VisionPerformanceRun baseline, VisionPerformanceRun current)
     {
         Validate(baseline); Validate(current);
+        if (baseline.Version != current.Version) return new(false, "Measurement format changed. Recollect the baseline with the current instrumentation before comparing runs.");
         var a = baseline.Snapshot; var b = current.Snapshot;
         if (a.ModelManifestHash is null || b.ModelManifestHash is null ||
             a.FrameToDecision.Samples < 100 || b.FrameToDecision.Samples < 100)
@@ -236,7 +246,7 @@ internal static class VisionPerformanceRuns
 
     private static void Validate(VisionPerformanceRun run)
     {
-        if (run.Version != 1 || run.RunId == Guid.Empty || string.IsNullOrWhiteSpace(run.Label) || run.Label.Length > 80 ||
+        if (run.Version is not (1 or 2) || run.RunId == Guid.Empty || string.IsNullOrWhiteSpace(run.Label) || run.Label.Length > 80 ||
             run.Label.Any(char.IsControl) || run.Snapshot is not { } data)
             throw new InvalidDataException("The performance run version, label or snapshot is invalid.");
         if (data.ExecutionProvider is not ("Capture only" or "CPUExecutionProvider" or "CUDAExecutionProvider") ||
@@ -258,7 +268,14 @@ internal static class VisionPerformanceRuns
             (data.LatestHelperHandoffMs is { } handoff && !Nonnegative(handoff)))
             throw new InvalidDataException("The saved performance run contains unsupported context or invalid numeric values.");
         data.Crop.Validate();
-        foreach (var stats in new[] { data.FrameAge, data.Processing, data.FrameToDecision, data.Preprocessing, data.InferenceWithTransfers })
+        if (data.MeasurementGeneration < 0 || (run.Version == 1 && (data.CaptureReadback.Samples > 0 || data.RuntimeLocks is not null || data.MeasurementGeneration != 0)))
+            throw new InvalidDataException("Readback/lock measurements require performance format 2.");
+        if (data.RuntimeLocks is { } locks)
+        {
+            RuntimeLockMeasurements.Validate(locks);
+            if (locks.Generation != data.MeasurementGeneration) throw new InvalidDataException("Runtime lock measurements belong to another run.");
+        }
+        foreach (var stats in new[] { data.FrameAge, data.Processing, data.FrameToDecision, data.Preprocessing, data.InferenceWithTransfers, data.CaptureReadback })
         {
             if (stats.Samples < 0 || stats.Samples > VisionPerformanceBuffer.Capacity || stats.Samples > data.TotalFrames)
                 throw new InvalidDataException("Performance sample counts are inconsistent.");

@@ -8,8 +8,10 @@ internal sealed class CapturedVisionFrame : IDisposable
     private Action? _release;
 
     internal CapturedVisionFrame(byte[] buffer, int width, int height, long captureTicks,
-        long sequence, long sourceGeneration, Action release)
+        long sequence, long sourceGeneration, Action release, double? captureReadbackMs = null)
     {
+        if (captureReadbackMs is { } duration && (!double.IsFinite(duration) || duration < 0))
+            throw new ArgumentOutOfRangeException(nameof(captureReadbackMs));
         _buffer = buffer;
         Width = width;
         Height = height;
@@ -17,6 +19,7 @@ internal sealed class CapturedVisionFrame : IDisposable
         Sequence = sequence;
         SourceGeneration = sourceGeneration;
         _release = release;
+        CaptureReadbackMs = captureReadbackMs;
     }
 
     public int Width { get; }
@@ -25,6 +28,7 @@ internal sealed class CapturedVisionFrame : IDisposable
     public long CaptureTicks { get; }
     public long Sequence { get; }
     public long SourceGeneration { get; }
+    public double? CaptureReadbackMs { get; }
     public byte[] Buffer => Volatile.Read(ref _release) is not null ? _buffer
         : throw new ObjectDisposedException(nameof(CapturedVisionFrame));
     public ReadOnlyMemory<byte> Pixels => Buffer.AsMemory(0, checked(Stride * Height));

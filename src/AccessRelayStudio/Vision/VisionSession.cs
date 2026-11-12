@@ -40,6 +40,7 @@ internal sealed class VisionSession : IDisposable
     private VisionSessionStatus _status = new(false, false, false, "Observation is off.", 0, 0, 0, 0, 0);
     private readonly FrameMetric[] _metrics = new FrameMetric[2048];
     private readonly VisionPerformanceBuffer _performance = new();
+    private long _lockMeasurementToken;
     private long _performanceReplacedFrames, _performanceDropBaseline, _performanceReleaseBaseline, _performanceMissBaseline;
     private int _metricIndex, _metricCount;
     private bool _disposed;
@@ -54,15 +55,16 @@ internal sealed class VisionSession : IDisposable
     {
         get
         {
-            long replaced, releaseBaseline, missBaseline; bool training;
+            long replaced, releaseBaseline, missBaseline, lockToken; bool training;
             lock (_gate)
             {
                 replaced = _performanceReplacedFrames; releaseBaseline = _performanceReleaseBaseline;
                 missBaseline = _performanceMissBaseline; training = _trainingInhibited;
+                lockToken = _lockMeasurementToken;
             }
             var output = _runtime.VisionStatus;
             return _performance.Snapshot(replaced, Math.Max(0, output.AutomatedReleases - releaseBaseline),
-                Math.Max(0, output.MissedDeadlines - missBaseline), _runtime.RecentOutputHandoffMs, output.Armed, training);
+                Math.Max(0, output.MissedDeadlines - missBaseline), _runtime.RecentOutputHandoffMs, output.Armed, training, _runtime.LockMeasurements(lockToken));
         }
     }
     internal VisionPerformanceRun SavePerformanceRun(string label)
@@ -109,8 +111,9 @@ internal sealed class VisionSession : IDisposable
             _runtime.InvalidateVisionSession("Preparing capture and model.");
             _status = new(true, false, false, "Starting window capture…", 0, 0, 0, 0, 0);
             _metricCount = _metricIndex = 0;
+            _lockMeasurementToken = _runtime.BeginLockMeasurements();
             _performance.Reset(new("Capture only", null, settings.AnimationProfile, settings.CameraView,
-                settings.Crop, 0, 0, VisionPerformanceBuffer.Fingerprint(settings)));
+                settings.Crop, 0, 0, VisionPerformanceBuffer.Fingerprint(settings), _lockMeasurementToken));
             _performanceReplacedFrames = _performanceDropBaseline = 0;
             _performanceReleaseBaseline = _runtime.VisionStatus.AutomatedReleases;
             _performanceMissBaseline = _runtime.VisionStatus.MissedDeadlines;
@@ -118,7 +121,13 @@ internal sealed class VisionSession : IDisposable
             _preview?.Dispose(); _preview = null;
             _worker = new Thread(() => Run(hwnd, settings, cancellation, loadModel))
                 { IsBackground = true, Name = "AccessRelay vision" };
-            _worker.Start();
+            try { _worker.Start(); }
+            catch
+            {
+                _performance.Finish(); _runtime.FinishLockMeasurements(_lockMeasurementToken);
+                _status = _status with { Running = false, CanArm = false, Message = "Observation worker could not start." };
+                throw;
+            }
         }
     }
 
@@ -198,9 +207,10 @@ internal sealed class VisionSession : IDisposable
                             var contextOutput = _runtime.VisionStatus;
                             lock (_gate)
                             {
+                                _lockMeasurementToken = _runtime.BeginLockMeasurements();
                                 _performance.Reset(new(model?.ExecutionProvider ?? "Capture only", model?.ManifestHash,
                                     settings.AnimationProfile, settings.CameraView, settings.Crop, frame.Width, frame.Height,
-                                    VisionPerformanceBuffer.Fingerprint(settings)));
+                                    VisionPerformanceBuffer.Fingerprint(settings), _lockMeasurementToken));
                                 _performanceDropBaseline = source.DroppedFrames; _performanceReplacedFrames = 0;
                                 _performanceReleaseBaseline = contextOutput.AutomatedReleases;
                                 _performanceMissBaseline = contextOutput.MissedDeadlines;
@@ -242,7 +252,7 @@ internal sealed class VisionSession : IDisposable
                             if (!_performance.Record(new(frame.Sequence, frame.CaptureTicks, started, completed, hasDecision && inferenceMs.HasValue,
                                 preprocessingMs, inferenceMs, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
                                 Math.Max(0, GC.CollectionCount(0) - gen0), Math.Max(0, GC.CollectionCount(1) - gen1),
-                                Math.Max(0, GC.CollectionCount(2) - gen2), _trainingInhibited))) excludedTimingFrames++;
+                                Math.Max(0, GC.CollectionCount(2) - gen2), _trainingInhibited, frame.CaptureReadbackMs))) excludedTimingFrames++;
                             // A low-rate preview copy does not retain a leased capture resource.
                             if (_previewEnabled && !cancellation.IsCancellationRequested &&
                                 Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200)
@@ -274,6 +284,7 @@ internal sealed class VisionSession : IDisposable
         {
             lock (_gate) _stopping = true;
             _performance.Finish();
+            _runtime.FinishLockMeasurements(_lockMeasurementToken);
             _runtime.InvalidateVisionSession("Vision observation is stopped.");
             lock (_gate)
             {

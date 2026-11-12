@@ -36,6 +36,10 @@ jobs:
         run: python -S -m unittest discover -s ./tools/vision -p 'test_*.py' -v
       - name: Check desktop binary media and evidence integrity
         run: dotnet run --project ./tools/desktop/Verification/DesktopEvidenceVerification.csproj -c Release
+      - name: Check vision contracts, model library and performance imports
+        run: dotnet run --project ./tools/vision/Verification/VisionModelVerification.csproj -c Release
+      - name: Build physical input diagnostics
+        run: dotnet build ./src/AccessRelayStudio/Input/Probe/EliteInputProbe.csproj -c Release
       - name: Check native runtime with simulated devices
         run: dotnet run --project ./src/AccessRelayStudio/WindowsVerification/WindowsVerification.csproj -c Release -- --no-capture
       - name: Check native helpers

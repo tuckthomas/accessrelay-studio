@@ -56,6 +56,24 @@ internal static class RuntimeAccessibilityChecks
         Feedback();
         CoPilot();
         VoiceCommands();
+        LockMeasurements();
+    }
+
+    private static void LockMeasurements()
+    {
+        using var input = new EliteInputMonitor();
+        using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
+        long first = runtime.BeginLockMeasurements();
+        Wait(() => runtime.LockMeasurements(first)?.InputPoll.Samples > 0, "Runtime poll lock measurements were not recorded.");
+        _ = runtime.VisionStatus;
+        if (runtime.LockMeasurements(first)?.VisionRead.Samples == 0) throw new Exception("Runtime vision-read measurements were not recorded.");
+        long second = runtime.BeginLockMeasurements(); runtime.FinishLockMeasurements(first);
+        if (runtime.LockMeasurements(first) is not null || runtime.LockMeasurements(second)?.Collecting != true)
+            throw new Exception("Retired profiling lifecycle affected a newer context.");
+        runtime.FinishLockMeasurements(second);
+        var frozen = runtime.LockMeasurements(second); Thread.Sleep(20);
+        if (runtime.LockMeasurements(second) != frozen) throw new Exception("Finished profiling kept collecting background controller samples.");
+        Console.WriteLine("SUCCESS: runtime profiling records actual lock acquisition, rejects old generations and freezes on finish.");
     }
 
     private static void VoiceCommands()

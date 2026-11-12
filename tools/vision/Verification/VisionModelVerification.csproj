@@ -8,12 +8,14 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.31.1" />
     <Compile Include="../../../src/AccessRelayStudio/Core/ControllerState.cs" Link="Core/ControllerState.cs" />
+    <Compile Include="../../../src/AccessRelayStudio/Core/RuntimeLockMeasurements.cs" Link="Core/RuntimeLockMeasurements.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionSettings.cs" Link="Core/VisionSettings.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionTrainingCaptureSettings.cs" Link="Core/VisionTrainingCaptureSettings.cs" />
     <Compile Include="../../../games/nba2k27/src/Nba2K27ShotProfile.cs" Link="Core/Nba2K27ShotProfile.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionPrediction.cs" Link="Core/VisionPrediction.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/ControllerOutputArbiter.cs" Link="Core/ControllerOutputArbiter.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/CapturedVisionFrame.cs" Link="Vision/CapturedVisionFrame.cs" />
+    <Compile Include="../../../src/AccessRelayStudio/Vision/LatestFrameBuffer.cs" Link="Vision/LatestFrameBuffer.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/FramePreprocessor.cs" Link="Vision/FramePreprocessor.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionModel.cs" Link="Vision/VisionModel.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionModelManifest.cs" Link="Vision/VisionModelManifest.cs" />

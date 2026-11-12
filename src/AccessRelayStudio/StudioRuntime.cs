@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Buffers;
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Input;
 using EliteScriptStudio.Output;
@@ -21,6 +22,8 @@ internal sealed class StudioRuntime : IDisposable
     private readonly StickSmoother _smoother = new();
     private readonly SwitchNavigationInput _navigation = new();
     private readonly VoiceCommandArbiter _voiceCommands = new(Stopwatch.Frequency);
+    private readonly RuntimeLockMeasurements _lockMeasurements = new();
+    private long _lockMeasurementToken;
     private readonly FeedbackDispatcher? _feedback;
     private FeedbackIdentity? _lockedFeedback;
     private long _profileFeedbackToken, _testFeedbackToken, _lastReleaseFeedback;
@@ -51,7 +54,31 @@ internal sealed class StudioRuntime : IDisposable
     public bool ScriptsEnabled => _engine.ScriptsEnabled;
     public bool IsVisionTrainingRecording { get { lock (_sync) return _visionTrainingRecording; } }
     public double? RecentOutputHandoffMs { get { lock (_sync) return (_output as UsbipXboxOutput)?.RecentHandoffMs; } }
-    public VisionStatusSnapshot VisionStatus { get { lock (_sync) return _vision.Status; } }
+    public VisionStatusSnapshot VisionStatus
+    {
+        get
+        {
+            long token = Volatile.Read(ref _lockMeasurementToken), requested = token != 0 ? Stopwatch.GetTimestamp() : 0;
+            lock (_sync) { if (token != 0) _lockMeasurements.Record(RuntimeLockPath.VisionRead, token, requested, Stopwatch.GetTimestamp()); return _vision.Status; }
+        }
+    }
+    internal long BeginLockMeasurements()
+    { lock (_sync) { long token = _lockMeasurements.Begin(); Volatile.Write(ref _lockMeasurementToken, token); return token; } }
+    internal void FinishLockMeasurements(long token)
+    { lock (_sync) { if (_lockMeasurements.Finish(token)) Volatile.Write(ref _lockMeasurementToken, 0); } }
+    internal RuntimeLockSnapshot? LockMeasurements(long token)
+    {
+        if (token <= 0) return null;
+        var samples = ArrayPool<RuntimeLockSample>.Shared.Rent(RuntimeLockMeasurements.Storage);
+        try
+        {
+            Span<int> counts = stackalloc int[RuntimeLockMeasurements.Paths], next = stackalloc int[RuntimeLockMeasurements.Paths];
+            Span<long> totals = stackalloc long[RuntimeLockMeasurements.Paths]; bool collecting;
+            lock (_sync) if (!_lockMeasurements.Copy(token, samples, counts, next, totals, out collecting)) return null;
+            return RuntimeLockMeasurements.Summarize(token, collecting, samples, counts, next, totals, Stopwatch.Frequency);
+        }
+        finally { ArrayPool<RuntimeLockSample>.Shared.Return(samples); }
+    }
     internal SwitchNavigationSnapshot NavigationStatus { get { lock (_sync) return _navigation.Snapshot(_clock.ElapsedMilliseconds, _latest?.Input.NavigationConnected == true); } }
     internal FeedbackStatus? FeedbackStatus => _feedback?.Status;
     internal CoPilotSettings CoPilotSettings => _input.CoPilotSettings;
@@ -167,8 +194,10 @@ internal sealed class StudioRuntime : IDisposable
     public bool SubmitVisionPrediction(VisionPrediction prediction)
     {
         bool accepted;
+        long token = Volatile.Read(ref _lockMeasurementToken), requested = token != 0 ? Stopwatch.GetTimestamp() : 0;
         lock (_sync)
         {
+            if (token != 0) _lockMeasurements.Record(RuntimeLockPath.VisionSubmission, token, requested, Stopwatch.GetTimestamp());
             var before = _vision.Status;
             accepted = _vision.Submit(prediction, Stopwatch.GetTimestamp());
             CancelLostLockFeedbackLocked(before);
@@ -449,10 +478,12 @@ internal sealed class StudioRuntime : IDisposable
                     nextStats = elapsed + 500;
                 }
 
+                long lockToken = Volatile.Read(ref _lockMeasurementToken), lockRequested = lockToken != 0 ? Stopwatch.GetTimestamp() : 0;
                 lock (_sync)
                 {
                     if (selection != _selectionVersion)
                         continue;
+                    if (lockToken != 0) _lockMeasurements.Record(RuntimeLockPath.InputPoll, lockToken, lockRequested, Stopwatch.GetTimestamp());
                     if (connection != input.ConnectionVersion)
                     {
                         connection = input.ConnectionVersion;
@@ -582,8 +613,10 @@ internal sealed class StudioRuntime : IDisposable
 
     private void AdvanceReleaseDeadline(long timestamp)
     {
+        long token = Volatile.Read(ref _lockMeasurementToken), requested = token != 0 ? Stopwatch.GetTimestamp() : 0;
         lock (_sync)
         {
+            if (token != 0) _lockMeasurements.Record(RuntimeLockPath.ReleaseDeadline, token, requested, Stopwatch.GetTimestamp());
             if (_stop.IsCancellationRequested) return;
             var before = _vision.Status;
             if (!_vision.TryAdvanceDeadline(timestamp)) { CancelLostLockFeedbackLocked(before); return; }

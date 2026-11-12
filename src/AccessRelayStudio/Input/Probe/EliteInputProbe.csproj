@@ -9,5 +9,6 @@
   <ItemGroup>
     <Compile Include="..\*.cs" />
     <Compile Include="..\..\Core\ControllerState.cs" />
+    <Compile Include="..\..\Core\CoPilotInput.cs" />
   </ItemGroup>
 </Project>
