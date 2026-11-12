@@ -12,7 +12,7 @@ Current checkpoint: sections 1–2 are complete. Sections 3–9 have shipped cod
 and passing Windows CI with simulated devices; physical/adaptive-device, native
 WebView and real microphone acceptance remains open. Section 10 has session/footage
 provenance guards and reviewed conversion implemented; real clip review remains open.
-Section 11 has experiment tooling implemented and synthetic/numerical validation;
+Section 11 has experiment tooling implemented, passing Windows CI and synthetic/numerical validation;
 real model comparisons remain open. Section 12 now has bounded readback/lock profiling implemented; actual Windows
 CPU/CUDA measurements and any optimization decision remain open.
 
@@ -293,6 +293,8 @@ preprocessing/arming/performance tests and Windows runtime compilation passed.
 See `docs/vision-model-experiments.md` and
 `.agents/reports/vision-experiments-synthetic-smoke.md`. No architecture winner,
 accuracy improvement or Windows GPU/console latency result is claimed.
+Windows publish and simulated-runtime CI passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43292051607.
 Prerequisites for actual comparisons: reviewed train/validation/held-out gameplay and target hardware.
 
 ## 12. Profiled runtime optimization
@@ -323,3 +325,10 @@ physical input probe. See `docs/runtime-profiling.md` for measurement scopes and
 format-2 compatibility. Inference/transfer time remains an honest aggregate; no
 GPU shader, buffer interoperability or lock-free optimization is claimed.
 Prerequisites for remaining measurements: Windows capture/GPU and representative runs.
+
+Deadline freshness correction: `bfc997ecb7345b1c4d9ed4a97e9640dff94eecd3`. A deterministic
+actual-runtime regression reproduced a release using a pre-lock callback timestamp.
+The callback now reads QPC after acquiring controller ownership. The complete
+simulated runtime/evidence suite failed at that regression before the fix and passed
+after it on Linux with the managed timer fallback. Windows CI also exercises the
+platform high-resolution timer; no physical output device was used by these tests.
