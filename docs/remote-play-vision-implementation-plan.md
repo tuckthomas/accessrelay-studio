@@ -292,12 +292,12 @@ Confirm names against existing conventions during implementation. Keep new compo
 | `Vision/VisionSettings.cs` | Profile settings, validation, and compatibility metadata. |
 | `Core/ControllerOutputArbiter.cs` | Single-owner state merge, channel ownership, release latch, and token validation. |
 | `Core/ReleaseScheduler.cs` | Cancellable monotonic deadlines routed through the arbiter. |
-| `VisionPanel.xaml` and `.xaml.cs` | Accessible configuration, preview, observation/arm state, and diagnostics. |
+| `DesktopUi/src/pages/VisionPage.tsx` and `Desktop/DesktopVisionService.cs` | Accessible configuration, preview, observation/arm state, and diagnostics in the active React interface. |
 | `Verification/VisionVerification.cs` | Deterministic timing, ownership, buffer lifecycle, and profile checks. |
 
-Integrate with `StudioRuntime`, `MainWindow`, profile storage, output/helper diagnostics, and build/publish rules through focused changes. Reuse existing primitives where they satisfy the contract. Do not add a second virtual-controller stack such as Python `vgamepad`.
+Integrate with `StudioRuntime`, `DesktopWindow`, `DesktopVisionService`, profile storage, output/helper diagnostics, and build/publish rules through focused changes. The legacy native MainWindow/panels have been removed; see [desktop architecture](desktop-architecture.md). Reuse existing primitives where they satisfy the contract. Do not add a second virtual-controller stack such as Python `vgamepad`.
 
-The current verification project links `Core/*.cs` into a portable `net10.0` executable. Keep proposed Core state/clock/arbiter contracts platform-neutral and inject a clock/output interface. Put Windows capture, GPU resources, OS timer/affinity adapters, and production output wiring outside that linked Core set, or introduce a separate Windows integration project deliberately. New Core files must not silently break the existing portable verification build.
+Core is compiled into the portable `net10.0` AccessRelayStudio.Engine library, referenced by verification. Keep Core state/clock/arbiter contracts platform-neutral and inject a clock/output interface. Windows capture, GPU resources, OS timer/affinity adapters and production output wiring belong to AccessRelayStudio.Runtime. Windows verification references that actual runtime library with test devices. New Core files must not introduce Windows or presentation dependencies.
 
 ## 14. Implementation sequence and gates
 

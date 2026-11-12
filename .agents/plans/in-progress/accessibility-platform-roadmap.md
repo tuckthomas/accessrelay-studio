@@ -19,8 +19,11 @@ CPU/CUDA measurements and any optimization decision remain open.
 Desktop cleanup follow-up: legacy native screens were removed in
 `2fae5d685d939ee1cfba27c22933a6d153c14004`, with passing Windows CI. Portable
 engine, Windows runtime and desktop host project separation is implemented in
-`5b699a2788a9734cd5416e2a6dc6eaea65346365`. Its checklist and verification are
-tracked in `desktop-host-cleanup.md`; existing physical/data acceptance remains open.
+`5b699a2788a9734cd5416e2a6dc6eaea65346365`, with passing Windows publishing,
+compiled-boundary/deployment and complete CI checks:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43304719048.
+Its finished checklist is in [completed/desktop-host-cleanup.md](../completed/desktop-host-cleanup.md);
+existing physical/data acceptance remains open in this active roadmap.
 
 ## Delivery and evidence
 

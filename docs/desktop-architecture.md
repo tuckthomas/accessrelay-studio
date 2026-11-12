@@ -7,10 +7,11 @@ The existing 3D controller viewer is still bundled and used by the React control
 
 The compiler enforces this dependency direction:
 
-```text
-AccessRelayStudio (WinUI shell and desktop presentation adapters)
-    -> AccessRelayStudio.Runtime (Windows device/audio/vision workers)
-        -> AccessRelayStudio.Engine (portable Core logic)
+```mermaid
+flowchart TD
+    Host["AccessRelayStudio: desktop presentation"] --> Runtime["AccessRelayStudio.Runtime: Windows workers"]
+    Host --> Engine["AccessRelayStudio.Engine: portable Core"]
+    Runtime --> Engine
 ```
 
 `AccessRelayStudio.Engine` targets plain `net10.0`. It owns controller/macro

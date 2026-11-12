@@ -22,4 +22,6 @@ For the focused preview-visibility regression, append `-- --preview-only`. It ru
 
 `-- --preview-diagnostics <absolute-output.json>` runs that focused regression and exports the session's raw capture/completion timestamps and processing durations for investigating host-clock behavior. It preserves the production timestamp and freshness checks.
 
-When workspace disk space is limited, pass `-p:BaseIntermediateOutputPath=<absolute C: directory>/obj/ -p:OutputPath=<absolute C: directory>/bin/` before the `--` separator. Keep outputs outside the source tree when needed.
+When workspace disk space is limited, pass `--artifacts-path <absolute C: directory>`
+before the `--` separator. The SDK separates engine, runtime and verification output
+by project. Avoid a shared BaseIntermediateOutputPath across these project references.

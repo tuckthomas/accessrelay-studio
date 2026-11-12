@@ -60,11 +60,20 @@ desktop evidence checks, pack author CLI, actual compiled runtime with simulated
 devices, and input-probe compilation passed. The metadata checker passed for the
 compiled Engine/Runtime assemblies. 57 frontend unit tests, 20 Chromium browser
 workflows, TypeScript and Vite production build passed. Published host metadata and
-Windows-native deployment checks are pending the new CI run; no physical-device
-or screen-reader listening result is inferred from these checks.
-- [ ] Pass Windows publishing and CI against the separated projects.
-- [ ] Record full implementation commit IDs, update the active accessibility roadmap
+Windows-native deployment checks passed in CI. A deliberately invalid runtime with
+desktop presentation code was also rejected by the metadata guard in an isolated
+compiled fixture. No physical-device or screen-reader listening result is inferred
+from these checks.
+
+- [x] Pass Windows publishing and CI against the separated projects.
+- [x] Record full implementation commit IDs, update the active accessibility roadmap
       where needed, and move this cleanup plan to `completed`.
 
+Windows CI passed: https://github.com/tuckthomas/accessrelay-studio/actions/runs/43304719048.
+This validates publishing, all three compiled assembly boundaries, native ONNX and
+managed audio/speech/React/viewer/pack assets, portable engine/dataset/evidence/vision
+checks, input-probe build, actual runtime with simulated devices, and native helpers.
+Cleanup is complete; implementation commits are recorded in sections 1–3 above.
+
 Physical-device, microphone, user and gameplay acceptance remains tracked separately
-in `accessibility-platform-roadmap.md`; this cleanup does not manufacture that evidence.
+in [the active accessibility roadmap](../in-progress/accessibility-platform-roadmap.md).
