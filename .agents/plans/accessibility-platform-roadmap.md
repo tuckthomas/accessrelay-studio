@@ -13,7 +13,8 @@ and passing Windows CI with simulated devices; physical/adaptive-device, native
 WebView and real microphone acceptance remains open. Section 10 has session/footage
 provenance guards and reviewed conversion implemented; real clip review remains open.
 Section 11 has experiment tooling implemented and synthetic/numerical validation;
-real model comparisons remain open. Section 12 profiling work is next.
+real model comparisons remain open. Section 12 now has bounded readback/lock profiling implemented; actual Windows
+CPU/CUDA measurements and any optimization decision remain open.
 
 ## Delivery and evidence
 
@@ -296,15 +297,29 @@ Prerequisites for actual comparisons: reviewed train/validation/held-out gamepla
 
 ## 12. Profiled runtime optimization
 
+- [x] Add bounded readback/copy and controller-lock measurements, profiler generation
+      ownership/freeze, diagnostics UI and versioned performance imports.
+
 - [ ] Measure capture readback, preprocessing, transfers, inference, and lock contention
       with representative Windows CPU/CUDA runs before choosing an optimization.
 - [ ] Evaluate GPU preprocessing only with explicit D3D/ONNX interoperability and
       numerical parity; putting resize in ONNX alone does not remove CPU staging copies.
-- [ ] Preserve the explicit CPU path, bounded memory, cancellation, and versioned
-      preprocessing compatibility when introducing another backend.
-- [ ] Replace synchronization only where measured contention warrants it; preserve
-      atomic output validation and lease/resource ownership during stop/source changes.
-- [ ] Test lifecycle races and compare end-to-end latency/resource reports before promotion.
+- [x] Preserve the CPU path, bounded memory, cancellation and canonical preprocessing.
+      No additional backend is introduced without interoperability/parity evidence.
+- [x] Preserve atomic output validation and lease/resource ownership. Keep current
+      synchronization until measured contention justifies a specific replacement.
+- [x] Test profiling generation races, frozen runs, reused frame leases, optional
+      stages, zero-allocation recording and legacy/current saved-run handling.
+- [ ] Compare actual end-to-end latency/resource reports before optimization promotion.
 - [ ] Push justified optimizations separately and record their commit SHAs and evidence.
 
-Implementation commits: pending. Prerequisites: Windows capture/GPU and representative performance reports.
+Profiling implementation commit: `a3de4a2a3915bcd312c9ec03660beaec08968ab5`.
+Validation: portable controller/measurement tests, complete managed vision/model/
+performance suite, 57 frontend unit tests, 20 browser workflows, TypeScript/Vite
+build, physical-input probe and Windows runtime cross-compilation passed. New
+Windows runtime tests exercise actual profiling integration with simulated devices.
+Windows CI now also runs the standalone vision/performance suite and builds the
+physical input probe. See `docs/runtime-profiling.md` for measurement scopes and
+format-2 compatibility. Inference/transfer time remains an honest aggregate; no
+GPU shader, buffer interoperability or lock-free optimization is claimed.
+Prerequisites for remaining measurements: Windows capture/GPU and representative runs.
