@@ -34,5 +34,7 @@ jobs:
         run: dotnet run --project ./src/AccessRelayStudio/Verification/Verification.csproj -c Release
       - name: Check desktop binary media and evidence integrity
         run: dotnet run --project ./tools/desktop/Verification/DesktopEvidenceVerification.csproj -c Release
+      - name: Check native runtime with simulated devices
+        run: dotnet run --project ./src/AccessRelayStudio/WindowsVerification/WindowsVerification.csproj -c Release -- --no-capture
       - name: Check native helpers
         run: cargo test --locked --manifest-path ./src/AccessRelayStudio/Audio/VirtualMicHost/Cargo.toml

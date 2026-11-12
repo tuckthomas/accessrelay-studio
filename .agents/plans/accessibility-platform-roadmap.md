@@ -57,21 +57,26 @@ Validation: 49 unit tests, 9 Chromium browser tests, TypeScript/Vite build, and
 isolated compilation of the real audio sources passed. Browser tests cover live
 regions inside a modal and the existing menu keyboard/ARIA contract. The host now
 reports asynchronous voice failures explicitly instead of masking them with old
-service text. Windows CI and real screen-reader/audio-device validation are tracked
-separately; no listening or microphone hardware test is claimed.
+service text. Windows CI passed: https://github.com/tuckthomas/accessrelay-studio/actions/runs/43253558902.
+Real screen-reader/audio-device validation remains separate; no listening or
+microphone hardware test is claimed.
 
 ## 3. Sticky button accessibility
 
-- [ ] Add opt-in per-button press-to-latch/press-to-release configuration and UI.
-- [ ] Keep sticky intent separate from vision's forced-release suppression latch.
-- [ ] Define precedence with manual input, macros, recording, and vision ownership.
-- [ ] Clear state on Stop, disconnect, profile/device changes, and disabling the feature;
+- [x] Add opt-in per-button press-to-latch/press-to-release configuration and UI.
+- [x] Keep sticky intent separate from vision's forced-release suppression latch.
+- [x] Define precedence with manual input, macros, recording, and vision ownership.
+- [x] Clear state on Stop, disconnect, profile/device changes, and disabling the feature;
       require a fresh press before reactivation.
-- [ ] Test edges, simultaneous controls, precedence, persistence compatibility, and resets.
+- [x] Test edges, simultaneous controls, precedence, persistence compatibility, and resets.
 - [ ] Validate portable logic and Windows bridge/output behavior before completion.
 - [ ] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: pending.
+Implementation commit: pending push. Portable controller verification, 51 frontend
+unit tests, TypeScript/Vite build, existing browser checks, and Windows verification
+cross-compilation passed. Native runtime tests use simulated devices and are added
+to Windows CI. Real physical device validation remains open. See
+`docs/controller-accessibility.md` for precedence, trigger behavior and profile v4 compatibility.
 
 ## 4. Tremor smoothing
 

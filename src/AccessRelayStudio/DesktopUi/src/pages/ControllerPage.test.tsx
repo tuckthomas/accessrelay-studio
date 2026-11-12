@@ -6,6 +6,34 @@ afterEach(cleanup);
 const setup = () => structuredClone(previewState.controller);
 
 describe('controller workflows', () => {
+  it('keeps sticky edits through status updates and guards navigation until saved or discarded', async () => {
+    const state = setup(), command = vi.fn().mockResolvedValue(null);
+    const { rerender } = render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Accessibility' }));
+    fireEvent.click(screen.getByLabelText('A button'));
+    rerender(<ControllerPage state={structuredClone(state)} status={{ ...state.status, meanPollMs: 4 }} command={command} />);
+    expect((screen.getByLabelText('A button') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: 'Button mapping' }));
+    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save sticky controls' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('stickySave', { controls: ['a'] }));
+    await screen.findByText('Sticky controls saved. Release the controls before pressing to latch.');
+    fireEvent.click(screen.getByRole('tab', { name: 'Button mapping' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it('preserves a rejected sticky draft and prevents changes while recording', async () => {
+    const state = setup(), command = vi.fn().mockRejectedValue(new Error('Finish the recording first.'));
+    const { rerender } = render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Accessibility' }));
+    fireEvent.click(screen.getByLabelText('Left trigger'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save sticky controls' }));
+    await screen.findByText('Finish the recording first.');
+    expect((screen.getByLabelText('Left trigger') as HTMLInputElement).checked).toBe(true);
+    rerender(<ControllerPage state={state} status={{ ...state.status, recording: { isRecording: true } }} command={command} />);
+    expect((screen.getByLabelText('Left trigger') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Save sticky controls' }) as HTMLButtonElement).disabled).toBe(true);
+  });
   it('does not partially save a recording draft when interval retiming is rejected', async () => {
     const state = setup(), id = '67e6e39e-531e-447b-a7a7-763287ca44ea';
     const recording = { id, name: 'Original sequence', channels: 'rightStick', durationMs: 100,

@@ -16,6 +16,7 @@ internal sealed class StudioRuntime : IDisposable
 {
     private readonly EliteInputMonitor _input;
     private readonly MacroEngine _engine = new();
+    private readonly StickyButtons _sticky = new();
     private readonly object _sync = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly Thread _worker;
@@ -98,6 +99,7 @@ internal sealed class StudioRuntime : IDisposable
             if (recording && (_engine.ScriptsEnabled || _recorder is not null))
                 throw new InvalidOperationException("Turn off macro scripts and finish macro recording before recording manual gameplay training data.");
             _visionTrainingRecording = recording;
+            _sticky.Reset();
             _vision.SetTrainingRecording(recording);
         }
         _releaseScheduler.Signal();
@@ -131,6 +133,7 @@ internal sealed class StudioRuntime : IDisposable
         _stickDeadzone = stickDeadzone;
         _visionProfile = initial;
         _engine.Apply(initial);
+        _sticky.Configure(initial.StickyControls);
         _releaseScheduler = new ReleaseScheduler(GetReleaseDeadline, AdvanceReleaseDeadline, HighResolutionReleaseTimer.TryCreate());
         _worker = new Thread(Poll) { IsBackground = true, Name = "Gamepad Studio input" };
         _worker.Start();
@@ -142,6 +145,7 @@ internal sealed class StudioRuntime : IDisposable
         {
             RequireTrainingStoppedLocked("applying or changing a macro profile");
             _engine.Apply(profile);
+            _sticky.Configure(profile.StickyControls);
             _visionProfile = profile;
             InvalidateVisionLocked("Macro profile changed. Arm vision again after releasing the shoot button.");
         }
@@ -167,6 +171,7 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             _input.SelectDevice(id);
+            _sticky.Reset();
             Interlocked.Increment(ref _selectionVersion);
             _engine.Tick(default, PaddleButtons.None, false, _clock.ElapsedMilliseconds);
             InvalidateVisionLocked("Physical controller selection changed.");
@@ -198,6 +203,7 @@ internal sealed class StudioRuntime : IDisposable
                 throw new InvalidOperationException("Connect a controller to start a recording.");
 
             _recorder = new InputRecorder(channels);
+            _sticky.Reset();
             _pending = null;
             _recordingConnection = input.ConnectionVersion;
             _recordingBeganAt = _clock.ElapsedMilliseconds;
@@ -276,6 +282,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void DisconnectOutput(string status = "Virtual output off")
     {
+        _sticky.Reset();
         InvalidateVisionLocked("Virtual output stopped. Vision release is disarmed.");
         var output = _output;
         _output = null;
@@ -338,6 +345,7 @@ internal sealed class StudioRuntime : IDisposable
                     if (connection != input.ConnectionVersion)
                     {
                         connection = input.ConnectionVersion;
+                        _sticky.Reset();
                         _engine.Tick(default, PaddleButtons.None, false, now);
                         InvalidateVisionLocked("Physical controller connection changed. Vision release is disarmed.");
                     }
@@ -358,7 +366,8 @@ internal sealed class StudioRuntime : IDisposable
                     else if (_visionTrainingRecording)
                         state = input.IsConnected ? input.State : default;
                     else
-                        state = _engine.Tick(input.State, input.HeldPaddles, input.IsConnected, now, input.PressedPaddles);
+                        state = _engine.Tick(input.State, input.HeldPaddles, input.IsConnected, now, input.PressedPaddles,
+                            _sticky.Sample(input.State, input.IsConnected && _output?.IsAvailable == true));
                     state = _stickDeadzone.Apply(state);
                     state = _vision.Sample(input.State, state, input.IsConnected, _output?.IsAvailable == true,
                         _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp());
@@ -411,6 +420,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private bool VisionMacroConflict()
     {
+        if (_visionProfile.StickyControls.Contains(_vision.Settings.ShootButton)) return true;
         if (!_engine.ScriptsEnabled) return false;
         var binding = _visionProfile.GetBinding(_vision.Settings.ShootButton);
         return _engine.Status.IsActive || (binding.Enabled && binding.Script != ScriptKind.Passthrough);

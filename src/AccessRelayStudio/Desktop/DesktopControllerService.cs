@@ -53,6 +53,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         activeProfile = new
         {
             _active.Id, _active.Name,
+            stickyControls = _active.StickyControls.OrderBy(control => (uint)control),
             bindings = ControlMap.All.Select(control =>
             {
                 var binding = _active.GetBinding(control);
@@ -162,6 +163,15 @@ internal sealed class DesktopControllerService : IDesktopModule
                 Guid? luaId = Guid.TryParse(args.Text("luaScriptId"), out var lid) ? lid : null;
                 Save(_active.WithBinding(control, new(script, args.Flag("enabled", true), args.Flag("consume"), recordingId, luaId)));
                 _notice = ControlLabel(control) + " mapping saved."; break;
+            }
+            case "stickySave":
+            {
+                var controls = args.GetProperty("controls").Read<ControlId[]>();
+                if (controls is null || controls.Length > 16 || controls.Any(control => !StickyButtons.Supports(control)))
+                    throw new InvalidDataException("Choose gamepad buttons or triggers for sticky input.");
+                Save(_active with { StickyControls = controls.ToImmutableHashSet() });
+                _notice = "Sticky controls saved. Release the controls before pressing to latch.";
+                break;
             }
             case "timingSave":
             {

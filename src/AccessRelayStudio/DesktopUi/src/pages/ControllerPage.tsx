@@ -52,11 +52,12 @@ export function ControllerPage({ state, status, command }: PageProps) {
     </div>
     {!state.driverAvailable && <Notice tone="warning" title="One-time device setup">Open Settings to install the virtual device driver before connecting output.</Notice>}
     {live.training && <Notice tone="warning">Gameplay training is recording manual input. Finish that clip before changing controller setups or sequences.</Notice>}
-    <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Controller workspace" items={[{ id: 'mapping', label: 'Button mapping' }, { id: 'sequences', label: 'Sequences', count: profile.recordings?.length || 0 }, { id: 'lua', label: 'Lua scripts', count: profile.luaScripts?.length || 0 }, { id: 'input', label: 'Input & response' }]} />
+    <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Controller workspace" items={[{ id: 'mapping', label: 'Button mapping' }, { id: 'sequences', label: 'Sequences', count: profile.recordings?.length || 0 }, { id: 'lua', label: 'Lua scripts', count: profile.luaScripts?.length || 0 }, { id: 'input', label: 'Input & response' }, { id: 'accessibility', label: 'Accessibility' }]} />
     {tab === 'mapping' && <MappingEditor state={state} status={live} command={command} openSequences={() => transition(() => setTab('sequences'))} />}
     {tab === 'sequences' && <Sequences state={state} status={live} command={command} />}
     {tab === 'lua' && <LuaEditor state={state} status={live} command={command} />}
     {tab === 'input' && <InputResponse state={state} status={live} command={command} />}
+    {tab === 'accessibility' && <StickyInput key={profile.id} state={state} status={live} command={command} />}
     <details className="details-section"><summary>Manage controller setups</summary><div className="row"><Button onClick={() => nameAction('profileRename')}><Icon name="pencil" size={16} />Rename</Button>
       <Button onClick={() => transition(() => nameAction('profileDuplicate'))}><Icon name="copy" size={16} />Duplicate</Button><Button onClick={() => transition(() => perform('profileImport'))}><Icon name="upload" size={16} />Import setup</Button>
       <Button onClick={() => perform('profileExport')}><Icon name="download" size={16} />Export setup</Button><Button variant="ghost" disabled={(state.profiles || []).length < 2} onClick={() => setDeleteProfile(true)}><Icon name="trash" size={16} />Delete setup</Button></div></details>
@@ -67,6 +68,35 @@ export function ControllerPage({ state, status, command }: PageProps) {
       onConfirm={() => command('profileDelete', { id: profile.id })} confirmLabel="Delete setup" />
     <DiscardDialog open={nextAction !== null} onKeep={() => setNextAction(null)} onDiscard={() => { const action = nextAction; setNextAction(null); action?.(); }} />
   </div>;
+}
+
+function StickyInput({ state, status, command }: PageProps) {
+  const saved = JSON.stringify([...(state.activeProfile?.stickyControls || [])].sort());
+  const [selected, setSelected] = useState<string[]>(JSON.parse(saved)), [baseline, setBaseline] = useState(saved);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
+  const dirty = JSON.stringify([...selected].sort()) !== baseline;
+  useUnsavedChanges(dirty);
+  useEffect(() => {
+    if (!dirty) { setSelected(JSON.parse(saved)); setBaseline(saved); }
+  }, [saved]);
+  const locked = busy || status.training || status.recording?.isRecording || !!status.recording?.pending;
+  return <Card title="Sticky buttons" description="Press once to hold a control, then press again to release it. These choices are saved with this controller setup.">
+    <div className="stack">
+      <p className="subtle">Choose buttons or triggers below. Selected triggers switch between fully pressed and released. Paddles keep their usual mappings.</p>
+      <p className="subtle">Stop everything, a disconnection, or changing setups clears held controls. Release a control before pressing it again. Sequences can override sticky output; recordings capture unmodified physical input. A sticky shoot button prevents arming vision assistance.</p>
+      <div className="field-grid">{(state.controls || []).filter((control: any) => !/^(small|large)/.test(control.id)).map((control: any) =>
+        <Toggle key={control.id} label={control.label} checked={selected.includes(control.id)} disabled={locked} onChange={checked => {
+          setSelected(value => checked ? [...value, control.id] : value.filter(id => id !== control.id)); setMessage('');
+        }} />)}</div>
+      {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
+      <div className="row"><Button variant="primary" busy={busy} disabled={!dirty || locked} onClick={async () => {
+        const controls = [...selected].sort(); setBusy(true); setError('');
+        try { await command('stickySave', { controls }); setBaseline(JSON.stringify(controls)); setMessage('Sticky controls saved. Release the controls before pressing to latch.'); }
+        catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+        finally { setBusy(false); }
+      }}>Save sticky controls</Button><Button disabled={!dirty || locked} onClick={() => { setSelected(JSON.parse(saved)); setBaseline(saved); setError(''); }}>Discard edits</Button></div>
+    </div>
+  </Card>;
 }
 
 function MappingEditor({ state, status, command, openSequences }: PageProps & { openSequences: () => void }) {

@@ -11,6 +11,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="DatasetChecks.cs" />
     <Compile Include="RuntimeTrainingChecks.cs" />
+    <Compile Include="RuntimeAccessibilityChecks.cs" />
     <Compile Include="RuntimeTestDevices.cs" />
     <Compile Include="PreviewSessionChecks.cs" />
     <Compile Include="../StudioRuntime.cs" Link="StudioRuntime.cs" />

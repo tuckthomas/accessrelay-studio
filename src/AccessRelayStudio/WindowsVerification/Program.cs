@@ -23,6 +23,7 @@ if (!args.Contains("--buffer-only", StringComparer.Ordinal))
 {
     DatasetChecks.Run();
     RuntimeTrainingChecks.Run();
+    RuntimeAccessibilityChecks.Run();
     if (!args.Contains("--no-capture", StringComparer.Ordinal))
     {
         CaptureCheck();

@@ -109,7 +109,8 @@ async function previewCommand(method: string, args: any): Promise<any> {
       controller.activeProfile.bindings[index] = { ...controller.activeProfile.bindings[index], ...args };
     } else if (action === 'timingSave') {
       controller.activeProfile.timings.find((item: any) => item.variant === args.variant).timing = args.timing;
-    } else if (action === 'deadzoneSave') controller.deadzone = args;
+    } else if (action === 'stickySave') controller.activeProfile.stickyControls = args.controls;
+    else if (action === 'deadzoneSave') controller.deadzone = args;
     else if (action === 'luaValidate') return { valid: true, message: 'Design preview only. Run the desktop app to validate Lua.' };
     else if (action === 'luaGet') return controller.activeProfile.luaScripts.find((script: any) => script.id === args.id);
     else if (action === 'luaSave') {

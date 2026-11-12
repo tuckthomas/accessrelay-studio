@@ -94,7 +94,7 @@ public sealed class MacroEngine
 
     /// <summary>Sample at a monotonic time in milliseconds, such as Environment.TickCount64.</summary>
     public ControllerState Tick(ControllerState input, PaddleButtons paddles, bool connected, long timestampMs,
-        PaddleButtons tapEdges = PaddleButtons.None)
+        PaddleButtons tapEdges = PaddleButtons.None, ControllerState? manualOutput = null)
     {
         lock (_sync)
         {
@@ -109,7 +109,7 @@ public sealed class MacroEngine
             _previous = pressed;
             _hasSample = true;
             if (!_enabled)
-                return input;
+                return manualOutput ?? input;
 
             if (_active is { } existing && Elapsed(existing, timestampMs) >= existing.Plan.TotalMs)
             {
@@ -121,7 +121,7 @@ public sealed class MacroEngine
             if (rising != 0)
                 StartPressedShot(rising, timestampMs);
 
-            ControllerState output = ControlMap.Consume(input, _consume);
+            ControllerState output = ControlMap.Consume(manualOutput ?? input, _consume);
             if (_lua is { } lua)
             {
                 output = lua.Tick(input, paddles, output, timestampMs, out var error);

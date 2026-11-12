@@ -1,4 +1,19 @@
 import { expect, test } from '@playwright/test';
+test('sticky controls save with the setup and remain editable after navigating away', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('tab', { name: 'Accessibility' }).click();
+  await page.getByLabel('A button', { exact: true }).check();
+  await page.getByLabel('Left trigger', { exact: true }).check();
+  await page.getByRole('button', { name: 'Save sticky controls' }).click();
+  await expect(page.getByText('Sticky controls saved. Release the controls before pressing to latch.')).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('tab', { name: 'Accessibility' }).click();
+  await expect(page.getByLabel('A button', { exact: true })).toBeChecked();
+  await expect(page.getByLabel('Left trigger', { exact: true })).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Save sticky controls' })).toBeDisabled();
+});
 test('task navigation remains usable at desktop widths without horizontal overflow', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
