@@ -11,6 +11,6 @@
     <Compile Include="../../../src/AccessRelayStudio/Core/ControllerState.cs" Link="ControllerState.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionSettings.cs" Link="VisionSettings.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionTrainingCaptureSettings.cs" Link="VisionTrainingCaptureSettings.cs" />
-    <Compile Include="../../../src/AccessRelayStudio/Core/Nba2K27ShotProfile.cs" Link="Nba2K27ShotProfile.cs" />
+    <Compile Include="../../../games/nba2k27/src/Nba2K27ShotProfile.cs" Link="Nba2K27ShotProfile.cs" />
   </ItemGroup>
 </Project>

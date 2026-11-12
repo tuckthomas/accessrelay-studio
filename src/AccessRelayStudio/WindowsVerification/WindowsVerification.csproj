@@ -26,7 +26,7 @@
     <Compile Include="../Vision/VisionSession.cs" Link="Vision/VisionSession.cs" />
     <Compile Include="../Vision/VisionModel.cs" Link="Vision/VisionModel.cs" />
     <Compile Include="../Vision/VisionModelManifest.cs" Link="Vision/VisionModelManifest.cs" />
-    <Compile Include="../Vision/ShotTracker.cs" Link="Vision/ShotTracker.cs" />
+    <Compile Include="../../../games/nba2k27/src/*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />
     <Compile Include="../Vision/FramePreprocessor.cs" Link="Vision/FramePreprocessor.cs" />
     <Compile Include="../Vision/VisionDiagnostics.cs" Link="Vision/VisionDiagnostics.cs" />
     <Compile Include="../Vision/VisionPerformance.cs" Link="Vision/VisionPerformance.cs" />

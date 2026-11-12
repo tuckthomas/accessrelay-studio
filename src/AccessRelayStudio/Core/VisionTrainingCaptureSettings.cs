@@ -2,6 +2,12 @@ using System.IO;
 
 namespace EliteScriptStudio.Core;
 
+internal interface ITrainingCaptureProfile
+{
+    void Validate();
+    bool UsesSupervisionOverlay { get; }
+}
+
 internal enum VisionTrainingPurpose { MeterSupervisedTraining, MeterOffValidation }
 
 /// <summary>Manually confirmed evidence regions, in normalized coordinates of the captured window.</summary>
@@ -32,14 +38,14 @@ internal sealed record VisionTrainingCaptureSettings
                 throw new InvalidDataException("Meter and feedback regions must be inside the gameplay region.");
     }
 
-    public void ValidateForRecording(Nba2K27ShotProfile profile)
+    public void ValidateForRecording(ITrainingCaptureProfile profile)
     {
         Validate(); profile.Validate();
         if (!Configured || FeedbackRegion is null)
             throw new InvalidDataException("Set up training capture first: mark the gameplay area, player, meter and shot feedback on the preview.");
-        if (Purpose == VisionTrainingPurpose.MeterSupervisedTraining && (!profile.UsesShotMeter || MeterRegion is null))
+        if (Purpose == VisionTrainingPurpose.MeterSupervisedTraining && (!profile.UsesSupervisionOverlay || MeterRegion is null))
             throw new InvalidDataException("Training clips require the shot meter on in the game and in the selected shot profile, plus a marked meter region. Use Meter-off validation only for meter-off evaluation footage.");
-        if (Purpose == VisionTrainingPurpose.MeterOffValidation && profile.UsesShotMeter)
+        if (Purpose == VisionTrainingPurpose.MeterOffValidation && profile.UsesSupervisionOverlay)
             throw new InvalidDataException("Meter-off validation requires the shot meter off in the game and in the selected shot profile.");
     }
 

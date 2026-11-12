@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using EliteScriptStudio.Core;
 
-namespace EliteScriptStudio.Vision;
+using EliteScriptStudio.Vision;
+
+namespace EliteScriptStudio.Packs.Nba2K27;
 
 /// <summary>Fixed-region temporal tracking. It never silently switches to another visible player.</summary>
 internal sealed class ShotTracker

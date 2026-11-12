@@ -29,6 +29,7 @@
   <ItemGroup>
     <Content Include="DesktopUi\dist\**\*" TargetPath="DesktopUi\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Compile Include="../../games/nba2k27/src/*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />
     <PackageReference Include="MoonSharp" Version="2.0.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />

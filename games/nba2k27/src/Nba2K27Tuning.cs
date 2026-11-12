@@ -1,4 +1,6 @@
-namespace EliteScriptStudio.Core;
+using EliteScriptStudio.Core;
+
+namespace EliteScriptStudio.Packs.Nba2K27;
 
 internal enum Nba2K27TimingFeedback { None, Early, SlightlyEarly, Excellent, SlightlyLate, Late }
 internal enum Nba2K27TempoFeedback { None, Fast, SlightlyFast, Excellent, SlightlySlow, Slow }

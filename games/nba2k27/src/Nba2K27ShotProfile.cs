@@ -4,12 +4,14 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace EliteScriptStudio.Core;
+using EliteScriptStudio.Core;
+
+namespace EliteScriptStudio.Packs.Nba2K27;
 
 /// <summary>Player and custom shot configuration. Entry guards are not a game animation catalog.</summary>
 internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches, int ThreePointRating,
     string Base, string UpperRelease1, string UpperRelease2, bool UsesShotMeter = false,
-    string MeterReleaseType = "", int ShotSpeed = 4, int Release1Percent = 50, string CameraView = "2K")
+    string MeterReleaseType = "", int ShotSpeed = 4, int Release1Percent = 50, string CameraView = "2K") : ITrainingCaptureProfile
 {
     public const int MaximumProfiles = 64;
     public const int MinimumHeightInches = 36;
@@ -38,6 +40,8 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
         if (Release1Percent is < 0 or > 100)
             throw new InvalidDataException("Upper Release 1 allocation must be between 0 and 100 percent; Upper Release 2 receives the remainder.");
     }
+
+    bool ITrainingCaptureProfile.UsesSupervisionOverlay => UsesShotMeter;
 
     public int Release2Percent => 100 - Release1Percent;
 

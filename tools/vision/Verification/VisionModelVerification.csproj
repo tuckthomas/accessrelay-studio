@@ -10,7 +10,7 @@
     <Compile Include="../../../src/AccessRelayStudio/Core/ControllerState.cs" Link="Core/ControllerState.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionSettings.cs" Link="Core/VisionSettings.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionTrainingCaptureSettings.cs" Link="Core/VisionTrainingCaptureSettings.cs" />
-    <Compile Include="../../../src/AccessRelayStudio/Core/Nba2K27ShotProfile.cs" Link="Core/Nba2K27ShotProfile.cs" />
+    <Compile Include="../../../games/nba2k27/src/Nba2K27ShotProfile.cs" Link="Core/Nba2K27ShotProfile.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionPrediction.cs" Link="Core/VisionPrediction.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/ControllerOutputArbiter.cs" Link="Core/ControllerOutputArbiter.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/CapturedVisionFrame.cs" Link="Vision/CapturedVisionFrame.cs" />
@@ -19,7 +19,7 @@
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionModelManifest.cs" Link="Vision/VisionModelManifest.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionModelLibrary.cs" Link="Vision/VisionModelLibrary.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionSettingsStore.cs" Link="Vision/VisionSettingsStore.cs" />
-    <Compile Include="../../../src/AccessRelayStudio/Vision/ShotTracker.cs" Link="Vision/ShotTracker.cs" />
+    <Compile Include="../../../games/nba2k27/src/ShotTracker.cs" Link="Vision/ShotTracker.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionCalibration.cs" Link="Vision/VisionCalibration.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionDiagnostics.cs" Link="Vision/VisionDiagnostics.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/VisionPerformance.cs" Link="Vision/VisionPerformance.cs" />

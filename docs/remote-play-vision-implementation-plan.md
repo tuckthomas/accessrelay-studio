@@ -285,7 +285,7 @@ Confirm names against existing conventions during implementation. Keep new compo
 | `Vision/LatestFrameBuffer.cs` | Bounded reusable resources with explicit ownership. |
 | `Vision/VisionModel.cs` | Model manifest, validation, ONNX session, providers, warm-up, and reusable tensors. |
 | `Vision/FramePreprocessor.cs` | Crop, resize, color conversion, normalization, and measured transfers. |
-| `Vision/ShotTracker.cs` | Player identity, temporal state, model observations, confidence, and shot token. |
+| `games/nba2k27/src/ShotTracker.cs` | NBA adapter: player identity, temporal state, model observations, confidence, and shot token. |
 | `Vision/ReleasePredictor.cs` | Time-to-target estimate, calibrated deadline, and uncertainty checks. |
 | `Vision/VisionCalibration.cs` | Versioned calibration records and bounded offset estimation. |
 | `Vision/VisionDiagnostics.cs` | Bounded event records and off-path summaries/exports. |

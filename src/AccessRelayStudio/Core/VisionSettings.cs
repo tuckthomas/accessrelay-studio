@@ -54,8 +54,8 @@ internal sealed record VisionSettings
             throw new InvalidDataException("The model manifest path is invalid.");
         if (string.IsNullOrWhiteSpace(AnimationProfile) || AnimationProfile.Length > 80 || AnimationProfile.Any(char.IsControl))
             throw new InvalidDataException("Choose an animation profile of up to 80 characters.");
-        if (CameraView is null || (CameraView.Length != 0 && !Nba2K27ShotProfile.CameraViews.Contains(CameraView, StringComparer.Ordinal)))
-            throw new InvalidDataException("The supported camera views are 2K, 2K Low and 2K Legacy.");
+        if (CameraView is null || CameraView.Length > 80 || CameraView.Any(char.IsControl))
+            throw new InvalidDataException("Choose a camera configuration of up to 80 readable characters.");
         Check(MinimumConfidence, 0, 1, "Confidence");
         Check(MaximumUncertaintyMs, 0, 1000, "Uncertainty");
         Check(MaximumFrameAgeMs, 1, 1000, "Frame age");

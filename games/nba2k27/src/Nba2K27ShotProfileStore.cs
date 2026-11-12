@@ -2,7 +2,9 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 
-namespace EliteScriptStudio.Core;
+using EliteScriptStudio.Core;
+
+namespace EliteScriptStudio.Packs.Nba2K27;
 
 /// <summary>Separate versioned storage; shot profiles never enter the macro-profile enumeration.</summary>
 internal sealed class Nba2K27ShotProfileStore
