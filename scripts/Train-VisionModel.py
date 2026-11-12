@@ -5,6 +5,9 @@ No Python process is used by AccessRelay's production capture/inference loop.
 An exported model always has validation=null and cannot arm automatic release.
 targetReleaseTicks labels the captured target GAME PHASE, never physical button-up
 or virtual-controller send time: production compensates video/input delays separately.
+Enriched captureEvidence sessions are acquisition artifacts, not supported training
+inputs: their teacher labels, leakage-safe crops and teacher/student profile mapping
+must be reviewed and converted by a future explicit workflow.
 """
 from __future__ import annotations
 
@@ -90,6 +93,17 @@ def load_sessions(directories: list[Path], split: str, history: int, interval_ms
     camera = None
     for directory in directories:
         session = read_json(directory / "session.json")
+        # Fail closed on the marker, even if malformed or null. Silently reading only
+        # frames.bgra would discard teacher/validation provenance and could train a
+        # purported meter-off predictor on visible meter pixels or the wrong profile.
+        # Evaluation imports this same loader, so the restriction also covers held-out
+        # evidence. Do not remove captureEvidence to bypass this compatibility gate.
+        if "captureEvidence" in session:
+            raise ValueError(
+                "Enriched captureEvidence sessions are not supported by the current trainer/evaluator: "
+                "they need reviewed label conversion, meter-leakage-safe preprocessing and explicit "
+                "teacher/student profile mapping. Preserve the original evidence; do not remove its marker."
+            )
         labels = read_json(directory / "labels.json")
         if labels.get("labelTimeBasis", "captured-target-game-phase") != "captured-target-game-phase":
             raise ValueError("Target labels must mark the captured target game phase, not physical/virtual input timestamps")

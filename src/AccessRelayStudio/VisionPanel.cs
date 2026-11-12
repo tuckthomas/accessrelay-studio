@@ -45,6 +45,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
     private readonly TextBlock _shotProfileInfo = Text("Select a saved NBA 2K27 player/shot profile in Plugins before collecting training data.");
     private readonly TextBlock _trainingInfo = Text("Not recording — live view frames are not saved.");
     private readonly TextBlock _trainingDetails = Text("Record a training clip to save a 10-second take. A model is not required.");
+    private readonly TextBlock _trainingSetupInfo = Text("Training capture needs setup: mark the player, meter and shot feedback on a preview.");
     private readonly TextBlock _diagnosticStatus = Text("Live timing details appear after a session starts.");
     private readonly Expander _diagnostics = new() { Header = new TextBlock { Text = "Timing and diagnostics", FontSize = 14 }, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _status = Text("Observation is off.");
@@ -79,6 +80,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
     private readonly Button _start = new() { Content = new TextBlock { Text = "Start live view", FontSize = 14, TextWrapping = TextWrapping.Wrap }, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _recordTraining = new() { Content = "Record training clip…", FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _stopTraining = new() { Content = "Stop recording", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
+    private readonly Button _setupTraining = new() { Content = "Set up training capture…", FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _save = new() { Content = "Save settings", FontSize = 14 };
     private readonly Control[] _configurationControls;
     private WriteableBitmap? _bitmap;
@@ -125,6 +127,9 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _recordTraining.Click += (_, _) => RecordTraining();
         _stopTraining.Click += (_, _) => RunAction(() => _session?.StopTraining());
         header.Children.Add(recordingActions);
+        _setupTraining.Click += (_, _) => SetupTrainingCapture();
+        header.Children.Add(_setupTraining);
+        header.Children.Add(_trainingSetupInfo);
         _trainingInfo.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         header.Children.Add(_trainingInfo);
         _status.MaxLines = 3; _status.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -142,8 +147,8 @@ internal sealed class VisionPanel : UserControl, IDisposable
         var profileActions = Row();
         AddButton(profileActions, "Manage NBA 2K27 shot profiles", openShotProfiles);
         _configuration.Children.Add(profileActions);
-        _configuration.Children.Add(Text("Choose your player/shot profile and Remote Play window, then use Record training clip above. Recording starts live view for you. No gameplay model is needed to save clips."));
-        _configuration.Children.Add(Text("Route your physical controller through AccessRelay's virtual Xbox controller into Remote Play. Choose the intended player's region below; no shot meter or special in-game icon is required."));
+        _configuration.Children.Add(Text("Choose your player/shot profile and Remote Play window, then use Set up training capture to mark the regions on a preview. Record training clip saves up to 10 seconds, including shot feedback and controller traces. No model is needed."));
+        _configuration.Children.Add(Text("Route your physical controller through AccessRelay's virtual Xbox controller into Remote Play. Training uses the shot meter as evidence. Meter-off validation is a separate clip purpose; a special player icon is not required."));
         _configuration.Children.Add(_source);
         _configuration.Children.Add(Text("Browser windows show their active tab; background tabs are not separate capture sources."));
         var sourceActions = Row();
@@ -251,6 +256,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
         AutomationProperties.SetName(_modelPicker, "Installed gameplay model or capture and recording only");
         AutomationProperties.SetName(_recordTraining, "Record and save a training clip");
         AutomationProperties.SetName(_stopTraining, "Stop the current training clip recording");
+        AutomationProperties.SetName(_setupTraining, "Set up gameplay, player, meter and feedback capture areas");
         AutomationProperties.SetName(stop, "Stop Remote Play live view");
         ApplyModelChoices(Array.Empty<VisionModelLibraryEntry>(), Array.Empty<string>());
         RefreshWindows();
@@ -348,6 +354,8 @@ internal sealed class VisionPanel : UserControl, IDisposable
         if (_shotProfile is { } profile)
         {
             string configuration = "nba2k27:" + profile.ConfigurationFingerprint;
+            if (settings.CameraView != profile.CameraView)
+                settings = settings with { TrainingCapture = settings.TrainingCapture with { Configured = false } };
             if (settings.AnimationProfile != configuration)
                 settings = settings with { AnimationProfile = configuration, ModelManifestPath = "", CorrectionMs = 0 };
             settings = settings with { CameraView = profile.CameraView };
@@ -386,6 +394,11 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _selectedSourceIdentity = selected;
         if (previous?.Hwnd == selected?.Hwnd && previous?.ProcessId == selected?.ProcessId) return;
         InvalidateCorrection();
+        if (previous is not null)
+        {
+            _loadedSettings = _loadedSettings with { TrainingCapture = _loadedSettings.TrainingCapture with { Configured = false } };
+            UpdateTrainingSetupInfo();
+        }
         if (previous is not null && selected is null)
             _notice.Text = "The selected window is no longer available. Choose a source window before starting observation.";
     }
@@ -511,6 +524,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
             _lateness.Value = settings.MaximumLatenessMs;
         }
         finally { _populating = false; }
+        UpdateTrainingSetupInfo();
         RefreshModelLibrary(settings);
     }
     private void InvalidateCorrection()
@@ -569,6 +583,8 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _recordTraining.IsEnabled = !_busy && _session?.IsStopping != true && training?.IsRecording != true &&
             (training is not { HasTake: true, IsFinalized: false });
         _stopTraining.IsEnabled = !_busy && training?.IsRecording == true;
+        _setupTraining.IsEnabled = !_busy && _session?.IsStopping != true &&
+            training is not { HasTake: true, IsFinalized: false };
         if (_pageVisible && !_liveSelected && editable && !_busy && !_source.IsDropDownOpen && !_refreshingSources &&
             (_sourcesRefreshedAt == 0 || Stopwatch.GetElapsedTime(_sourcesRefreshedAt).TotalSeconds >= 2))
             RunAction(RefreshWindows);
@@ -673,6 +689,104 @@ internal sealed class VisionPanel : UserControl, IDisposable
         _trainingDetails.Text = training is { HasTake: true } clip
             ? clip.Message + "\nClip folder: " + clip.DirectoryPath + "\nReview and label captured shots before using them to train a model."
             : "Use Record training clip above to choose a save folder and record 10 seconds of manual gameplay. Live view starts automatically. A model is not required. Clips must be reviewed and labeled before model training.";
+    }
+
+    private void UpdateTrainingSetupInfo()
+    {
+        var capture = _loadedSettings.TrainingCapture;
+        _trainingSetupInfo.Text = capture.Configured
+            ? $"Capture layout: {capture.HudName} · {(capture.Purpose == VisionTrainingPurpose.MeterSupervisedTraining ? "Training · meter on" : "Validation · meter off")} · {capture.ShotCategory} · {capture.SourceWidth} × {capture.SourceHeight}. Recheck the layout after changing HUD placement or window size."
+            : "Set up training capture before recording: mark the gameplay area, player, meter and shot feedback on the preview.";
+    }
+
+    private async void SetupTrainingCapture()
+    {
+        if (_busy) return;
+        _busy = true; RefreshStatus();
+        try { await SetupTrainingCaptureCoreAsync(); }
+        catch (Exception error) { if (!_disposed) _notice.Text = error.Message; }
+        finally { _busy = false; RefreshStatus(); }
+    }
+
+    private async Task<bool> SetupTrainingCaptureCoreAsync()
+    {
+        if (_shotProfile is not { } profile)
+            throw new InvalidOperationException("Create and select a complete NBA 2K27 player/shot profile in Plugins first.");
+        if (_source.SelectedItem is not CaptureSource source)
+            throw new InvalidOperationException("Choose the Remote Play window in Configuration before setting up training capture.");
+        if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
+            throw new InvalidOperationException("Finish the current training clip before changing its capture layout.");
+        if (_session?.IsStopping == true)
+            throw new InvalidOperationException("Live view is stopping. Wait for it to finish before setting up capture.");
+        var runtime = _runtime() ?? throw new InvalidOperationException("Controller monitor unavailable.");
+        var settings = ReadSettings();
+        Guid profileId = _profileId;
+        _tabs.SelectedItem = _liveTab;
+        if (_session?.Status.Running != true) StartSession(loadModel: false);
+        var session = _session!;
+        int workflowVersion = _workflowVersion;
+        _notice.Text = "Getting a fresh preview for training setup…";
+        WriteableBitmap? snapshot = null;
+        long began = Stopwatch.GetTimestamp();
+        while (snapshot is null && Stopwatch.GetElapsedTime(began).TotalSeconds < 4)
+        {
+            CheckSetupContext();
+            if (session.TakePreview() is { } preview)
+            {
+                using (preview)
+                {
+                    snapshot = new WriteableBitmap(preview.Width, preview.Height);
+                    snapshot.PixelBuffer.As<IBufferByteAccess>().Buffer(out nint target);
+                    Marshal.Copy(preview.Pixels, 0, target, preview.Length);
+                    snapshot.Invalidate();
+                }
+            }
+            else if (session.Status is { Running: true, Frames: > 0, SourceStale: false } &&
+                _lastObservedSource == source.Hwnd && _bitmap is { } current && _preview.Visibility == Visibility.Visible &&
+                current.PixelWidth == session.Status.CaptureWidth && current.PixelHeight == session.Status.CaptureHeight)
+            {
+                int length = checked(current.PixelWidth * current.PixelHeight * 4);
+                var copy = new byte[length];
+                current.PixelBuffer.As<IBufferByteAccess>().Buffer(out nint from);
+                Marshal.Copy(from, copy, 0, length);
+                snapshot = new WriteableBitmap(current.PixelWidth, current.PixelHeight);
+                snapshot.PixelBuffer.As<IBufferByteAccess>().Buffer(out nint to);
+                Marshal.Copy(copy, 0, to, length); snapshot.Invalidate();
+            }
+            else if (session.Status.CaptureFailed)
+                throw new InvalidOperationException("The selected window could not be captured. Check the live view before setting up training.");
+            if (snapshot is null) await Task.Delay(50);
+        }
+        if (snapshot is null)
+            throw new InvalidOperationException("No fresh preview arrived. Make sure the selected Remote Play window is visible and playing video, then try setup again.");
+        CheckSetupContext();
+        // Freeze a separate image before stopping; the dialog never shares the updating preview bitmap.
+        Stop();
+        workflowVersion = _workflowVersion;
+        began = Stopwatch.GetTimestamp();
+        while (session.IsStopping && Stopwatch.GetElapsedTime(began).TotalSeconds < 4) await Task.Delay(50);
+        if (session.IsStopping) throw new InvalidOperationException("Live view is still stopping. Try training setup again when it has stopped.");
+        CheckSetupContext();
+        var result = await VisionTrainingSetup.ShowAsync(XamlRoot, ActualTheme, snapshot, settings, profile,
+            snapshot.PixelWidth, snapshot.PixelHeight);
+        CheckSetupContext();
+        if (result is not { } selected)
+        { _notice.Text = "Capture setup cancelled. Live view is stopped; the previous layout was kept."; return false; }
+        var updated = settings with { Crop = selected.Player, TrainingCapture = selected.Capture, CorrectionMs = 0 };
+        updated.Validate();
+        _store.Save(profileId, updated);
+        Populate(updated); runtime.ConfigureVision(updated);
+        _notice.Text = "Capture layout saved. Record training clip will save the player, scene, meter, feedback and controller trace. Keep playing through the shot feedback before stopping the clip.";
+        return true;
+
+        void CheckSetupContext()
+        {
+            if (_disposed || _workflowVersion != workflowVersion || _profileId != profileId ||
+                _shotProfile is not { } selectedProfile || selectedProfile.Id != profile.Id || selectedProfile.ConfigurationFingerprint != profile.ConfigurationFingerprint ||
+                _source.SelectedItem is not CaptureSource currentSource || currentSource.Hwnd != source.Hwnd ||
+                currentSource.ProcessId != source.ProcessId || !ReferenceEquals(runtime, _runtime()) || !ReferenceEquals(session, _session))
+                throw new InvalidOperationException("The source or shot profile changed during setup. Open capture setup again for the selected source.");
+        }
     }
 
     private async void ImportModelPackage()
@@ -806,6 +920,12 @@ internal sealed class VisionPanel : UserControl, IDisposable
             if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
                 throw new InvalidOperationException("Wait for the current clip to finish recording or saving.");
             var settings = ReadSettings();
+            if (!settings.TrainingCapture.Configured)
+            {
+                if (!await SetupTrainingCaptureCoreAsync()) return;
+                settings = ReadSettings();
+            }
+            settings.TrainingCapture.ValidateForRecording(profile);
             int workflowVersion = _workflowVersion;
             Guid profileId = _profileId;
             var picker = new FolderPicker(_windowId);
@@ -825,9 +945,35 @@ internal sealed class VisionPanel : UserControl, IDisposable
                 if (_session?.IsStopping == true)
                     throw new InvalidOperationException("Live view is still stopping. Wait for it to finish, then record a clip.");
                 if (_session?.Status.Running != true) StartSession(loadModel: false);
+                var recordingSession = _session!;
+                int recordingWorkflow = _workflowVersion;
+                long captureStarted = Stopwatch.GetTimestamp();
+                while (recordingSession.Status is not { Frames: > 0, CaptureWidth: > 0, CaptureHeight: > 0 })
+                {
+                    CheckRecordingContext();
+                    if (!recordingSession.Status.Running || recordingSession.Status.CaptureFailed)
+                        throw new InvalidOperationException("Live view could not start. Check the selected Remote Play window before recording.");
+                    if (Stopwatch.GetElapsedTime(captureStarted).TotalSeconds >= 3)
+                        throw new InvalidOperationException("No gameplay frame arrived. Make sure the selected Remote Play window is playing, then try recording again.");
+                    await Task.Delay(50);
+                }
+                CheckRecordingContext();
+                if (recordingSession.Status.CaptureWidth != settings.TrainingCapture.SourceWidth ||
+                    recordingSession.Status.CaptureHeight != settings.TrainingCapture.SourceHeight)
+                    throw new InvalidOperationException("The capture window size changed. Use Set up training capture to confirm the regions again before recording.");
                 _session!.StartTraining(folder.Path, profile, currentSource.Title);
                 _tabs.SelectedItem = _liveTab;
                 _notice.Text = RecordingNotice;
+
+                void CheckRecordingContext()
+                {
+                    if (_disposed || _workflowVersion != recordingWorkflow || _profileId != profileId ||
+                        _shotProfile is not { } selectedProfile || selectedProfile.Id != profile.Id || selectedProfile.ConfigurationFingerprint != profile.ConfigurationFingerprint ||
+                        ReadSettings() != settings || _source.SelectedItem is not CaptureSource selected ||
+                        selected.Hwnd != source.Hwnd || selected.ProcessId != source.ProcessId ||
+                        !ReferenceEquals(runtime, _runtime()) || !ReferenceEquals(recordingSession, _session))
+                        throw new InvalidOperationException("The source or shot profile changed while waiting for capture. Check the configuration and record again.");
+                }
             }
         }
         catch (Exception error) { _notice.Text = error.Message; }

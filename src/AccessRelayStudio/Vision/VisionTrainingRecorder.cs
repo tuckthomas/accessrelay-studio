@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using EliteScriptStudio.Core;
 
@@ -9,13 +10,18 @@ namespace EliteScriptStudio.Vision;
 internal readonly record struct VisionTrainingStatus(bool HasTake, bool IsRecording, bool IsFinalized,
     bool IsComplete, string DirectoryPath, long StoredFrames, long DroppedFrames, string Message);
 
-/// <summary>Opt-in, bounded raw player-crop dataset writer. This records observations, never target labels.</summary>
+/// <summary>Opt-in, bounded synchronized visual/controller evidence writer. Observations are not target labels.</summary>
 internal sealed class VisionTrainingRecorder : IDisposable
 {
     internal const int StoredWidth = 256, StoredHeight = 256, FrameBytes = StoredWidth * StoredHeight * 4;
-    private sealed record Pending(byte[] Pixels, long Sequence, long CaptureTicks, long ShotToken, bool PhysicalShootHeld);
+    internal const long EvidenceByteLimit = 2L * 1024 * 1024 * 1024;
+    private sealed record StoredRegion(string Name, string File, int Width, int Height, VisionCrop Crop)
+    { internal int ByteLength => checked(Width * Height * 4); }
+    private sealed record RegionFrameEntry(string Name, string File, long OffsetBytes, int ByteLength);
+    private sealed record Pending(byte[] Pixels, long Sequence, long CaptureTicks, long ObservedTicks,
+        long ShotToken, bool PhysicalShootHeld, long SourceGeneration);
     private sealed record FrameEntry(long Sequence, long CaptureTicks, string File, long OffsetBytes, int ByteLength,
-        long ShotToken, bool PhysicalShootHeld);
+        long ShotToken, bool PhysicalShootHeld, long ObservedTicks, long SourceGeneration, RegionFrameEntry[]? Evidence);
     private readonly Channel<Pending> _frames = Channel.CreateBounded<Pending>(new BoundedChannelOptions(8)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly List<FrameEntry> _index = [];
@@ -26,6 +32,11 @@ internal sealed class VisionTrainingRecorder : IDisposable
     private readonly Timer _timeout;
     private readonly Func<string, Stream> _createStream;
     private readonly TimeSpan _durationLimit;
+    private readonly StoredRegion[] _regions;
+    private readonly int _bytesPerFrame;
+    private readonly long _byteLimit;
+    private readonly VisionTrainingTrace? _controllerTrace;
+    private Action? _detachControllerTrace;
     private readonly long _started = Stopwatch.GetTimestamp();
     private readonly DateTimeOffset _createdAtUtc = DateTimeOffset.UtcNow;
     private readonly object _gate = new();
@@ -47,10 +58,31 @@ internal sealed class VisionTrainingRecorder : IDisposable
     }
 
     internal VisionTrainingRecorder(string parentDirectory, Nba2K27ShotProfile profile, VisionSettings settings, string sourceTitle,
-        Func<string, Stream>? streamFactory = null, TimeSpan? durationLimit = null)
+        Func<string, Stream>? streamFactory = null, TimeSpan? durationLimit = null,
+        VisionTrainingTrace? controllerTrace = null, Action? detachControllerTrace = null, long? byteLimit = null)
     {
         profile.Validate(); settings.Validate();
-        // Internal test seams keep production defaults: 10 seconds, 512 MiB, eight pending frames.
+        // Legacy primary-only fixtures remain readable; the UI/session requires configured multi-region evidence.
+        if (settings.TrainingCapture.Configured) settings.TrainingCapture.ValidateForRecording(profile);
+        var regions = new List<StoredRegion> { new("player", "frames.bgra", StoredWidth, StoredHeight, settings.Crop) };
+        if (settings.TrainingCapture.Configured)
+        {
+            var layout = settings.TrainingCapture;
+            if (!VisionTrainingCaptureSettings.Contains(layout.GameplayRegion, settings.Crop))
+                throw new InvalidDataException("The player region must be inside the marked gameplay area.");
+            regions.Add(new("scene", "scene.bgra", 640, 360, layout.GameplayRegion));
+            if (layout.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && layout.MeterRegion is { } meter)
+                regions.Add(new("meter", "meter.bgra", 256, 256, meter));
+            regions.Add(new("feedback", "feedback.bgra", 640, 192, layout.FeedbackRegion!.Value));
+        }
+        _regions = regions.ToArray();
+        _bytesPerFrame = _regions.Sum(region => region.ByteLength);
+        long productionByteLimit = settings.TrainingCapture.Configured ? EvidenceByteLimit : 512L * 1024 * 1024;
+        _byteLimit = byteLimit ?? productionByteLimit;
+        if (_byteLimit < _bytesPerFrame || _byteLimit > productionByteLimit)
+            throw new ArgumentOutOfRangeException(nameof(byteLimit));
+        _controllerTrace = controllerTrace; _detachControllerTrace = detachControllerTrace;
+        // Production defaults: 10 seconds, at most 2 GiB across visual streams, eight pending frames.
         _durationLimit = durationLimit ?? TimeSpan.FromSeconds(10);
         if (_durationLimit <= TimeSpan.Zero || _durationLimit > TimeSpan.FromSeconds(10))
             throw new ArgumentOutOfRangeException(nameof(durationLimit));
@@ -58,8 +90,10 @@ internal sealed class VisionTrainingRecorder : IDisposable
             FileAccess.Write, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan));
         var parent = Path.GetFullPath(parentDirectory);
         Directory.CreateDirectory(parent);
-        if (new DriveInfo(Path.GetPathRoot(parent)!).AvailableFreeSpace < 512L * 1024 * 1024)
-            throw new IOException("Training capture needs at least 512 MiB of free space in the selected location.");
+        if (new DriveInfo(Path.GetPathRoot(parent)!).AvailableFreeSpace < _byteLimit + 64L * 1024 * 1024)
+            throw new IOException(settings.TrainingCapture.Configured
+                ? "Training evidence needs at least 2.1 GiB free in the selected location. Choose a drive with enough space."
+                : "Training capture needs at least 576 MiB of free space in the selected location.");
         DirectoryPath = Path.Combine(parent, "take-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(DirectoryPath);
         _profile = profile; _settings = settings; _sourceTitle = sourceTitle;
@@ -74,69 +108,98 @@ internal sealed class VisionTrainingRecorder : IDisposable
 
     internal void Capture(CapturedVisionFrame frame, VisionStatusSnapshot output)
     {
+        long observedTicks = Stopwatch.GetTimestamp();
         lock (_gate)
         {
             if (_finished) return;
             if (Stopwatch.GetElapsedTime(_started) >= _durationLimit)
             { FinishLocked("Training take complete. Review and label the recorded frames before training.", true); return; }
+            if (_settings.TrainingCapture.Configured && (frame.Width != _settings.TrainingCapture.SourceWidth ||
+                frame.Height != _settings.TrainingCapture.SourceHeight))
+            { FinishLocked("Capture size changed since HUD setup. Take marked incomplete; confirm the regions on a fresh preview.", false); return; }
             if (_generation >= 0 && (_generation != frame.SourceGeneration || _width != frame.Width || _height != frame.Height))
             { FinishLocked("Source resized or changed. Take marked incomplete; record a new take.", false); return; }
             _generation = frame.SourceGeneration; _width = frame.Width; _height = frame.Height;
         }
-        var buffer = ArrayPool<byte>.Shared.Rent(FrameBytes);
+        var buffer = ArrayPool<byte>.Shared.Rent(_bytesPerFrame);
         try
         {
-            ResizeCrop(frame, buffer, _settings.Crop);
-            if (_frames.Writer.TryWrite(new(buffer, frame.Sequence, frame.CaptureTicks, output.ShotToken, output.ShootHeld)))
+            int offset = 0;
+            foreach (var region in _regions)
+            {
+                ResizeCrop(frame, buffer.AsSpan(offset, region.ByteLength), region);
+                offset += region.ByteLength;
+            }
+            if (_frames.Writer.TryWrite(new(buffer, frame.Sequence, frame.CaptureTicks, observedTicks,
+                    output.ShotToken, output.ShootHeld, frame.SourceGeneration)))
                 buffer = null!;
-            else Interlocked.Increment(ref _dropped);
+            else lock (_gate)
+            {
+                // Stop/timer can finalize while this producer finishes cropping. That rejected
+                // post-stop frame must not mutate counters after metadata was already finalized.
+                if (!_finished) Interlocked.Increment(ref _dropped);
+            }
         }
         finally { if (buffer is not null) ArrayPool<byte>.Shared.Return(buffer); }
     }
 
-    private static void ResizeCrop(CapturedVisionFrame frame, byte[] target, VisionCrop crop)
+    private static void ResizeCrop(CapturedVisionFrame frame, Span<byte> target, StoredRegion region)
     {
+        var crop = region.Crop;
         var source = frame.Pixels.Span;
-        for (int y = 0; y < StoredHeight; y++)
+        for (int y = 0; y < region.Height; y++)
         {
-            int sy = Math.Min(frame.Height - 1, (int)((crop.Top + (y + .5) / StoredHeight * crop.Height) * frame.Height));
-            for (int x = 0; x < StoredWidth; x++)
+            int sy = Math.Min(frame.Height - 1, (int)((crop.Top + (y + .5) / region.Height * crop.Height) * frame.Height));
+            for (int x = 0; x < region.Width; x++)
             {
-                int sx = Math.Min(frame.Width - 1, (int)((crop.Left + (x + .5) / StoredWidth * crop.Width) * frame.Width));
-                source.Slice(sy * frame.Stride + sx * 4, 4).CopyTo(target.AsSpan((y * StoredWidth + x) * 4, 4));
+                int sx = Math.Min(frame.Width - 1, (int)((crop.Left + (x + .5) / region.Width * crop.Width) * frame.Width));
+                source.Slice(sy * frame.Stride + sx * 4, 4).CopyTo(target.Slice((y * region.Width + x) * 4, 4));
             }
         }
     }
 
     private async Task WriteAsync()
     {
+        var streams = new List<Stream>();
         try
         {
-            await using var stream = _createStream(Path.Combine(DirectoryPath, "frames.bgra"));
+            foreach (var region in _regions) streams.Add(_createStream(Path.Combine(DirectoryPath, region.File)));
+            long totalBytes = 0;
             await foreach (var frame in _frames.Reader.ReadAllAsync())
             {
                 try
                 {
-                    if (stream.Position + FrameBytes > 512L * 1024 * 1024)
+                    if (totalBytes + _bytesPerFrame > _byteLimit)
                     {
-                        lock (_gate) FinishLocked("Take reached its 512 MiB limit.", true);
+                        lock (_gate) FinishLocked("Take reached its visual evidence storage limit.", true);
                         Interlocked.Increment(ref _dropped);
                         continue;
                     }
-                    long offset = stream.Position;
-                    await stream.WriteAsync(frame.Pixels.AsMemory(0, FrameBytes));
+                    long offset = streams[0].Position;
+                    var evidence = _regions.Length > 1 ? new RegionFrameEntry[_regions.Length - 1] : null;
+                    int bufferOffset = 0;
+                    for (int index = 0; index < _regions.Length; index++)
+                    {
+                        var region = _regions[index];
+                        long regionOffset = streams[index].Position;
+                        await streams[index].WriteAsync(frame.Pixels.AsMemory(bufferOffset, region.ByteLength));
+                        if (index > 0) evidence![index - 1] = new(region.Name, region.File, regionOffset, region.ByteLength);
+                        bufferOffset += region.ByteLength;
+                    }
+                    totalBytes += _bytesPerFrame;
                     _index.Add(new(frame.Sequence, frame.CaptureTicks, "frames.bgra", offset, FrameBytes,
-                        frame.ShotToken, frame.PhysicalShootHeld));
+                        frame.ShotToken, frame.PhysicalShootHeld, frame.ObservedTicks, frame.SourceGeneration, evidence));
                     Interlocked.Increment(ref _storedFrames);
                 }
                 finally { ArrayPool<byte>.Shared.Return(frame.Pixels); }
             }
-            await stream.FlushAsync();
+            foreach (var stream in streams) await stream.FlushAsync();
         }
         catch (Exception error)
         {
             lock (_gate)
             {
+                DetachControllerTrace();
                 _finished = true; _complete = false;
                 _message = "Training capture failed: " + error.Message;
                 _frames.Writer.TryComplete();
@@ -145,9 +208,22 @@ internal sealed class VisionTrainingRecorder : IDisposable
         }
         finally
         {
+            DetachControllerTrace();
+            foreach (var stream in streams)
+                try { await stream.DisposeAsync(); }
+                catch (Exception error) { lock (_gate) { _complete = false; _message = "Training stream finalization failed: " + error.Message; } }
             lock (_gate) { _finished = true; if (_index.Count == 0) _complete = false; }
             try
             {
+                if (_controllerTrace is { } trace)
+                {
+                    var snapshot = trace.Snapshot();
+                    if (snapshot.Samples.Length == 0 || snapshot.DroppedSamples > 0)
+                        lock (_gate) { _complete = false; _message = "Controller trace is missing or exceeded its bound; evidence is incomplete."; }
+                    WriteJson("controller-trace.json", new { schemaVersion = 1, stopwatchFrequency = Stopwatch.Frequency,
+                        timingScope = "PC physical sampling and locally accepted output requests. Acceptance may retain a duplicate report; Xbox receipt/application is not measured.",
+                        samples = snapshot.Samples, droppedSamples = snapshot.DroppedSamples, capacity = snapshot.Capacity });
+                }
                 WriteMetadata(_complete);
                 lock (_gate) _metadataComplete = _complete;
             }
@@ -171,21 +247,43 @@ internal sealed class VisionTrainingRecorder : IDisposable
             sourceTitle = _sourceTitle, shotProfile = _profile, stopwatchFrequency = Stopwatch.Frequency,
             frames = _index, droppedFrames = Interlocked.Read(ref _dropped), complete,
             labelsRequired = "Target release labels require reviewed practice experiments; physical release and ball departure are not automatically ground truth.",
-            timingScope = "PC capture timestamps; original Xbox render time is not measured."
+            timingScope = "PC capture timestamps; original Xbox render time is not measured.",
+            captureEvidence = _settings.TrainingCapture.Configured ? new
+            {
+                version = 1, purpose = _settings.TrainingCapture.Purpose, layout = _settings.TrainingCapture,
+                streams = _regions.Select(region => new { region.Name, region.File, region.Width, region.Height,
+                    stride = region.Width * 4, pixelFormat = "BGRA8", region.Crop }),
+                controllerTraceFile = _controllerTrace is not null ? "controller-trace.json" : null,
+                controllerSamples = _controllerTrace?.StoredSamples ?? 0,
+                droppedControllerSamples = _controllerTrace?.DroppedSamples ?? 0,
+                maximumVisualBytes = _byteLimit,
+                labelStatus = "Raw synchronized evidence only. Meter, tempo, contest and feedback labels still require extraction and review. The current trainer does not consume enriched evidence.",
+                shotTokenScope = "Diagnostic arbiter token, normally zero while manual training disarms assistance; not a gameplay shot identifier."
+            } : null
         };
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
-        string temporary = Path.Combine(DirectoryPath, "session.json.tmp");
-        File.WriteAllText(temporary, JsonSerializer.Serialize(metadata, options));
-        File.Move(temporary, Path.Combine(DirectoryPath, "session.json"), overwrite: true);
+        WriteJson("session.json", metadata);
         if (!File.Exists(Path.Combine(DirectoryPath, "labels.example.json")))
             File.WriteAllText(Path.Combine(DirectoryPath, "labels.example.json"), JsonSerializer.Serialize(new
             {
                 schemaVersion = 1, sessionId = Path.GetFileName(DirectoryPath), labelTimeBasis = "captured-target-game-phase", split = "train", shots = Array.Empty<object>(),
                 instructions = "Copy to labels.json. Add reviewed shots with shotId, startTicks, endTicks, targetReleaseTicks, isTargetShot, playerIdentityConfirmed. See docs/vision-model-workflow.md."
-            }, options));
+            }, JsonOptions));
     }
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
+    private void WriteJson(string filename, object document)
+    {
+        string temporary = Path.Combine(DirectoryPath, filename + ".tmp");
+        File.WriteAllText(temporary, JsonSerializer.Serialize(document, JsonOptions));
+        File.Move(temporary, Path.Combine(DirectoryPath, filename), overwrite: true);
+    }
+    private void DetachControllerTrace() => Interlocked.Exchange(ref _detachControllerTrace, null)?.Invoke();
     private void FinishLocked(string message, bool complete)
-    { if (_finished) return; _finished = true; _complete = complete; _message = message; _frames.Writer.TryComplete(); }
+    { if (_finished) return; _finished = true; _complete = complete; _message = message; DetachControllerTrace(); _frames.Writer.TryComplete(); }
     internal void Stop(bool complete = false) { lock (_gate) FinishLocked(complete ? "Take stopped; review labels." : "Take stopped early; marked incomplete.", complete); }
     public void Dispose() { _timeout.Dispose(); Stop(); _writer.GetAwaiter().GetResult(); }
 }

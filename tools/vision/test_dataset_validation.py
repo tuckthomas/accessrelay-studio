@@ -53,6 +53,34 @@ class DatasetValidationTests(unittest.TestCase):
         self.assertEqual(fingerprint, "a" * 64)
         self.assertEqual(camera, "2K")
 
+    def test_enriched_evidence_rejected_for_every_dataset_split(self):
+        for purpose in ("meterSupervisedTraining", "meterOffValidation"):
+            for split in ("train", "validation", "held-out"):
+                with self.subTest(purpose=purpose, split=split):
+                    metadata = self.session | {"captureEvidence": {"version": 1, "purpose": purpose,
+                                                                 "layout": {}, "streams": []}}
+                    (self.directory / "session.json").write_text(json.dumps(metadata), encoding="utf-8")
+                    # No labels.json is needed to diagnose this unsupported capture
+                    # format. In particular, held-out footage must not be silently
+                    # treated as legacy player crops by the shared evaluation loader.
+                    with self.assertRaisesRegex(ValueError, "reviewed label conversion.*meter-leakage-safe.*teacher/student"):
+                        training.load_sessions([self.directory], split, 2, 10)
+
+    def test_malformed_enriched_marker_cannot_bypass_compatibility_gate(self):
+        for evidence in (None, False, {}, [], "legacy", {"version": 999}):
+            with self.subTest(evidence=evidence):
+                metadata = self.session | {"captureEvidence": evidence}
+                (self.directory / "session.json").write_text(json.dumps(metadata), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "not supported by the current trainer/evaluator"):
+                    self.load([self.target, self.negative])
+
+    def test_enriched_evidence_rejected_before_primary_pixel_access(self):
+        self.session["captureEvidence"] = {"version": 1, "purpose": "meterSupervisedTraining"}
+        (self.directory / "session.json").write_text(json.dumps(self.session), encoding="utf-8")
+        (self.directory / "frames.bgra").unlink()
+        with self.assertRaisesRegex(ValueError, "Preserve the original evidence"):
+            self.load([self.target, self.negative])
+
     def test_target_negative_overlap_rejected_before_samples(self):
         negative = self.negative | {"startTicks": 130000}
         with self.assertRaisesRegex(ValueError, "overlap"):

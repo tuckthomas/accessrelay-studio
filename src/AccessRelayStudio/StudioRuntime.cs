@@ -34,6 +34,8 @@ internal sealed class StudioRuntime : IDisposable
     private long _recordingBeganAt;
     private int _selectionVersion;
     private bool _visionTrainingRecording;
+    private VisionTrainingTrace? _visionTrainingTrace;
+    private long _visionTrainingTraceAttachedAt, _latestInputSampleTicks;
 
     public RuntimeSample? Latest => Volatile.Read(ref _latest);
     public bool HasOutput { get { lock (_sync) return _output is not null; } }
@@ -99,6 +101,17 @@ internal sealed class StudioRuntime : IDisposable
             _vision.SetTrainingRecording(recording);
         }
         _releaseScheduler.Signal();
+    }
+
+    internal void SetVisionTrainingTrace(VisionTrainingTrace? trace)
+    {
+        // Polling and scheduled output use the same lock. Returning from detach fences every
+        // producer, allowing the caller to finalize the trace without post-detach records.
+        lock (_sync)
+        {
+            _visionTrainingTrace = trace;
+            _visionTrainingTraceAttachedAt = Stopwatch.GetTimestamp();
+        }
     }
 
     public RecorderState Recording
@@ -295,6 +308,7 @@ internal sealed class StudioRuntime : IDisposable
             {
                 int selection = Volatile.Read(ref _selectionVersion);
                 var input = _input.Poll();
+                long sampleTicks = Stopwatch.GetTimestamp();
                 if (input.PressedPaddles != PaddleButtons.None)
                 {
                     paddlePulse++;
@@ -348,7 +362,8 @@ internal sealed class StudioRuntime : IDisposable
                     state = _stickDeadzone.Apply(state);
                     state = _vision.Sample(input.State, state, input.IsConnected, _output?.IsAvailable == true,
                         _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp());
-                    WriteOutputLocked(state);
+                    _latestInputSampleTicks = sampleTicks;
+                    WriteTracedOutputLocked(state, VisionTrainingTraceKind.Poll, sampleTicks, input);
                     Volatile.Write(ref _latest, new(input, state, _output is not null, _outputStatus,
                         _engine.Status, mean, p95, p99, paddlePulse, lastPaddles, visible));
                 }
@@ -425,7 +440,8 @@ internal sealed class StudioRuntime : IDisposable
             if (_stop.IsCancellationRequested || !_vision.TryAdvanceDeadline(timestamp)) return;
             try
             {
-                WriteOutputLocked(_vision.Output);
+                WriteTracedOutputLocked(_vision.Output, VisionTrainingTraceKind.DeadlineOutput,
+                    _latestInputSampleTicks, _latest?.Input ?? default);
                 if (_latest is { } previous)
                     Volatile.Write(ref _latest, previous with { Output = _vision.Output, OutputActive = _output is not null });
             }
@@ -437,9 +453,34 @@ internal sealed class StudioRuntime : IDisposable
         }
     }
 
-    private void WriteOutputLocked(ControllerState state)
+    private void WriteTracedOutputLocked(ControllerState state, VisionTrainingTraceKind kind,
+        long sampleTicks, ControllerSample input)
+    {
+        var trace = _visionTrainingTrace;
+        if (trace is null || sampleTicks < _visionTrainingTraceAttachedAt)
+        {
+            WriteOutputLocked(state);
+            return;
+        }
+        bool outputAvailable = _output?.IsAvailable == true;
+        long before = Stopwatch.GetTimestamp();
+        bool accepted = false;
+        try { accepted = WriteOutputLocked(state); }
+        finally
+        {
+            long after = Stopwatch.GetTimestamp();
+            trace.Record(new(kind, sampleTicks, before, after, input.State, state,
+                input.IsConnected, input.ConnectionVersion, input.HeldPaddles, input.PressedPaddles,
+                outputAvailable, accepted));
+        }
+    }
+
+    private bool WriteOutputLocked(ControllerState state)
     {
         // This is the sole report-writing path for polling and deadline wakes alike.
-        if (_output is not null && !_output.TryWrite(state)) DisconnectOutput(_output.Status);
+        if (_output is null) return false;
+        if (_output.TryWrite(state)) return true;
+        DisconnectOutput(_output.Status);
+        return false;
     }
 }

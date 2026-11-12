@@ -15,9 +15,17 @@ namespace EliteScriptStudio.Input
         private readonly object _gate = new();
         private ControllerState _state;
         private PaddleButtons _paddles;
+        private bool _connected = true;
+        private long _connectionVersion = 1;
         internal void SetState(ControllerState state, PaddleButtons paddles = PaddleButtons.None)
         { lock (_gate) { _state = state; _paddles = paddles; } }
-        internal ControllerSample Poll() { lock (_gate) return new(true, _state, _paddles, PaddleButtons.None, 1); }
+        internal void SetConnection(bool connected, long connectionVersion)
+        { lock (_gate) { _connected = connected; _connectionVersion = connectionVersion; } }
+        internal ControllerSample Poll()
+        {
+            lock (_gate) return new(_connected, _state, _connected ? _paddles : PaddleButtons.None,
+                PaddleButtons.None, _connectionVersion);
+        }
         internal void SelectDevice(string? id) { }
         internal void SetVirtualOutputActive(bool active) { }
         public void Dispose() { }
@@ -36,10 +44,16 @@ namespace EliteScriptStudio.Output
 
     internal sealed class UsbipXboxOutput : IControllerOutput
     {
+        private int _rejectWrites;
+        internal bool RejectWrites
+        {
+            get => Volatile.Read(ref _rejectWrites) != 0;
+            set => Volatile.Write(ref _rejectWrites, value ? 1 : 0);
+        }
         public string Status => "Verification output";
         public bool IsAvailable => true;
         public double? RecentHandoffMs => null;
-        public bool TryWrite(ControllerState state) => true;
+        public bool TryWrite(ControllerState state) => !RejectWrites;
         public void Neutralize() { }
         public void Dispose() { }
     }

@@ -348,13 +348,24 @@ internal sealed class VisionSession : IDisposable
                 throw new InvalidOperationException("Restart observation using the selected NBA 2K27 shot profile before recording.");
             if (_activeSettings.CameraView != profile.CameraView)
                 throw new InvalidOperationException("Restart observation using the selected camera view before recording.");
+            _activeSettings.TrainingCapture.ValidateForRecording(profile);
+            if (_status.CaptureWidth != _activeSettings.TrainingCapture.SourceWidth ||
+                _status.CaptureHeight != _activeSettings.TrainingCapture.SourceHeight)
+                throw new InvalidOperationException("Wait for a fresh live preview and confirm training capture setup for the current window size.");
             _runtime.SetVisionTrainingRecording(true);
             _trainingInhibited = true;
             _status = _status with { CanArm = false };
             _recorder?.Dispose();
-            try { _recorder = new VisionTrainingRecorder(directory, profile, _activeSettings, sourceTitle); }
+            try
+            {
+                var trace = new VisionTrainingTrace();
+                _runtime.SetVisionTrainingTrace(trace);
+                _recorder = new VisionTrainingRecorder(directory, profile, _activeSettings, sourceTitle,
+                    controllerTrace: trace, detachControllerTrace: () => _runtime.SetVisionTrainingTrace(null));
+            }
             catch
             {
+                _runtime.SetVisionTrainingTrace(null);
                 _runtime.SetVisionTrainingRecording(false);
                 _trainingInhibited = false;
                 throw;

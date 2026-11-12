@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using EliteScriptStudio.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -29,9 +30,17 @@ internal static class VisionDatasetReview
     };
     [ComImport, Guid("905A0FEF-BC53-11DF-8C49-001E4FC686DA"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IBufferByteAccess { void Buffer(out nint data); }
-    private sealed record FrameIndex(long CaptureTicks, long OffsetBytes, int ByteLength, string File);
+    private sealed record RegionFrameIndex(string Name, string File, long OffsetBytes, int ByteLength);
+    private sealed record FrameIndex(long CaptureTicks, long OffsetBytes, int ByteLength, string File,
+        long Sequence = 0, RegionFrameIndex[]? Evidence = null);
+    private sealed record EvidenceStream(string Name, string File, int Width, int Height, int Stride,
+        string PixelFormat, VisionCrop Crop);
+    private sealed record CaptureEvidence(int Version, string Purpose, EvidenceStream[] Streams);
+    private sealed record ReviewRegion(string Name, string Label, string File, int Width, int Height)
+    { internal int ByteLength => checked(Width * Height * 4); }
     private sealed record Session(int SchemaVersion, string SessionId, bool Complete, long StopwatchFrequency,
-        int StoredWidth, int StoredHeight, int StoredStride, string PixelFormat, FrameIndex[] Frames);
+        int StoredWidth, int StoredHeight, int StoredStride, string PixelFormat, FrameIndex[] Frames,
+        CaptureEvidence? CaptureEvidence = null);
     private sealed record Shot(string ShotId, long StartTicks, long EndTicks, long? TargetReleaseTicks,
         bool IsTargetShot, bool PlayerIdentityConfirmed, bool Reviewed);
     private sealed record Labels(int SchemaVersion, string SessionId, string Split, Shot[] Shots,
@@ -50,12 +59,19 @@ internal static class VisionDatasetReview
         panel.Children.Add(Text("Mark the captured frame showing the desired target game phase, justified by a controlled practice attempt and reviewed game feedback. The target is not the physical button-up time or the PC virtual-controller send time. Runtime timing separately compensates video and input delay; labeling a button/send timestamp would compensate that delay twice. Ball departure alone does not establish the optimal target."));
         panel.Children.Add(Text("Labels use captured-target-game-phase timing. Choosing one frame has the recording's sampling uncertainty; it does not establish exact sub-millisecond Xbox timing."));
         panel.Children.Add(Text("Keep each complete session in one dataset split. Reserve held-out sessions for final evaluation; do not tune on them."));
+        if (take.HasEvidence)
+            panel.Children.Add(Text("This clip includes synchronized regions. Choose an available capture region, then use the same frame slider to inspect the shot and later feedback. Enriched clips still need reviewed label conversion before model training; nothing is extracted automatically."));
         panel.Children.Add(Text("Session: " + take.Session.SessionId));
         var split = new ComboBox { Header = "Dataset split for this entire take", ItemsSource = Splits, SelectedItem = take.Labels.Split,
-            HorizontalAlignment = HorizontalAlignment.Stretch };
+            FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
         panel.Children.Add(split);
+        var regionPicker = new ComboBox { Header = "Capture region", ItemsSource = take.Regions,
+            DisplayMemberPath = "Label", SelectedIndex = 0, FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Stretch, Visibility = take.HasEvidence ? Visibility.Visible : Visibility.Collapsed };
+        AutomationProperties.SetName(regionPicker, "Recorded capture region");
+        panel.Children.Add(regionPicker);
         var bitmap = new WriteableBitmap(Width, Height);
-        var preview = new Image { Source = bitmap, Width = 320, Height = 320, Stretch = Stretch.Uniform,
+        var preview = new Image { Source = bitmap, Width = take.HasEvidence ? 600 : 320, Height = take.HasEvidence ? 340 : 320, Stretch = Stretch.Uniform,
             HorizontalAlignment = HorizontalAlignment.Left };
         AutomationProperties.SetName(preview, "Training frame preview");
         panel.Children.Add(preview);
@@ -68,12 +84,12 @@ internal static class VisionDatasetReview
         var movement = Row();
         panel.Children.Add(movement);
         var existing = new ComboBox { Header = "Saved labels (select to edit)", DisplayMemberPath = "ShotId",
-            HorizontalAlignment = HorizontalAlignment.Stretch };
+            FontSize = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
         panel.Children.Add(existing);
-        var shotId = new TextBox { Header = "Shot / interval ID", MaxLength = 80 };
-        var isTarget = new CheckBox { Content = "This interval is an intended-player target shooting attempt", IsChecked = true };
-        var identity = new CheckBox { Content = "I confirmed the intended player's identity throughout this interval" };
-        var reviewed = new CheckBox { Content = "I reviewed this interval and, for a target shot, its controlled target game phase" };
+        var shotId = new TextBox { Header = "Shot / interval ID", MaxLength = 80, FontSize = 14 };
+        var isTarget = new CheckBox { Content = "This interval is an intended-player target shooting attempt", IsChecked = true, FontSize = 14 };
+        var identity = new CheckBox { Content = "I confirmed the intended player's identity throughout this interval", FontSize = 14 };
+        var reviewed = new CheckBox { Content = "I reviewed this interval and, for a target shot, its controlled target game phase", FontSize = 14 };
         panel.Children.Add(shotId); panel.Children.Add(isTarget); panel.Children.Add(identity);
         long start = take.Session.Frames[0].CaptureTicks, end = take.Session.Frames[^1].CaptureTicks;
         long? target = null;
@@ -95,15 +111,20 @@ internal static class VisionDatasetReview
             try
             {
                 index = Math.Clamp((int)Math.Round(scrub.Value), 0, take.Session.Frames.Length - 1);
-                take.ReadFrame(index);
+                var region = regionPicker.SelectedItem as ReviewRegion ?? take.Regions[0];
+                take.ReadFrame(index, region);
+                if (bitmap.PixelWidth != region.Width || bitmap.PixelHeight != region.Height)
+                    bitmap = new WriteableBitmap(region.Width, region.Height);
                 bitmap.PixelBuffer.As<IBufferByteAccess>().Buffer(out nint destination);
-                Marshal.Copy(take.Pixels, 0, destination, FrameBytes);
+                Marshal.Copy(take.Pixels, 0, destination, region.ByteLength);
                 bitmap.Invalidate();
+                preview.Source = bitmap;
                 long ticks = take.Session.Frames[index].CaptureTicks;
                 double elapsedMs = ((double)ticks - take.Session.Frames[0].CaptureTicks) * 1000 / take.Session.StopwatchFrequency;
-                frameText.Text = $"Frame {index + 1} / {take.Session.Frames.Length} · {elapsedMs:F2} ms from take start · capture ticks {ticks}";
+                frameText.Text = $"{region.Label} · {region.Width} × {region.Height}\nFrame {index + 1} / {take.Session.Frames.Length} · {elapsedMs:F2} ms from take start · capture ticks {ticks}"
+                    + (take.HasEvidence ? $" · source sequence {take.Session.Frames[index].Sequence}" : "");
             }
-            catch (Exception error) { message.Text = "Could not read this frame: " + error.Message; }
+            catch (Exception error) { preview.Source = null; message.Text = "Could not read this frame: " + error.Message; }
         }
         void RefreshLabels(string? selectedId = null)
         {
@@ -178,6 +199,7 @@ internal static class VisionDatasetReview
         shotId.TextChanged += (_, _) => reviewed.IsChecked = false;
         identity.Click += (_, _) => reviewed.IsChecked = false;
         scrub.ValueChanged += (_, _) => Render();
+        regionPicker.SelectionChanged += (_, _) => Render();
         RefreshLabels(); NewLabel(); Render();
         dialog.Content = new ScrollViewer { Content = panel, MaxHeight = 680, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         await dialog.ShowAsync();
@@ -189,18 +211,27 @@ internal static class VisionDatasetReview
     private sealed class Take : IDisposable
     {
         private readonly string _directory, _labelsPath;
-        private readonly FileStream _frames;
+        private FileStream? _frames;
+        private string? _openRegion;
         private string? _labelsHash;
         internal Session Session { get; }
         internal Labels Labels { get; private set; }
-        internal byte[] Pixels { get; } = new byte[FrameBytes];
+        internal ReviewRegion[] Regions { get; }
+        internal bool HasEvidence => Session.CaptureEvidence is not null;
+        internal byte[] Pixels { get; private set; } = [];
 
         internal Take(string directory)
         {
             _directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
             _labelsPath = Child("labels.json");
             byte[] metadata = ReadBounded(Child("session.json"));
+            using var document = JsonDocument.Parse(metadata, new JsonDocumentOptions { MaxDepth = 16 });
+            bool hasEvidenceMarker = document.RootElement.TryGetProperty("captureEvidence", out var evidenceMarker);
+            if (hasEvidenceMarker && evidenceMarker.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("The captureEvidence metadata is malformed; choose an original supported evidence take.");
             Session = JsonSerializer.Deserialize<Session>(metadata, Json) ?? throw new InvalidDataException("Session metadata is empty.");
+            if (Session.CaptureEvidence is { } versionedEvidence && versionedEvidence.Version != 1)
+                throw new InvalidDataException("This captureEvidence version is not supported. Update AccessRelay before reviewing this take.");
             if (Session.SchemaVersion != 1 || !Session.Complete || string.IsNullOrWhiteSpace(Session.SessionId)
                 || Session.SessionId.Length > 128 || Session.SessionId.Any(char.IsControl) || Session.StopwatchFrequency <= 0
                 || Session.StoredWidth != Width || Session.StoredHeight != Height || Session.StoredStride != Width * 4
@@ -216,6 +247,7 @@ internal static class VisionDatasetReview
                     throw new InvalidDataException("The training take contains invalid frame timestamps or data offsets.");
                 previous = frame.CaptureTicks;
             }
+            Regions = ValidateEvidence(length);
             if (File.Exists(_labelsPath))
             {
                 byte[] bytes = ReadBounded(_labelsPath);
@@ -224,12 +256,93 @@ internal static class VisionDatasetReview
                 _labelsHash = Convert.ToHexString(SHA256.HashData(bytes));
             }
             else Labels = new Labels(1, Session.SessionId, "train", []);
-            _frames = File.Open(framePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
 
-        internal void ReadFrame(int index)
+        private ReviewRegion[] ValidateEvidence(long primaryLength)
         {
-            _frames.Position = Session.Frames[index].OffsetBytes;
+            var player = new ReviewRegion("player", "Player", "frames.bgra", Width, Height);
+            if (Session.CaptureEvidence is not { } evidence)
+            {
+                if (Session.Frames.Any(frame => frame.Evidence is { Length: > 0 }))
+                    throw new InvalidDataException("Region frames have no matching captureEvidence stream metadata.");
+                return [player];
+            }
+            bool supervised = evidence.Purpose == "meterSupervisedTraining";
+            if (!supervised && evidence.Purpose != "meterOffValidation")
+                throw new InvalidDataException("The captureEvidence purpose is not supported.");
+            var expected = new List<ReviewRegion>
+            {
+                player, new("scene", "Court", "scene.bgra", 640, 360)
+            };
+            if (supervised) expected.Add(new("meter", "Meter", "meter.bgra", 256, 256));
+            expected.Add(new("feedback", "Shot feedback", "feedback.bgra", 640, 192));
+            if (evidence.Streams is null || evidence.Streams.Length != expected.Count)
+                throw new InvalidDataException("The evidence stream count does not match this clip's purpose.");
+            var declared = new HashSet<string>(StringComparer.Ordinal);
+            var lengths = new Dictionary<string, long>(StringComparer.Ordinal) { ["player"] = primaryLength };
+            long totalBytes = 0;
+            foreach (var stream in evidence.Streams)
+            {
+                if (stream is null || string.IsNullOrEmpty(stream.Name) || !declared.Add(stream.Name))
+                    throw new InvalidDataException("Each evidence stream needs one unique supported region name.");
+                var region = expected.FirstOrDefault(item => item.Name == stream.Name);
+                if (region is null || stream.File != region.File || stream.Width != region.Width || stream.Height != region.Height
+                    || stream.Stride != region.Width * 4 || stream.PixelFormat != "BGRA8")
+                    throw new InvalidDataException("The evidence stream filename, dimensions, stride or pixel format is unsupported.");
+                stream.Crop.Validate();
+                // Fixed allowlisted filenames pass through the same containment/reparse
+                // check as the primary stream. Validate file lengths without opening all
+                // streams or allocating their pixel buffers during metadata review.
+                long streamLength = stream.Name == "player" ? primaryLength : new FileInfo(Child(stream.File)).Length;
+                long expectedLength = (long)Session.Frames.Length * region.ByteLength;
+                if (streamLength != expectedLength)
+                    throw new InvalidDataException("An evidence stream's length does not match the recorded frame count.");
+                lengths[stream.Name] = streamLength;
+                totalBytes += streamLength;
+            }
+            if (totalBytes > 2L * 1024 * 1024 * 1024)
+                throw new InvalidDataException("The take exceeds the two-GiB visual evidence bound.");
+            long previousSequence = -1;
+            for (int index = 0; index < Session.Frames.Length; index++)
+            {
+                var frame = Session.Frames[index];
+                if (frame.Sequence < 0 || frame.Sequence <= previousSequence || frame.OffsetBytes != (long)index * FrameBytes
+                    || frame.Evidence is null || frame.Evidence.Length != expected.Count - 1)
+                    throw new InvalidDataException("Evidence frames must preserve one increasing source sequence and every synchronized region.");
+                previousSequence = frame.Sequence;
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var stored in frame.Evidence)
+                {
+                    if (stored is null || string.IsNullOrEmpty(stored.Name) || stored.Name == "player" || !names.Add(stored.Name))
+                        throw new InvalidDataException("A frame contains missing, repeated or unsupported evidence regions.");
+                    var region = expected.FirstOrDefault(item => item.Name == stored.Name);
+                    if (region is null || stored.File != region.File || stored.ByteLength != region.ByteLength
+                        || stored.OffsetBytes < 0 || stored.OffsetBytes != (long)index * region.ByteLength
+                        || stored.OffsetBytes > lengths[region.Name] - region.ByteLength)
+                        throw new InvalidDataException("An evidence frame points outside its declared region stream.");
+                }
+            }
+            return expected.ToArray();
+        }
+
+        internal void ReadFrame(int index, ReviewRegion region)
+        {
+            if (_openRegion != region.Name || _frames is null)
+            {
+                _frames?.Dispose();
+                _frames = null;
+                _openRegion = null;
+                // Recheck redirects when a view is selected, not only when the take
+                // was opened. Only the selected stream is held open and read.
+                var stream = File.Open(Child(region.File), FileMode.Open, FileAccess.Read, FileShare.Read);
+                Pixels = new byte[region.ByteLength];
+                _frames = stream;
+                _openRegion = region.Name;
+            }
+            var frame = Session.Frames[index];
+            long offset = region.Name == "player" ? frame.OffsetBytes
+                : frame.Evidence!.First(item => item.Name == region.Name).OffsetBytes;
+            _frames.Position = offset;
             _frames.ReadExactly(Pixels);
         }
 
@@ -299,6 +412,6 @@ internal static class VisionDatasetReview
             return bytes;
         }
 
-        public void Dispose() => _frames.Dispose();
+        public void Dispose() => _frames?.Dispose();
     }
 }

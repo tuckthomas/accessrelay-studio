@@ -57,6 +57,89 @@ internal static class RuntimeTrainingChecks
                 () => { runtime.StopRecording(); runtime.DiscardRecording(); }, () => runtime.Recording.IsRecording);
         }
         Console.WriteLine("SUCCESS: runtime training entry/enable/recording races, profile guards, manual passthrough, allowed stops and explicit resume verified with simulated devices.");
+        TraceCaptureChecks();
+        TraceBufferChecks();
+    }
+
+    private static void TraceCaptureChecks()
+    {
+        using var input = new EliteInputMonitor();
+        var profile = StudioProfile.CreateDefault() with { ScriptsEnabled = false };
+        var deadzone = new StickDeadzone(20, 20);
+        using var runtime = new StudioRuntime(input, profile, deadzone);
+        var output = new UsbipXboxOutput();
+        runtime.Attach(output);
+        runtime.SetVisionTrainingRecording(true);
+        var trace = new VisionTrainingTrace();
+        runtime.SetVisionTrainingTrace(trace);
+        var physical = new ControllerState((ushort)(ControlId.X | ControlId.A), 73, 119,
+            -2000, 3000, 1200, -1300);
+        input.SetState(physical, PaddleButtons.LargeRight);
+        WaitUntil(() => trace.Snapshot().Samples.Count(sample => sample.Physical == physical && sample.Connected) >= 3,
+            "Training trace did not record repeated physical samples without a video/model loop.");
+        Check(trace.Snapshot().Samples.Where(sample => sample.Physical == physical).All(sample =>
+                sample.RequestedOutput == deadzone.Apply(physical) && sample.HeldPaddles == PaddleButtons.LargeRight
+                && sample.OutputAvailable && sample.AcceptedForLocalHandoff),
+            "Training trace lost raw axes/paddles or confused physical input with processed output.");
+
+        input.SetConnection(false, 2);
+        WaitUntil(() => trace.Snapshot().Samples.Any(sample => !sample.Connected && sample.ConnectionVersion == 2),
+            "Training trace hid a physical-controller disconnection.");
+        input.SetConnection(true, 3);
+        WaitUntil(() => trace.Snapshot().Samples.Any(sample => sample.Connected && sample.ConnectionVersion == 3),
+            "Training trace lost the new controller connection generation.");
+
+        output.RejectWrites = true;
+        WaitUntil(() => trace.Snapshot().Samples.Any(sample => sample.OutputAvailable && !sample.AcceptedForLocalHandoff),
+            "A rejected local output was recorded as accepted.");
+        WaitUntil(() => trace.Snapshot().Samples.Count(sample => !sample.OutputAvailable && !sample.AcceptedForLocalHandoff) >= 2,
+            "Training trace did not distinguish unavailable output from accepted handoff.");
+
+        runtime.SetVisionTrainingTrace(null);
+        var detached = trace.Snapshot();
+        var changed = physical with { RightX = 22000, RightY = -23000 };
+        input.SetState(changed);
+        WaitUntil(() => runtime.Latest?.Input.State == changed, "Polling did not continue after detaching the training trace.");
+        Check(trace.StoredSamples == detached.Samples.Length && trace.DroppedSamples == detached.DroppedSamples,
+            "The trace received a sample after detach returned.");
+        Check(detached.Samples.Length >= 7 && detached.Samples.All(sample => sample.Kind == VisionTrainingTraceKind.Poll
+                && sample.SampleTicks > 0 && sample.BeforeSubmitTicks >= sample.SampleTicks
+                && sample.AfterSubmitTicks >= sample.BeforeSubmitTicks),
+            "Training trace timestamps did not preserve the physical-sample/submission ordering.");
+        Check(detached.Samples.Where(sample => !sample.Connected).All(sample => sample.RequestedOutput == default),
+            "A disconnected sample claimed a nonneutral output.");
+        runtime.SetVisionTrainingRecording(false);
+        Console.WriteLine("SUCCESS: synchronized raw/processed controller trace, independent polling, paddles, connection changes, local output failure and detach fence verified.");
+    }
+
+    private static void TraceBufferChecks()
+    {
+        var trace = new VisionTrainingTrace(3);
+        var sample = new VisionTrainingTraceSample(VisionTrainingTraceKind.Poll, 1, 2, 3,
+            default, default, true, 7, PaddleButtons.None, PaddleButtons.None, true, true);
+        trace.Record(sample); // Warm the producer before checking its allocation behavior.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 100; index++) trace.Record(sample);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check(allocated == 0, "Appending bounded controller trace records allocated managed memory.");
+        var snapshot = trace.Snapshot();
+        Check(snapshot.Capacity == 3 && snapshot.Samples.Length == 3 && snapshot.DroppedSamples == 98,
+            "Controller trace overflow did not retain its original bounded records and exact drop count.");
+        Check(snapshot.Samples.All(value => value == sample), "Overflow overwrote an earlier controller sample.");
+
+        var concurrent = new VisionTrainingTrace(1000);
+        Parallel.For(1, 2001, index => concurrent.Record(sample with
+        {
+            SampleTicks = index, BeforeSubmitTicks = index + 1, AfterSubmitTicks = index + 2,
+            ConnectionVersion = index
+        }));
+        var completed = concurrent.Snapshot();
+        Check(completed.Samples.Length == 1000 && completed.DroppedSamples == 1000
+                && completed.Samples.Select(value => value.SampleTicks).Distinct().Count() == 1000
+                && completed.Samples.All(value => value.BeforeSubmitTicks == value.SampleTicks + 1
+                    && value.AfterSubmitTicks == value.SampleTicks + 2 && value.ConnectionVersion == value.SampleTicks),
+            "Concurrent controller trace producers published torn, duplicate or missing bounded slots.");
+        Console.WriteLine("SUCCESS: controller trace zero-allocation append, bounded overflow, immutable slots and concurrent publication verified.");
     }
 
     private static void Race(StudioRuntime runtime, Action competingTransition, Action cleanup, Func<bool> competingState)

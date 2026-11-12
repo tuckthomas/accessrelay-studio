@@ -19,6 +19,7 @@ internal sealed record VisionSettings
 {
     public static VisionSettings Default { get; } = new();
     public VisionCrop Crop { get; init; } = new(0, 0, 1, 1);
+    public VisionTrainingCaptureSettings TrainingCapture { get; init; } = new();
     public string ModelManifestPath { get; init; } = "";
     public string AnimationProfile { get; init; } = "Default";
     public string CameraView { get; init; } = "";
@@ -43,6 +44,8 @@ internal sealed record VisionSettings
     public void Validate()
     {
         Crop.Validate();
+        if (TrainingCapture is null) throw new InvalidDataException("Training capture settings are missing.");
+        TrainingCapture.Validate();
         if (!Enum.IsDefined(ExecutionProvider))
             throw new InvalidDataException("Choose CPU or CUDA as the inference backend.");
         if (!Enum.IsDefined(ShootButton) || (uint)ShootButton > ushort.MaxValue)
