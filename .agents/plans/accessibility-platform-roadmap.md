@@ -8,14 +8,12 @@ and game packs. Treat model and GPU changes as experiments until measurements ju
 shipping them. Existing profiles, controller ownership, cancellation, and explicit
 operator activation must remain compatible.
 
-Current checkpoint: sections 1–2 are complete. Sections 3–4 have shipped code and
-passing Windows CI with simulated devices; physical-device acceptance remains open.
-Sections 5–7 are implemented and passed Windows CI with simulated inputs. Section 8
-has local phrase/template recognition and bounded host arbitration implemented;
-Windows native CI and real microphone evaluation remain to be recorded.
-Section 10 has session and footage-provenance guards implemented; reviewed conversion is now implemented; real source-clip validation remains open. Section 9 now has NBA extraction and the versioned pack SDK/import/tuning UI
-implemented; native CI and Windows interaction acceptance remain to be recorded.
-Sections 11–12 are queued, not implemented.
+Current checkpoint: sections 1–2 are complete. Sections 3–9 have shipped code
+and passing Windows CI with simulated devices; physical/adaptive-device, native
+WebView and real microphone acceptance remains open. Section 10 has session/footage
+provenance guards and reviewed conversion implemented; real clip review remains open.
+Section 11 has experiment tooling implemented and synthetic/numerical validation;
+real model comparisons remain open. Section 12 profiling work is next.
 
 ## Delivery and evidence
 
@@ -261,6 +259,8 @@ rejected until review proof binds source/labels/reference and all data hashes.
 The converter preserves original evidence and source IDs; it rejects overlapping
 model/overlay ROIs and meter-on evaluation relabeling. No pixel mask or preprocessing
 contract is silently changed. See `docs/vision-model-workflow.md` for the workflow.
+Windows CI passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43289322222.
 Real clips, label quality and physical model/timing acceptance remain open. Footage reuse guard commit: `855717a127df3fa175438319b3f1daf91ad83cdc`. Validation: all 33 stdlib-only dataset/footage tests passed; Windows CI also passed:
 https://github.com/tuckthomas/accessrelay-studio/actions/runs/43287225043.
 The trainer and evaluator record/check RGB frame/window hashes independently of
@@ -270,16 +270,29 @@ source clips for functional training validation.
 
 ## 11. Measured model experiments
 
+- [x] Add a reproducible validation-only matrix, corpus binding and descriptive
+      timing/coverage/false-release/resource metrics; verify it using synthetic data.
+
 - [ ] Compare the existing temporal-convolution/global-pooling baseline with an
       order-preserving head using identical session splits and reproducible seeds.
 - [ ] Compare residual uncertainty training with bounded Gaussian NLL or staged warm-up;
       measure held-out calibration coverage, false releases, timing error, and inference cost.
-- [ ] Version changed model semantics and retain existing model/runtime compatibility.
-- [ ] Promote only a measured improvement; retain observation-only behavior until
-      independent accuracy and Windows hardware timing evidence permit arming.
-- [ ] Push experiment tooling separately and record code commit SHAs and report paths.
+- [x] Version changed model semantics and retain existing model/runtime compatibility.
+- [x] Keep all candidates observation-only; summaries never select/promote a model.
+- [ ] Collect independent accuracy and Windows hardware timing evidence before promotion.
+- [x] Push experiment tooling separately and record code commit SHAs and report paths.
 
-Implementation commits: pending. Prerequisites: reviewed training/validation/held-out data and target hardware.
+Implementation commit: `bb831d72fe4ec8f37a94a0e2aa5971c9d6ca8b1f`. Validation: 51
+Python checks passed with optional ML dependencies; the stdlib-only Windows suite
+runs 46 checks and skips five ML numerical/export tests. Six seeded synthetic
+training/export/validation jobs and a plan-only CLI run passed. All six variants
+passed ONNX CPU parity; the Gaussian/ordered model also ran through the real C#
+CPU adapter, producing 17 observations with `CanArm=False`. C# vision/model-library/
+preprocessing/arming/performance tests and Windows runtime compilation passed.
+See `docs/vision-model-experiments.md` and
+`.agents/reports/vision-experiments-synthetic-smoke.md`. No architecture winner,
+accuracy improvement or Windows GPU/console latency result is claimed.
+Prerequisites for actual comparisons: reviewed train/validation/held-out gameplay and target hardware.
 
 ## 12. Profiled runtime optimization
 
