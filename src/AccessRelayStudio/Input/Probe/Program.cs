@@ -1,4 +1,7 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Input;
 using Windows.Gaming.Input;
@@ -18,6 +21,25 @@ try
         Thread.Sleep(1000);
         sample = Task.Run(monitor.Poll).GetAwaiter().GetResult();
     }
+    if (args is ["--inventory-json", var inventoryPath])
+    {
+        string destination = Path.GetFullPath(inventoryPath);
+        if (File.Exists(destination)) throw new IOException("Inventory export never overwrites an existing report.");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        string? IdentityHash(string id) => id.Length == 0 ? null : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(id)));
+        var exportReport = new
+        {
+            schemaVersion = 1, capturedAtUtc = DateTimeOffset.UtcNow,
+            scope = "Read-only physical input discovery; no output, rumble or audio action was requested.",
+            hardwareAcceptanceComplete = false, sample.IsConnected, sample.Source, sample.SupportsBackgroundInput,
+            sample.IsPaddleInterfacePresent, selectedIdentitySha256 = IdentityHash(sample.DeviceId),
+            devices = sample.Devices.Select(device => new { device.Name, device.Transport, device.VendorId, device.ProductId,
+                device.IsElite, device.SupportsEliteKeypad, identitySha256 = IdentityHash(device.Id) })
+        };
+        using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write);
+        JsonSerializer.Serialize(output, exportReport, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+    }
+    else if (args.Length != 0) throw new ArgumentException("Usage: EliteInputProbe [--inventory-json new-report.json]");
     Console.WriteLine($"Physical gamepad selected: {sample.IsConnected} · {sample.Source}");
     Console.WriteLine($"Verified selectable gamepads: {sample.Devices.Count}");
     Console.WriteLine($"Controller keyboard found: {sample.IsPaddleInterfacePresent} · {sample.PaddleSource}");

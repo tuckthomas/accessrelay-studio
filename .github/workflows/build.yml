@@ -40,6 +40,14 @@ jobs:
         run: dotnet run --project ./tools/vision/Verification/VisionModelVerification.csproj -c Release
       - name: Build physical input diagnostics
         run: dotnet build ./src/AccessRelayStudio/Input/Probe/EliteInputProbe.csproj -c Release
+      - name: Check pending physical acceptance journal generation
+        shell: pwsh
+        run: |
+          ./scripts/Start-AccessibilityAcceptance.ps1 -AppPath ./artifacts/Run/AccessRelayStudio.exe -OutDirectory ./artifacts/acceptance-template -TemplateOnly
+          $cases = Import-Csv ./artifacts/acceptance-template/cases.csv
+          if ($cases.Count -ne 20 -or @($cases | Where-Object status -ne 'Pending').Count -ne 0) {
+            throw 'The physical acceptance journal must start with 20 pending cases.'
+          }
       - name: Check native runtime with simulated devices
         run: dotnet run --project ./src/AccessRelayStudio/WindowsVerification/WindowsVerification.csproj -c Release -- --no-capture
       - name: Check native helpers
