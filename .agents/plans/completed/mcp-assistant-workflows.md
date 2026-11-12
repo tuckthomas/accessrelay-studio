@@ -5,9 +5,14 @@ configuration drafts, production-engine Lua simulation, and bounded offline
 dataset/experiment workflows. Keep React and MCP as adapters to shared application
 services. Native timing, output ownership and model acceptance remain in the runtime.
 
+Software implementation completed: 2026-11-12. Final tested source:
+`93efc3a565123b00db875a667b09e9d886c633fa`. Native client/user and physical/data
+acceptance remain separate in the active accessibility roadmap.
+
 ## 1. Delivery and scope
 
 - [x] Create and push this checklist before implementation.
+      Initial plan commit: `58b72576442658a6c36d7bea4bf3cb61498377bc`.
 - [x] Deliver independent features in separate commits on `main`, updating this
       checklist with full implementation SHAs and concrete validation evidence.
 - [x] Preserve the completed desktop separation and the active accessibility roadmap;
@@ -31,8 +36,8 @@ labels, or apply a draft without the user reviewing it in Studio.
 
 Shared-service implementation: `a65d0fe55d4bdfdc8b7eb1190ee662484c638350`.
 Portable checks passed for diagnostic projections, monotonic expiry, permissions,
-revocation during reads and the embedded actual Lua contract. Integration and
-compiled dependency checks remain part of the later validation steps.
+revocation during reads and the embedded actual Lua contract. Windows integration
+and compiled dependency checks also passed as recorded in section 6.
 
 ## 3. Configuration drafts and real-engine simulation
 
@@ -65,7 +70,7 @@ verified separately in the following sections.
       review/apply/discard/undo, client configuration and immediate revocation.
 - [x] Serialize requests onto the host context; Stop all/close/revoke cancels jobs,
       expires drafts and prevents old requests from changing a new context.
-- [ ] Test real SDK client interoperability, framing/size limits, revocation, context
+- [x] Test real SDK client interoperability, framing/size limits, revocation, context
       changes, UI keyboard/ARIA flows and published bridge/worker availability.
 
 Studio integration: `245fa58da80f5c5332ff3829d85dd39e4424ef7a`.
@@ -75,7 +80,8 @@ self-contained bridge publishing. Runtime has no Application/MCP dependency.
 57 frontend unit tests, TypeScript/Vite production build and 21 browser workflows
 passed, including permission controls, keyboard-contained draft review/apply/undo
 and revocation. SDK tests cover default and 2025-11-25 clients and disconnect
-cancellation. Full Windows deployment validation is pending CI below.
+cancellation. Full Windows publishing, deployment and SDK verification passed in
+the final CI runs recorded below.
 
 ## 5. Bounded training workflows
 
@@ -103,11 +109,54 @@ claim real gameplay, model quality or physical timing evidence.
 
 ## 6. Validation and completion
 
-- [ ] Run shared-service, simulator/worker, SDK/IPC, engine/runtime, dataset/vision and
+- [x] Run shared-service, simulator/worker, SDK/IPC, engine/runtime, dataset/vision and
       frontend checks, browser workflows and production build.
-- [ ] Pass Windows publishing, deployment/boundary checks and CI; document client
+- [x] Pass Windows publishing, deployment/boundary checks and CI; document client
       setup, permissions, data flow, recovery and actual limitations.
-- [ ] Record implementation SHAs and evidence, then move this checklist to `completed`.
+- [x] Record implementation SHAs and evidence, then move this checklist to `completed`.
+
+Local regression evidence: shared assistant/isolated-worker/SDK/offline suites,
+portable engine, managed vision/model/performance, desktop evidence, and the actual
+runtime with simulated devices passed. Frontend: 57 unit tests, 21 browser workflows
+and production build passed. Stdlib Python: 50 passed and five optional ML checks
+skipped. The real helper publish target also produced the self-contained Windows
+bridge and bundled training tools in a separate local packaging probe.
+
+Windows follow-ups: bootstrap qualification/shutdown fencing
+`dd81859ffeeef082dd5d8e99bf203ef9b94b2632`; exact user-SID endpoint authentication
+`ac0be663ab79761242759458219bd4c312c87731`; broken-connection reset
+`3b7947ab7e1d00cf5b61b0313062c4f810be1284`; complete reply acknowledgement
+`a4cc995d19728f4ee9c82b6eaf9a6d75b9b62e4a`; repeated large-reply regression
+`a00f05c74361e28f766206b3b6f4e668661acb62`. Windows rejects remote pipe clients,
+checks the actual user SID (rather than an elevated token's owner group), and waits
+for acknowledgement before DisconnectNamedPipe can discard unread response bytes.
+The focused Windows SDK/private-IPC/job-object/cancellation suite passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43322695391.
+
+Final review fixes: warmed/isolated strict allocation measurement
+`760debeecb05cfd350ab2f1aa72f93356fa2a1eb`; offline foreground-admission fence
+`93efc3a565123b00db875a667b09e9d886c633fa`. A foreground command between the
+native idle read and admission now rejects both audit and experiment requests,
+even when there was no job to cancel yet. A deterministic regression checks that
+no job or output directory is created, and the actual SDK/worker/offline suite
+passed locally and on Windows after this fix.
+
+Final Windows CI passed on `93efc3a565123b00db875a667b09e9d886c633fa`:
+
+- Full Windows publishing, compiled project boundaries, deployment assets, published
+  SDK bridge/worker, controller/profile, dataset, desktop evidence, vision/performance,
+  physical probe build, Pending acceptance-template generation, simulated runtime
+  devices and native helpers:
+  https://github.com/tuckthomas/accessrelay-studio/actions/runs/43323674417.
+- Focused Windows SDK/private-IPC/worker/offline integration:
+  https://github.com/tuckthomas/accessrelay-studio/actions/runs/43323674773.
+
+Setup, permissions, privacy, recovery and actual limits are documented in
+[docs/mcp-assistant.md](../../../docs/mcp-assistant.md). A real installed-app session
+with the user's chosen assistant client, native WebView/screen-reader listening,
+selected local Python and physical devices remains manual acceptance. It is tracked
+in [the active roadmap](../in-progress/accessibility-platform-roadmap.md), not
+inferred from SDK clients, browser fixtures or simulated devices.
 
 ## Follow-up designs outside this first release
 

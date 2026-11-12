@@ -25,6 +25,15 @@ https://github.com/tuckthomas/accessrelay-studio/actions/runs/43304719048.
 Its finished checklist is in [completed/desktop-host-cleanup.md](../completed/desktop-host-cleanup.md);
 existing physical/data acceptance remains open in this active roadmap.
 
+MCP first-release software is complete at
+`93efc3a565123b00db875a667b09e9d886c633fa`, with full Windows publishing,
+SDK/private-IPC, deployment/boundary and simulated-device CI passing:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43323674417.
+Its checklist and implementation receipts are in
+[completed/mcp-assistant-workflows.md](../completed/mcp-assistant-workflows.md).
+This adds the native app/client checks in section 14; existing physical/data cases
+remain unverified until performed with the intended devices and reviewed data.
+
 ## Delivery and evidence
 
 - [x] Push this plan to GitHub `main` before implementing any checklist item.
@@ -370,3 +379,21 @@ See `docs/physical-acceptance.md` and
 procedure, not device, screen-reader, microphone or gameplay/model evidence.
 The remaining prerequisites are actual Windows hardware/user access and reviewed
 independent gameplay sessions; no unavailable measurement is marked complete.
+
+## 14. Native assistant-client acceptance
+
+- [ ] Connect the chosen MCP client to the installed app using Settings → Assistant
+      access. Check access off at launch, permissions, expiry, revoke, Stop and close;
+      verify live calls stop while ordinary capability/documentation discovery works.
+- [ ] Use the native WebView, screen reader and intended navigation controls to
+      review/apply/undo a draft with processing stopped. Verify stale profile/device
+      changes reject an old draft and applying never enables output or sequences.
+- [ ] Register the intended local Python, reviewed train/validation sessions and
+      output workspace. Run an audit and plan-only experiment; check cancellation
+      when foreground processing starts and preservation of local result artifacts.
+
+Software/source/CI receipts are in the completed MCP checklist above. These checks
+require the actual installed app/client and selected local setup; the automated SDK,
+browser and simulated-device checks do not mark them passed. Follow
+[the assistant setup guide](../../../docs/mcp-assistant.md) and retain observations
+locally with the physical acceptance journal before checking these items.
