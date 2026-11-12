@@ -7,7 +7,7 @@ public sealed record SimulationEvent(int TimeMs, ControllerState Input, PaddleBu
 public sealed record LuaSimulationRequest(string Source, ControlId Trigger = ControlId.A, int DurationMs = 1000, SimulationEvent[]? Events = null);
 public sealed record SimulationPoint(int TimeMs, ControllerState Input, ControllerState Output, bool SequenceActive);
 public sealed record LuaSimulationResult(bool Valid, string SourceSha256, bool Started, bool StopPreservesManual,
-    bool DisconnectNeutral, bool SafetyCertified, SimulationPoint[] Trace, string? Error);
+    bool DisconnectNeutral, bool SafetyCertified, SimulationPoint[] Trace, string? Error, bool TraceTruncated = false);
 
 /// <summary>Call only inside the isolated rehearsal worker. This is the production engine, not a second Lua API.</summary>
 public static class LuaSimulation
@@ -28,20 +28,20 @@ public static class LuaSimulation
                 Bindings = ImmutableDictionary<ControlId, ScriptBinding>.Empty.Add(request.Trigger, new(ScriptKind.Lua, LuaScriptId: script.Id)),
                 LuaScripts = ImmutableDictionary<Guid, LuaControllerScript>.Empty.Add(script.Id, script) };
             var engine = new MacroEngine(); engine.Apply(profile);
-            var trace = new List<SimulationPoint>(); int index = 0; bool started = false; ControllerState? previous = null; string? error = null;
+            var trace = new List<SimulationPoint>(); int index = 0; bool started = false, truncated = false; ControllerState? previous = null; string? error = null;
             for (int now = 0; now <= request.DurationMs; now += 4)
             {
                 while (index + 1 < events.Length && events[index + 1].TimeMs <= now) index++;
                 var input = events[index]; var output = engine.Tick(input.Input, input.Paddles, input.Connected, now);
-                started |= engine.Status.IsActive;
+                started |= engine.Status.Script == ScriptKind.Lua;
                 if (engine.Status.Error is { } failure) { error = failure[..Math.Min(512, failure.Length)]; break; }
-                if (previous != output && trace.Count < 512) trace.Add(new(now, input.Input, output, engine.Status.IsActive));
+                if (previous != output) { if (trace.Count < 512) trace.Add(new(now, input.Input, output, engine.Status.IsActive)); else truncated = true; }
                 previous = output;
             }
             var manual = new ControllerState(0x2000, 0, 0, 1234, -2345, 0, 0);
             engine.Stop(); bool stopped = engine.Tick(manual, default, true, request.DurationMs + 4) == manual;
             bool disconnected = engine.Tick(manual, default, false, request.DurationMs + 8) == default;
-            return new(error is null && stopped && disconnected, digest, started, stopped, disconnected, false, trace.ToArray(), error);
+            return new(error is null && stopped && disconnected, digest, started, stopped, disconnected, false, trace.ToArray(), error, truncated);
         }
         catch (Exception error) when (error is InvalidDataException or ArgumentException or InvalidOperationException)
         { return new(false, digest, false, false, false, false, [], "The production Lua engine rejected the source: " + error.Message[..Math.Min(512, error.Message.Length)]); }

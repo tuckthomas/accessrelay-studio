@@ -8,7 +8,8 @@ static class AssistantIntegrationChecks
 {
     internal static async Task Run(string[] args)
     {
-        string bridge = args is ["--bridge", var path] ? Path.GetFullPath(path) : Path.GetFullPath("src/AccessRelayStudio.Mcp/bin/Release/net10.0/AccessRelayStudio.Mcp.dll");
+        int bridgeIndex = Array.IndexOf(args, "--bridge");
+        string bridge = bridgeIndex >= 0 ? Path.GetFullPath(args[bridgeIndex+1]) : Path.GetFullPath("src/AccessRelayStudio.Mcp/bin/Release/net10.0/AccessRelayStudio.Mcp.dll");
         string command = bridge.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? Environment.ProcessPath! : bridge;
         // dotnet run can use an apphost; prefer the known dotnet host for framework-dependent helpers.
         if (bridge.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) command = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? (OperatingSystem.IsWindows() ? "dotnet" : "/workspace/.dotnet/dotnet");
@@ -53,6 +54,19 @@ static class AssistantIntegrationChecks
         var prompts = await client.ListPromptsAsync(cancellationToken: timeout.Token); Check(prompts.Count >= 5, "Coaching prompts missing.");
         var rpcDraft = await client.CallToolAsync("draft_controls", new Dictionary<string, object?> { ["request"] = new { stickyControls = new[] { "a" }, leftSmoothingMs = 10, rightSmoothingMs = 0 } }, cancellationToken: timeout.Token);
         Check(rpcDraft.IsError != true && service.Drafts().Length == 1, "SDK draft creation failed.");
+        var legacyArgs = command == bridge ? new List<string>() : new List<string> { bridge };
+        legacyArgs.AddRange(["--pipe", pipe]);
+        await using var legacy = await McpClient.CreateAsync(new StdioClientTransport(new() { Command = command, Arguments = legacyArgs,
+            Name = "AccessRelay legacy verification", InheritEnvironmentVariables = true }),
+            new McpClientOptions { ProtocolVersion = "2025-11-25" }, cancellationToken: timeout.Token);
+        Check((await legacy.CallToolAsync("read_studio_status", cancellationToken: timeout.Token)).IsError != true, "Legacy client handshake compatibility failed.");
+        string cancelPipe = "AccessRelayCancel." + Guid.NewGuid().ToString("N");
+        var observedCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var waitingServer = new AssistantPipeServer(async (_, cancellation) =>
+        { try { await Task.Delay(Timeout.Infinite, cancellation); } catch (OperationCanceledException) { observedCancellation.TrySetResult(); throw; } return null; }, cancelPipe);
+        using var abandon = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        try { await AssistantWire.CallAsync("wait", new { }, abandon.Token, cancelPipe); } catch (OperationCanceledException) { }
+        await observedCancellation.Task.WaitAsync(TimeSpan.FromSeconds(3));
         Console.WriteLine("PASS isolated actual-engine Lua, hold/stop/disconnect/budgets, draft review/undo/staleness, bounded framing, real SDK stdio tools/resources/prompts and current-user IPC.");
     }
     static void Check(bool value, string message) { if (!value) throw new Exception(message); }

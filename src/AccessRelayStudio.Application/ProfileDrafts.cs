@@ -40,7 +40,7 @@ public sealed partial class StudioAssistantService
             next = next.WithLuaScript(script).WithBinding(request.LuaControl, new(ScriptKind.Lua, LuaScriptId: script.Id));
             changes.Add($"Add Lua mapping on {request.LuaControl}. Source SHA-256: {result.SourceSha256}. Existing mapping is replaced only on review/apply; sequences stay disabled.");
         }
-        next.Validate(); Access.Check(grant);
+        next.Validate(); cancellation.ThrowIfCancellationRequested(); Access.Check(grant);
         if (changes.Count == 0) throw new AssistantException("noChanges", "This draft does not change the selected setup.");
         var view = new ProfileDraftView(Guid.NewGuid(), state.Profile.Name, DateTimeOffset.UtcNow.AddMinutes(15), changes.ToArray(), result, "pending");
         lock (_draftGate)
@@ -73,6 +73,11 @@ public sealed partial class StudioAssistantService
     }
     public void DiscardDraft(Guid id) { lock (_draftGate) _drafts.Remove(id); }
     public bool CanUndo { get { lock (_draftGate) return _undo is not null; } }
+    public bool CanUndoFor(Guid instance, Guid profile, long revision, long inputGeneration)
+    {
+        lock (_draftGate) return _undo is { } undo && undo.Expected.InstanceId == instance && undo.Expected.ProfileId == profile
+            && undo.Expected.Revision == revision && undo.Expected.InputGeneration == inputGeneration;
+    }
     // Only the Studio UI calls apply/undo. Neither is exported as an MCP tool.
     public async Task ApplyDraftFromStudioAsync(Guid id, CancellationToken cancellation)
     {
@@ -108,8 +113,8 @@ public sealed partial class StudioAssistantService
     { if (expected != current) throw new AssistantException("staleContext", "The instance, selected setup, revision or controller context changed. Create a fresh draft."); }
     public static void RequireIdle(StudioRuntimeFacts state)
     {
-        if (state.OutputActive || state.ScriptsEnabled || state.Recording || state.VisionRunning || state.VoiceRunning
-            || state.VoiceCommandsRunning || state.NavigationActive || state.HasUnsavedChanges)
+        if (state.ProcessingTransition || state.OutputActive || state.ScriptsEnabled || state.Recording || state.VisionRunning || state.VoiceRunning
+            || state.VoiceCommandsRunning || state.HasUnsavedChanges)
             throw new AssistantException("processingActive", "Stop processing and save/discard interface edits before applying or undoing a draft.");
     }
 }

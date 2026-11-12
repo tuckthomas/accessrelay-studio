@@ -17,6 +17,7 @@ public sealed partial class StudioAssistantService
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, grant.Cancellation);
                 if (Rehearsal is null) throw new AssistantException("workerUnavailable", "The isolated rehearsal worker is unavailable.");
                 var result = await Rehearsal.RunAsync(AssistantJson.Read<LuaSimulationRequest>(request.Arguments), linked.Token);
+                linked.Token.ThrowIfCancellationRequested();
                 Access.Check(grant); return result;
             }
             case "trainingInputs" or "auditDataset" or "visionExperiment" or "trainingJob" or "cancelTrainingJob":

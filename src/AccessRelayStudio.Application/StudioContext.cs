@@ -10,7 +10,9 @@ public sealed record StudioContextToken(Guid InstanceId, Guid ProfileId, long Re
 public sealed record StudioRuntimeFacts(bool ControllerConnected, bool OutputActive, bool ScriptsEnabled,
     bool Recording, bool VisionRunning, bool ModelReady, bool VisionCanArm, bool VisionArmed,
     bool VoiceRunning, bool VoiceCommandsRunning, bool NavigationActive, bool HasUnsavedChanges,
-    double LeftDeadzonePercent, double RightDeadzonePercent, bool CoPilotEnabled, bool PrimaryConnected, bool CompanionConnected);
+    double LeftDeadzonePercent, double RightDeadzonePercent, bool CoPilotEnabled, bool PrimaryConnected, bool CompanionConnected,
+    bool ProcessingTransition = false, bool VisionSourceReady = false, bool VisionSourceStale = false,
+    long RejectedPredictions = 0, long MissedDeadlines = 0);
 public sealed record StudioApplicationContext(StudioContextToken Token, StudioProfile Profile, StudioRuntimeFacts Runtime);
 
 /// <summary>Implemented by the host. Its mutations run on the owner thread and recheck context atomically.</summary>

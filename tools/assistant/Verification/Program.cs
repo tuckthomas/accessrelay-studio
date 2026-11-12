@@ -14,10 +14,15 @@ clock.Now += TimeSpan.FromMinutes(16); Reject(() => access.Require(), "accessDis
 access.Configure(new(true, true)); Reject(() => access.Check(grant), "accessRevoked");
 host.PendingRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
 var pending = service.ReadStatusAsync(default); access.Configure(new()); host.PendingRead.SetResult(host.State);
-try { await pending; throw new Exception("Revoked read succeeded"); } catch (AssistantException error) { Check(error.Code == "accessRevoked", "Wrong read error"); }
+try { await pending; throw new Exception("Revoked read succeeded"); }
+catch (OperationCanceledException) { }
+catch (AssistantException error) { Check(error.Code == "accessRevoked", "Wrong read error"); }
 Check(StudioAssistantService.LuaContract().Contains("output.button") && !StudioAssistantService.LuaContract().Contains("press_button"), "Wrong Lua contract.");
+StudioAssistantService.RequireIdle(host.State.Runtime with { NavigationActive = true });
+Reject(() => StudioAssistantService.RequireIdle(host.State.Runtime with { ProcessingTransition = true }), "processingActive");
 Console.WriteLine("PASS shared diagnostic projection, monotonic expiry, permission scopes, revocation and actual Lua contract.");
 await AssistantIntegrationChecks.Run(args);
+await OfflineWorkflowChecks.Run(args);
 
 static void Check(bool value, string message) { if (!value) throw new Exception(message); }
 static void Reject(Action call, string code) { try { call(); } catch (AssistantException error) when (error.Code == code) { return; } throw new Exception("Expected " + code); }

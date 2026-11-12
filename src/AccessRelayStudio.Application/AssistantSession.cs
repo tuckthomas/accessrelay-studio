@@ -58,6 +58,7 @@ public sealed partial class StudioAssistantService(IStudioApplicationContext con
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, grant.Cancellation);
         var state = await context.ReadAsync(linked.Token).ConfigureAwait(false);
+        linked.Token.ThrowIfCancellationRequested();
         Access.Check(grant);
         if (state.Profile.Id != state.Token.ProfileId || AssistantJson.ProfileDigest(state.Profile) != state.Token.ProfileSha256)
             throw new AssistantException("inconsistentContext", "Studio changed during the read. Request a fresh context.");
@@ -87,6 +88,10 @@ public sealed partial class StudioAssistantService(IStudioApplicationContext con
         Add(!status.VisionCanArm, "visionEvidenceUnavailable", "This session cannot currently arm automatic assistance.", "Inspect matching model, profile/camera, crop, provider, held-out and hardware evidence in Remote Play; do not bypass its gates.");
         Add(status.NavigationActive, "navigationActive", "Physical controls are navigating Studio.", "Exit navigation and release controls before gameplay.");
         Add(status.HasUnsavedChanges, "unsavedChanges", "The interface has unsaved edits.", "Save or discard them before applying an assistant draft.");
+        Add(status.ProcessingTransition, "processingTransition", "A processing or import transition is finishing.", "Wait for completion or use Stop before applying a draft.");
+        Add(status.VisionRunning && !status.VisionSourceReady, "visionSourceUnavailable", "Vision has no ready source in the current runtime context.", "Inspect source selection and capture status in Remote Play.");
+        Add(status.VisionSourceStale, "visionSourceStale", "The capture session reports stale source frames.", "Restore the source and inspect freshness before assistance.");
+        Add(status.MissedDeadlines > 0, "deadlineMissesObserved", "The runtime recorded missed release deadlines in this context.", "Inspect the measured timing report; a cumulative counter does not identify the cause of one particular action.");
         Add(status.CoPilotEnabled && !status.CompanionConnected, "companionDisconnected", "The selected companion input is disconnected.", "Check co-pilot selection and ownership; the primary can still contribute.");
         return result.ToArray();
     }

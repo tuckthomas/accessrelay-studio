@@ -52,11 +52,14 @@ public sealed class IsolatedLuaRehearsal(string executable, string? managedAssem
 sealed class WorkerJob : SafeHandleZeroOrMinusOneIsInvalid
 {
     private WorkerJob() : base(true) { }
-    internal static WorkerJob Limit(Process process)
+    internal static WorkerJob Limit(Process process, bool singleProcess = true)
     {
         var job = CreateJobObjectW(0, null);
         if (job.IsInvalid) { job.Dispose(); process.Kill(entireProcessTree: true); throw new AssistantException("workerIsolation", "Windows could not isolate the rehearsal worker."); }
-        var info = new Extended { Basic = new() { Flags = 0x2000 | 0x100 | 0x8, ActiveProcessLimit = 1 }, ProcessMemoryLimit = 384U * 1024 * 1024 };
+        nuint memory = singleProcess ? 384U * 1024 * 1024 : 1536U * 1024 * 1024;
+        var info = new Extended { Basic = new() { Flags = 0x2000 | 0x100 | 0x8 | (singleProcess ? 0U : 0x200U | 0x4U),
+            ActiveProcessLimit = singleProcess ? 1U : 4U, JobTime = singleProcess ? 0 : TimeSpan.FromMinutes(5).Ticks },
+            ProcessMemoryLimit = memory, JobMemoryLimit = singleProcess ? 0 : memory };
         if (!SetInformationJobObject(job, 9, ref info, Marshal.SizeOf<Extended>()) || !AssignProcessToJobObject(job, process.Handle))
         { job.Dispose(); process.Kill(entireProcessTree: true); throw new AssistantException("workerIsolation", "Windows could not enforce rehearsal process limits."); }
         return job;

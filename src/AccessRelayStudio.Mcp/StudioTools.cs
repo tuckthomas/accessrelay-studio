@@ -21,6 +21,7 @@ static class Bridge
     internal static async Task<string> Resource(string operation, CancellationToken cancellation)
     {
         var result = await Call(operation, new { }, cancellation);
+        if (result.IsError == true) throw new ModelContextProtocol.McpException(((TextContentBlock)result.Content[0]).Text);
         return ((TextContentBlock)result.Content[0]).Text;
     }
 }

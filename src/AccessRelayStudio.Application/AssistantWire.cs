@@ -3,11 +3,13 @@ using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace EliteScriptStudio.Application;
 
-public sealed record AssistantRequest(string Operation, JsonElement Arguments);
-public sealed record AssistantReply(bool Ok, JsonElement? Result, string? Code = null, string? Message = null);
+public sealed record AssistantRequest(string Operation, JsonElement Arguments, int SchemaVersion = 1);
+public sealed record AssistantReply(bool Ok, JsonElement? Result, string? Code = null, string? Message = null, int SchemaVersion = 1);
 public static class AssistantWire
 {
     public const int MaximumBytes = 1024 * 1024;
@@ -35,7 +37,9 @@ public static class AssistantWire
         try { await pipe.ConnectAsync(5000, timeout.Token); }
         catch (TimeoutException) { throw new AssistantException("studioUnavailable", "Open AccessRelay Studio and enable assistant access in Settings."); }
         await WriteAsync(pipe, new AssistantRequest(operation, JsonSerializer.SerializeToElement(args, AssistantJson.Options)), timeout.Token);
-        return AssistantJson.Read<AssistantReply>(await ReadAsync(pipe, timeout.Token));
+        var reply = AssistantJson.Read<AssistantReply>(await ReadAsync(pipe, timeout.Token));
+        if (reply.SchemaVersion != 1) throw new AssistantException("protocolVersion", "Update the MCP bridge to match the running Studio installation.");
+        return reply;
     }
 }
 
@@ -51,8 +55,7 @@ public sealed class AssistantPipeServer : IAsyncDisposable
         _dispatch = dispatch; _name = pipeName ?? AssistantWire.PipeName;
         _listener = Create(); _worker = RunAsync();
     }
-    private NamedPipeServerStream Create() => new(_name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
-        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+    private NamedPipeServerStream Create() => LocalAssistantPipe.Create(_name);
     private async Task RunAsync()
     {
         while (!_stop.IsCancellationRequested)
@@ -65,7 +68,23 @@ public sealed class AssistantPipeServer : IAsyncDisposable
                 try
                 {
                     var request = AssistantJson.Read<AssistantRequest>(await AssistantWire.ReadAsync(_listener, deadline.Token));
-                    object? result = await _dispatch(request, deadline.Token);
+                    if (request.SchemaVersion != 1) throw new AssistantException("protocolVersion", "Update the MCP bridge to match the running Studio installation.");
+                    using var requestStop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+                    using var probeStop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+                    // A connection carries one request. EOF (or extra bytes) cancels work immediately.
+                    var probe = _listener.ReadAsync(new byte[1], probeStop.Token).AsTask();
+                    var work = _dispatch(request, requestStop.Token);
+                    object? result;
+                    try
+                    {
+                        if (await Task.WhenAny(work, probe) == probe) requestStop.Cancel();
+                        result = await work; requestStop.Token.ThrowIfCancellationRequested();
+                    }
+                    finally
+                    {
+                        probeStop.Cancel();
+                        try { await probe; } catch (Exception error) when (error is IOException or OperationCanceledException) { }
+                    }
                     reply = new(true, JsonSerializer.SerializeToElement(result, AssistantJson.Options));
                 }
                 catch (AssistantException error) { reply = new(false, null, error.Code, error.Message); }
@@ -76,10 +95,42 @@ public sealed class AssistantPipeServer : IAsyncDisposable
                 await AssistantWire.WriteAsync(_listener, reply, deadline.Token);
             }
             catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException) { }
-            finally { _listener.Dispose(); }
-            if (!_stop.IsCancellationRequested) _listener = Create();
+            finally
+            {
+                if (!_stop.IsCancellationRequested)
+                { try { if (_listener.IsConnected) _listener.Disconnect(); } catch (IOException) { } }
+            }
         }
     }
     public async ValueTask DisposeAsync()
     { _stop.Cancel(); _listener.Dispose(); try { await _worker; } catch (OperationCanceledException) { } _stop.Dispose(); }
+}
+
+static class LocalAssistantPipe
+{
+    internal static NamedPipeServerStream Create(string name)
+    {
+        if (name.Length is < 1 or > 120 || name.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '-' or '_')))
+            throw new AssistantException("pipeName", "Invalid local assistant pipe name.");
+        if (!OperatingSystem.IsWindows()) return new(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        string sid = identity.User?.Value ?? throw new IOException("Windows user identity is unavailable.");
+        // Explicit owner/DACL plus PIPE_REJECT_REMOTE_CLIENTS: a normal named pipe can otherwise be reached over SMB.
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW($"O:{sid}D:P(A;;GA;;;{sid})", 1, out var descriptor, out _))
+            throw new IOException("Windows could not restrict assistant pipe access.");
+        try
+        {
+            var attributes = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), Descriptor = descriptor };
+            var handle = CreateNamedPipeW(@"\\.\pipe\" + name, 0x3 | 0x40000000 | 0x80000, 0x8, 1, 65536, 65536, 0, ref attributes);
+            if (handle.IsInvalid) { handle.Dispose(); throw new IOException("The private assistant endpoint is unavailable or already owned by another Studio instance."); }
+            return new NamedPipeServerStream(PipeDirection.InOut, isAsync: true, isConnected: false, handle);
+        }
+        finally { LocalFree(descriptor); }
+    }
+    [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public int Length; public nint Descriptor; public int Inherit; }
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string descriptor, uint revision, out nint security, out uint size);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern SafePipeHandle CreateNamedPipeW(string name, uint openMode, uint pipeMode, uint instances, uint outputSize, uint inputSize, uint timeout, ref SecurityAttributes attributes);
+    [DllImport("kernel32.dll")] static extern nint LocalFree(nint memory);
 }
