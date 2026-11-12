@@ -4,6 +4,7 @@ obj/
 target/
 node_modules/
 artifacts/
+/AccessRelayStudio-Beta/
 Run/
 *.user
 *.suo

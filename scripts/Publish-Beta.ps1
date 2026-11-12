@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$InstallDirectory = (Join-Path $env:LOCALAPPDATA 'Programs/AccessRelayStudioBeta'),
-    [string]$BuildDirectory = (Join-Path $env:TEMP 'AccessRelayStudioBeta-Build'),
+    [string]$InstallDirectory = (Join-Path $PSScriptRoot '../AccessRelayStudio-Beta'),
+    [string]$BuildDirectory = (Join-Path $PSScriptRoot '../artifacts/BetaBuild'),
     [string]$LegacyRunDirectory,
     [string]$CudaRuntimeRoot,
     [switch]$CreateDesktopShortcut,
