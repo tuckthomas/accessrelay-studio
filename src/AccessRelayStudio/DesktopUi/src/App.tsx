@@ -7,6 +7,7 @@ import { ControllerPage } from './pages/ControllerPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VoicePage } from './pages/VoicePage';
 import { VisionPage } from './pages/VisionPage';
+import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
 
 type Page = 'workspace' | 'controller' | 'vision' | 'voice' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
@@ -62,6 +63,7 @@ export function App() {
   const controllerStatus = status.controller || state?.controller?.status || {};
   const voiceStatus = status.voice || state?.voice?.status || {};
   const visionStatus = status.vision || state?.vision?.status || {};
+  const announcement = useStatusAnnouncements(!!state, controllerStatus, voiceStatus, visionStatus, error);
   const anythingRunning = controllerStatus.outputActive || voiceStatus.isRunning || visionStatus.running || visionStatus.session?.running;
   const currentLabel = page === 'settings' ? 'Settings' : navigation.find(item => item.id === page)?.label || 'Workspace';
   if (!state) return <main className="loading-shell"><div className="loading-content">
@@ -69,7 +71,8 @@ export function App() {
     <p>{bootError || 'Opening your workspace…'}</p>
     {bootError ? <Button variant="primary" onClick={() => void bootstrap()}>Try again</Button> : <Icon name="loader" className="spin" />}
   </div></main>;
-  return <div className="app-shell">
+  return <AnnouncementContext.Provider value={announcement}><div className="app-shell">
+    <LiveAnnouncements />
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand"><img src="./brand.png" alt="" /><div className="brand-name">AccessRelay<span>Studio</span></div></div>
       <p className="nav-label">Your tools</p>
@@ -107,7 +110,7 @@ export function App() {
           status={controllerStatus} command={appCommand} />}
       </div></main>
     </div>
-    {error && <div className="toast"><Notice tone="danger"><div className="row"><span>{error}</span>
+    {error && <div className="toast"><Notice tone="danger" announce={false}><div className="row"><span>{error}</span>
       <Button variant="ghost" className="icon-button" aria-label="Dismiss message" onClick={() => setError('')}><Icon name="x" size={16} /></Button></div></Notice></div>}
     <DiscardDialog open={pendingPage !== null} onKeep={() => setPendingPage(null)} onDiscard={() => { if (pendingPage) setPage(pendingPage); setPendingPage(null); }} />
     <Modal open={closeRequested} onClose={() => { if (!closing) setCloseRequested(false); }} title="Close Studio and discard unsaved work?"
@@ -122,5 +125,5 @@ export function App() {
         <Notice>Stop everything ends vision, voice and controller output together. Opening Studio never starts them automatically.</Notice>
       </div>
     </Modal>
-  </div>;
+  </div></AnnouncementContext.Provider>;
 }

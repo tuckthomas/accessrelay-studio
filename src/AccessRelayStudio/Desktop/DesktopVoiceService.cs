@@ -76,7 +76,8 @@ internal sealed class DesktopVoiceService : IDesktopModule
         {
             status.IsRunning, isStarting = _operationName is "start" or "switch",
             busy = _operation is not null, operation = _operationName,
-            message = _operation is not null || !status.IsRunning ? _message : status.Message,
+            message = status.Error ?? (_operation is not null || !status.IsRunning ? _message : status.Message),
+            status.Error,
             status.InputPeak, status.OutputPeak, status.BufferedMilliseconds, destination = _destination,
             clipPlaying = _clipPreview?.IsPlaying == true,
             clipPositionMs = (_clipPreview?.Position.TotalMilliseconds ?? 0) + (_useCleaned ? _cleanedStartMs : 0),

@@ -1,6 +1,7 @@
-import { cloneElement, isValidElement, useEffect, useId, useRef, useState } from 'react';
+import { cloneElement, isValidElement, useContext, useEffect, useId, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { AnnouncementContext, LiveAnnouncements } from './announcements';
 import {
   Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, AudioLines, BookOpen, Camera, Check,
   ChevronDown, ChevronLeft, ChevronRight, Circle, CircleHelp, CirclePause, CirclePlay, Copy,
@@ -15,6 +16,16 @@ const unsavedDrafts = new Set<symbol>();
 const openModals = new Set<HTMLDialogElement>();
 const modalOpeners = new WeakMap<Element, HTMLElement>();
 let originalBodyOverflow = '';
+function syncModalAnnouncements() {
+  const active = [...openModals].at(-1);
+  // Explicitly hide inactive live regions as well as relying on native inertness,
+  // so assistive technology never receives duplicate background announcements.
+  document.querySelectorAll<HTMLElement>('[data-status-announcer]').forEach(region => {
+    const hidden = !!active && !active.contains(region);
+    region.inert = hidden;
+    if (hidden) region.setAttribute('aria-hidden', 'true'); else region.removeAttribute('aria-hidden');
+  });
+}
 const draftListeners = new Set<(dirty: boolean) => void>();
 let lastDirty = false;
 function publishDraftState() {
@@ -142,8 +153,10 @@ export function Tabs({ items, value, onChange, ariaLabel = 'Section' }: {
         onChange(items[next].id); (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
       }}>{item.label}{item.count !== undefined && <span className="tab-count">{item.count}</span>}</button>)}</div>;
 }
-export function Notice({ tone = 'info', title, children }: { tone?: 'info' | 'success' | 'warning' | 'danger'; title?: ReactNode; children: ReactNode }) {
-  return <div className={'notice notice-' + tone} role={tone === 'danger' ? 'alert' : 'status'}><Icon name={tone === 'success' ? 'check' : 'info'} size={19} />
+export function Notice({ tone = 'info', title, children, announce = true }: { tone?: 'info' | 'success' | 'warning' | 'danger'; title?: ReactNode; children: ReactNode; announce?: boolean }) {
+  const announcement = useContext(AnnouncementContext);
+  const duplicateError = tone === 'danger' && typeof children === 'string' && children === announcement.commandError;
+  return <div className={'notice notice-' + tone} role={!announce || duplicateError ? undefined : tone === 'danger' ? 'alert' : 'status'}><Icon name={tone === 'success' ? 'check' : 'info'} size={19} />
     <div>{title && <strong>{title}</strong>}<div>{children}</div></div></div>;
 }
 export function Meter({ value = 0, label, max = 100, tone = 'mint' }: { value?: number; label?: string; max?: number; tone?: string }) {
@@ -166,8 +179,10 @@ export function Modal({ open, onClose, title, description, children, footer, wid
     dialog.showModal();
     if (!openModals.size) { originalBodyOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; }
     openModals.add(dialog);
+    syncModalAnnouncements();
     return () => {
       dialog.close(); openModals.delete(dialog);
+      syncModalAnnouncements();
       if (!openModals.size) document.body.style.overflow = originalBodyOverflow;
       const opener = modalOpeners.get(dialog) ?? previous;
       modalOpeners.delete(dialog);
@@ -189,6 +204,7 @@ export function Modal({ open, onClose, title, description, children, footer, wid
       else if (!event.shiftKey && (document.activeElement === last || document.activeElement === ref.current)) { event.preventDefault(); first.focus(); }
     }}>
     <div className={'modal ' + (wide ? 'modal-wide' : '')}>
+      <LiveAnnouncements />
       <div className="modal-heading"><div><h2 id={titleId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div>
         <Button variant="ghost" className="icon-button" aria-label="Close dialog" onClick={onClose}><Icon name="x" /></Button></div>
       <div className="modal-body">{children}</div>{footer && <div className="modal-footer">{footer}</div>}

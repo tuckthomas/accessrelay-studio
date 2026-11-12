@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({ listeners: new Set<(message: any) => void>(), command: vi.fn() }));
 vi.mock('./api', async importOriginal => {
@@ -71,5 +71,67 @@ describe('workspace draft and capture visibility', () => {
     expect(screen.getByText('CPU 12.5% · GPU —')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Controller', exact: true }));
     expect(screen.queryByText('Resource use')).toBeNull();
+  });
+});
+
+describe('semantic hardware and model announcements', () => {
+  const updates = () => screen.getByRole('status', { name: 'Studio status updates' });
+  const errors = () => screen.getByRole('alert', { name: 'Studio errors' });
+  it('announces an existing failure on bootstrap without reading ordinary initial state', async () => {
+    state.voice.status.error = 'The microphone is unavailable.';
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    await waitFor(() => expect(errors().textContent).toBe('The microphone is unavailable.'));
+    expect(updates().textContent).toBe('');
+  });
+  it('starts quietly and announces transitions without repeating telemetry snapshots', async () => {
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    expect(updates().textContent).toBe('');
+    emit({ type: 'status', status: { controller: { connected: true }, voice: { isStarting: true } } });
+    await waitFor(() => expect(updates().textContent).toBe('Controller connected. Starting voice processing.'));
+    const observerCallback = vi.fn();
+    const observer = new MutationObserver(observerCallback);
+    observer.observe(updates(), { childList: true, characterData: true, subtree: true });
+    try {
+      for (const meanPollMs of [2, 4, 6]) emit({ type: 'status', status: {
+        controller: { connected: true, meanPollMs }, voice: { isStarting: true, inputPeak: meanPollMs / 10 }
+      } });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
+      expect(observerCallback).not.toHaveBeenCalled();
+    } finally { observer.disconnect(); }
+    emit({ type: 'status', status: { controller: { connected: false }, voice: { isRunning: true } } });
+    await waitFor(() => expect(updates().textContent).toBe('Controller disconnected. Voice processing is live.'));
+  });
+  it('announces asynchronous voice and capture failures once, independently of the visible page', async () => {
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Settings', exact: true }));
+    emit({ type: 'status', status: { voice: { error: 'Microphone disconnected.' }, vision: {
+      session: { captureFailed: true, message: 'Capture window closed.' }
+    } } });
+    await waitFor(() => expect(errors().textContent).toBe('Microphone disconnected. Capture window closed.'));
+    emit({ type: 'status', status: { voice: { error: 'Microphone disconnected.', inputPeak: 0 }, vision: {
+      session: { captureFailed: true, message: 'Capture window closed.', frames: 99 }
+    } } });
+    expect(errors().textContent).toBe('Microphone disconnected. Capture window closed.');
+  });
+  it('announces readiness and measured calibration notices without reading per-frame decisions', async () => {
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    emit({ type: 'status', status: { vision: { session: { running: true, modelReady: true },
+      notice: 'Measured calibration is ready for your review.' } } });
+    await waitFor(() => expect(updates().textContent).toContain('Vision model ready.'));
+    expect(updates().textContent).toContain('Measured calibration is ready for your review.');
+    emit({ type: 'status', status: { vision: { session: { running: true, modelReady: true, frames: 100 },
+      output: { state: 'trackingShot', lastConfidence: .95 }, notice: 'Measured calibration is ready for your review.' } } });
+    expect(updates().textContent).not.toContain('trackingShot');
+  });
+  it('delivers command errors inside the active dialog without duplicate visible alerts', async () => {
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Help', exact: true }));
+    const dialog = screen.getByRole('dialog', { name: 'Find your way around' });
+    harness.command.mockRejectedValueOnce(new Error('Output could not stop.'));
+    // jsdom has no native inert implementation; a host action can still fail while
+    // a modal is open. The real browser test checks which region is accessible.
+    fireEvent.click(screen.getByRole('button', { name: 'Stop everything' }));
+    await waitFor(() => expect(within(dialog).getByRole('alert', { name: 'Studio errors' }).textContent).toBe('Output could not stop.'));
+    expect(screen.getAllByRole('alert').every(element => element.hasAttribute('data-status-announcer') || element.closest('[data-status-announcer]'))).toBe(true);
   });
 });

@@ -9,7 +9,7 @@ public enum VoicePreset { Clean, Warm, Bright, Deep, Radio }
 public sealed record VoiceSettings(VoicePreset Preset, double PitchSemitones, double GainDb, bool Muted);
 public sealed record VoiceEndpoint(string Id, string Name, bool IsDefault);
 public sealed record VoiceDevices(VoiceEndpoint[] Microphones, VoiceEndpoint[] Outputs);
-public sealed record VoiceStatus(bool IsRunning, string Message, float InputPeak, float OutputPeak, int BufferedMilliseconds);
+public sealed record VoiceStatus(bool IsRunning, string Message, float InputPeak, float OutputPeak, int BufferedMilliseconds, string? Error = null);
 
 public sealed class VoiceSession : IDisposable
 {
@@ -17,6 +17,7 @@ public sealed class VoiceSession : IDisposable
     private VoiceStream? _stream;
     private NeuralVoicePreview? _preview;
     private string _message = "Voice processing is off.";
+    private string? _error;
     private bool _disposed;
 
     public VoiceStatus Status
@@ -29,7 +30,7 @@ public sealed class VoiceSession : IDisposable
                     return preview.Status;
                 return _stream is { } stream
                     ? new(true, _message, stream.InputPeak, stream.OutputPeak, stream.BufferedMilliseconds)
-                    : new(false, _message, 0, 0, 0);
+                    : new(false, _message, 0, 0, 0, _error);
             }
         }
     }
@@ -58,6 +59,7 @@ public sealed class VoiceSession : IDisposable
             lock (_gate)
             {
                 EnsureCanStart(cancellation);
+                _error = null;
                 _preview = new NeuralVoicePreview(microphoneId, outputId, settings, neural, OnPreviewFinished);
             }
         }
@@ -139,6 +141,7 @@ public sealed class VoiceSession : IDisposable
             try
             {
                 _stream = new VoiceStream(microphoneId, outputId, settings, OnFault, pipe, virtualEndpointName, neural);
+                _error = null;
                 _message = $"Voice processing is live · {_stream.OutputName}";
             }
             catch (COMException error)
@@ -181,11 +184,12 @@ public sealed class VoiceSession : IDisposable
             preview = _preview;
             preview?.RequestStop();
             _message = "Voice processing is off.";
+            _error = null;
         }
         preview?.WaitForStop();
     }
 
-    private void OnPreviewFinished(NeuralVoicePreview preview, string message)
+    private void OnPreviewFinished(NeuralVoicePreview preview, string message, bool failed)
     {
         lock (_gate)
         {
@@ -195,6 +199,7 @@ public sealed class VoiceSession : IDisposable
                 return;
             _preview = null;
             _message = stopped ? "Voice processing is off." : message;
+            _error = !stopped && failed ? message : null;
         }
     }
 
@@ -207,6 +212,7 @@ public sealed class VoiceSession : IDisposable
 
             StopStream();
             _message = message;
+            _error = message;
         }
     }
 

@@ -15,7 +15,7 @@ internal sealed class NeuralVoicePreview
     private float _inputPeak;
 
     public NeuralVoicePreview(string microphoneId, string outputId, VoiceSettings settings, NeuralVoiceWorker neural,
-        Action<NeuralVoicePreview, string> onFinished)
+        Action<NeuralVoicePreview, string, bool> onFinished)
     {
         _neural = neural;
         _signal = new VoiceSignal(settings, CaptureSeconds * 1000, primeMilliseconds: 0);
@@ -41,10 +41,11 @@ internal sealed class NeuralVoicePreview
 
     public void DisposeCancellation() => _stop.Dispose();
 
-    private async Task RunAsync(string microphoneId, string outputId, Action<NeuralVoicePreview, string> onFinished,
+    private async Task RunAsync(string microphoneId, string outputId, Action<NeuralVoicePreview, string, bool> onFinished,
         CancellationToken stop)
     {
         string message;
+        bool failed = false;
         try
         {
             float[] converted;
@@ -61,9 +62,9 @@ internal sealed class NeuralVoicePreview
             message = "Preview finished. Record another sample to listen again.";
         }
         catch (Exception) when (stop.IsCancellationRequested) { message = "Voice processing is off."; }
-        catch (COMException error) { message = VoiceSession.DescribeAudioError(error); }
-        catch (Exception error) { message = $"Voice preview stopped. {error.Message}"; }
-        onFinished(this, message);
+        catch (COMException error) { message = VoiceSession.DescribeAudioError(error); failed = true; }
+        catch (Exception error) { message = $"Voice preview stopped. {error.Message}"; failed = true; }
+        onFinished(this, message, failed);
     }
 
     private async Task<float[]> RecordAsync(string microphoneId, CancellationToken stop)

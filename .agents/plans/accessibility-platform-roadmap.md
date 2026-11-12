@@ -36,20 +36,20 @@ Implementation commit: `a7bc6a32d988a8b1253420ed43eedcc9249babe9`.
 Validation: 44 unit tests, 8 Chromium browser tests, TypeScript and Vite production
 build passed. Browser checks cover nested dialogs, Tab/Shift+Tab wrapping, blocked
 background focus, descriptions, Escape, and menu-trigger/opener restoration.
-Native Windows/WebView2 and screen-reader listening checks remain separate from
-the verified browser behavior.
+Windows CI also passed: https://github.com/tuckthomas/accessrelay-studio/actions/runs/43252380240.
+Real-device/WebView2 interaction and screen-reader listening remain separate checks.
 
 ## 2. Meaningful status announcements and menu regression coverage
 
-- [ ] Announce controller connection changes, voice lifecycle/failures, and meaningful
+- [x] Announce controller connection changes, voice lifecycle/failures, and meaningful
       vision/calibration transitions through persistent polite/alert live regions.
-- [ ] Avoid initial-state chatter, repeated messages, telemetry announcements, and
+- [x] Avoid initial-state chatter, repeated messages, telemetry announcements, and
       duplicate error announcements; announcements must remain available across pages.
-- [ ] Preserve announcements when a modal isolates background content.
-- [ ] Add tests for transitions, repeated snapshots, failures, and modal interaction.
-- [ ] Add browser regression assertions for existing Radix Home, End, typeahead,
+- [x] Preserve announcements when a modal isolates background content.
+- [x] Add tests for transitions, repeated snapshots, failures, and modal interaction.
+- [x] Add browser regression assertions for existing Radix Home, End, typeahead,
       `aria-controls`, and `aria-labelledby`; do not replace working menu behavior.
-- [ ] Run frontend unit tests, browser tests, and production build.
+- [x] Run frontend unit tests, browser tests, and production build.
 - [ ] Push implementation and record its commit SHA and validation here.
 
 Implementation commit: pending. Validation: pending.
