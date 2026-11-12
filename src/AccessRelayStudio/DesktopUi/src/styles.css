@@ -40,7 +40,6 @@ svg { flex-shrink: 0; }
 .brand img { width: 43px; height: 43px; }
 .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -.5px; line-height: 1.15; }
 .brand-name span { display: block; font-size: 14px; font-weight: 500; letter-spacing: 2.3px; text-transform: uppercase; margin-top: 3px; color: var(--muted); }
-.nav-label { color: var(--muted); font-size: 14px; font-weight: 600; padding: 0 15px 10px; }
 .primary-nav { display: flex; flex-direction: column; gap: 6px; }
 .nav-item { display: flex; align-items: center; gap: 13px; padding: 13px 15px; text-align: left; border: 1px solid transparent; border-radius: 11px; background: transparent; color: #4c655d; font-weight: 550; min-height: 49px; transition: background .15s, color .15s; }
 .nav-item:hover { background: #d5e1d7; color: var(--navy); }
@@ -48,8 +47,6 @@ svg { flex-shrink: 0; }
 .nav-item.active svg { color: var(--mint); }
 .nav-item .nav-active-mark { margin-left: auto; width: 5px; height: 5px; border-radius: 50%; background: var(--mint); }
 .sidebar-bottom { margin-top: auto; padding-top: 24px; }
-.sidebar-note { border-top: 1px solid #bdcfc2; margin: 20px 10px 0; padding: 18px 4px 0; display: flex; gap: 8px; color: var(--muted); font-size: 14px; line-height: 1.45; }
-.sidebar-note svg { margin-top: 2px; color: var(--accent); }
 .app-content { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .app-topbar { min-height: 68px; display: flex; align-items: center; gap: 16px; justify-content: space-between; padding: 14px 36px; border-bottom: 1px solid var(--line); background: var(--surface); flex-shrink: 0; }
 .topbar-breadcrumb { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
@@ -178,7 +175,6 @@ svg { flex-shrink: 0; }
 .tool-card:nth-child(3) .tool-card-icon { background: #dee9e7; color: #426e7a; }
 .tool-card p { color: var(--muted); margin-top: 7px; font-size: 14px; }
 .tool-card-link { margin-top: 2px; color: var(--accent); font-size: 14px; font-weight: 600; }
-.workspace-resources { background: #e8eee2; }
 .workspace-resources .card-heading { align-items: center; margin-bottom: 16px; }
 .resource-status { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 14px; }
 .resource-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; }

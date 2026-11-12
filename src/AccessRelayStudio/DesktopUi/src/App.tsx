@@ -8,7 +8,6 @@ import { SettingsPage } from './pages/SettingsPage';
 import { VoicePage } from './pages/VoicePage';
 import { VisionPage } from './pages/VisionPage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
-import { SwitchNavigation } from './SwitchNavigation';
 
 type Page = 'workspace' | 'controller' | 'vision' | 'voice' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
@@ -24,8 +23,6 @@ export function App() {
   const [status, setStatus] = useState<StudioStatus>({});
   const [error, setError] = useState('');
   const [bootError, setBootError] = useState('');
-  const [help, setHelp] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [closeRequested, setCloseRequested] = useState(false), [closing, setClosing] = useState(false);
   const navigate = useCallback((next: Page) => {
     if (next === page) return;
@@ -75,7 +72,6 @@ export function App() {
     <LiveAnnouncements />
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand"><img src="./brand.png" alt="" /><div className="brand-name">AccessRelay<span>Studio</span></div></div>
-      <p className="nav-label">Your tools</p>
       <nav className="primary-nav">{navigation.map(item => <button type="button" key={item.id}
         className={'nav-item' + (page === item.id ? ' active' : '')} onClick={() => navigate(item.id)}
         aria-label={item.label} aria-current={page === item.id ? 'page' : undefined} title={item.label}>
@@ -84,8 +80,6 @@ export function App() {
       <div className="sidebar-bottom">
         <button type="button" className={'nav-item' + (page === 'settings' ? ' active' : '')} onClick={() => navigate('settings')}
           aria-current={page === 'settings' ? 'page' : undefined} aria-label="Settings" title="Settings"><Icon name="settings" size={21} /><span>Settings</span></button>
-        <button type="button" className="nav-item" onClick={() => setHelp(true)} aria-label="Help" title="Help"><Icon name="help" size={21} /><span>A little guidance</span></button>
-        <div className="sidebar-note"><Icon name="shield" size={17} /><div>Runs on your PC.<br />Your setups stay here.</div></div>
       </div>
     </aside>
     <div className="app-content">
@@ -93,13 +87,8 @@ export function App() {
       <header className="app-topbar">
         <div className="topbar-breadcrumb"><span>Studio</span><Icon name="chevronRight" size={15} /><strong>{currentLabel}</strong></div>
         <div className="topbar-actions">
-          <SwitchNavigation controller={state.controller} status={controllerStatus} command={controllerCommand} />
           {(voiceStatus.isRunning || voiceStatus.commands?.recognition?.running) && <Badge tone="success"><Icon name="mic" size={15} />Mic live</Badge>}
           <Badge>Beta</Badge>
-          <Button variant="ghost" className="stop-everything" busy={stopping} onClick={async () => {
-            window.dispatchEvent(new Event('accessrelay-stop-all'));
-            setStopping(true); try { await controllerCommand('stopAll'); } catch {} finally { setStopping(false); }
-          }}><Icon name="stop" size={15} />Stop everything</Button>
         </div>
       </header>
       <main className="app-main" id="main-content"><div className="content-width">
@@ -119,13 +108,5 @@ export function App() {
       description="There are edits or controller recordings that have not been saved. Keep editing to save them before you close."
       footer={<><Button variant="danger" busy={closing} onClick={async () => { setClosing(true); try { await appCommand('close', { discard: true }); } catch { setClosing(false); } }}>Close and discard</Button>
         <Button variant="primary" disabled={closing} onClick={() => setCloseRequested(false)}>Keep editing</Button></>} />
-    <Modal open={help} onClose={() => setHelp(false)} title="Find your way around" description="A few starting points for your workspace."
-      footer={<Button variant="primary" onClick={() => setHelp(false)}>Got it</Button>}>
-      <div className="stack"><div><h3>Controller</h3><p className="subtle">Choose your controller and setup. Map buttons, record sequences, or write Lua, then turn on the virtual controller when you are ready.</p></div>
-        <div><h3>Remote Play</h3><p className="subtle">Choose your player and gameplay window. Set up the capture areas, then record a clip. Viewing alone does not save footage.</p></div>
-        <div><h3>Voice</h3><p className="subtle">Choose a microphone and voice. Listen in headphones before sending it through the virtual microphone.</p></div>
-        <Notice>Stop everything ends vision, voice and controller output together. Opening Studio never starts them automatically.</Notice>
-      </div>
-    </Modal>
   </div></AnnouncementContext.Provider>;
 }
