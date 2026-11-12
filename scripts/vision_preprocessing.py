@@ -5,12 +5,14 @@ No Pillow antialiasing or framework-specific image resizing is used here.
 """
 from __future__ import annotations
 
-import numpy as np
-
 PREPROCESSING_ID = "bgra8-player-crop-nearest256-bilinear-rgb-unit-ntchw-v2"
 
 
 def resize_stored_bgra(bgra, target_height: int, target_width: int, mean=(0, 0, 0), std=(1, 1, 1)):
+    # Metadata/provenance validation does not resize pixels and must remain usable
+    # without the optional offline ML environment.
+    import numpy as np
+
     image = np.asarray(bgra)
     if image.shape != (256, 256, 4) or image.dtype != np.uint8:
         raise ValueError("Canonical v2 recorded inputs must be 256x256 packed BGRA8")

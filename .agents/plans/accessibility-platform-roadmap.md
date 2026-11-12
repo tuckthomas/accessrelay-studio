@@ -8,6 +8,11 @@ and game packs. Treat model and GPU changes as experiments until measurements ju
 shipping them. Existing profiles, controller ownership, cancellation, and explicit
 operator activation must remain compatible.
 
+Current checkpoint: sections 1–2 are complete. Sections 3–4 have shipped code and
+passing Windows CI with simulated devices; physical-device acceptance remains open.
+Section 10 has the session-provenance guard implemented; its conversion/data work
+remains open. Sections 5–9 and 11–12 are queued, not implemented.
+
 ## Delivery and evidence
 
 - [x] Push this plan to GitHub `main` before implementing any checklist item.
@@ -188,8 +193,11 @@ Implementation commits: pending. Marketplace split: deferred until the contract 
       reviewed clips before claiming usable gameplay training.
 - [ ] Push independent improvements and record section commit SHAs here.
 
-Implementation commits: provenance guard pending push. Validation: 26 dependency-free
-dataset/provenance regression tests passed; Windows CI now runs the suite. Enriched
+Implementation commits: provenance guard `26866553388b539a973c541c91d4307f76f1b04f`;
+optional-NumPy import follow-up pending push. Validation: 26 dataset/provenance tests
+passed with Python site packages disabled (`-S`); image preprocessing also retained
+its expected RGB tensor behavior with NumPy installed. Windows CI now runs the
+stdlib-only suite; its follow-up result is pending. Enriched
 conversion and footage deduplication remain unimplemented. Prerequisites: reviewed
 source clips for functional training validation.
 

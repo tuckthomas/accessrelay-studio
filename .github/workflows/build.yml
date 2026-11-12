@@ -33,7 +33,7 @@ jobs:
       - name: Check controller logic and profiles
         run: dotnet run --project ./src/AccessRelayStudio/Verification/Verification.csproj -c Release
       - name: Check offline dataset provenance guards
-        run: python -m unittest discover -s ./tools/vision -p test_dataset_validation.py -v
+        run: python -S -m unittest discover -s ./tools/vision -p test_dataset_validation.py -v
       - name: Check desktop binary media and evidence integrity
         run: dotnet run --project ./tools/desktop/Verification/DesktopEvidenceVerification.csproj -c Release
       - name: Check native runtime with simulated devices

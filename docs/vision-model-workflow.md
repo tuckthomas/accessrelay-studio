@@ -9,7 +9,7 @@ Both provenance lists must be nonempty, unique, and mutually disjoint. Changing 
 labels file's split cannot turn a training session into validation evidence. These
 identity checks do not detect duplicated footage assigned a different session ID.
 Run their dependency-free regression suite with
-`python -m unittest discover -s tools/vision -p test_dataset_validation.py -v`.
+`python -S -m unittest discover -s tools/vision -p test_dataset_validation.py -v`.
 
 The live application uses ONNX Runtime in C# with an explicit **CPU** or **CUDA** provider selection. CUDA is the default. Python below is an **offline** training/export/evaluation tool, not a running service used by AccessRelay.
 
