@@ -254,6 +254,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
                 streams = _regions.Select(region => new { region.Name, region.File, region.Width, region.Height,
                     stride = region.Width * 4, pixelFormat = "BGRA8", region.Crop }),
                 controllerTraceFile = _controllerTrace is not null ? "controller-trace.json" : null,
+                inputComposition = _controllerTrace?.InputComposition,
                 controllerSamples = _controllerTrace?.StoredSamples ?? 0,
                 droppedControllerSamples = _controllerTrace?.DroppedSamples ?? 0,
                 maximumVisualBytes = _byteLimit,

@@ -22,6 +22,13 @@ internal sealed class VisionTrainingTrace
     private readonly int[] _published;
     private long _reserved, _dropped;
     private int _stored;
+    internal ControllerInputComposition? InputComposition { get; private set; }
+    internal void SetInputComposition(CoPilotSettings settings, bool primaryConnected = false, bool companionConnected = false)
+    {
+        settings.Validate();
+        if (StoredSamples != 0) throw new InvalidOperationException("Recorded input composition cannot be relabeled.");
+        InputComposition = settings.Enabled ? new(settings, primaryConnected, companionConnected) : null;
+    }
 
     internal VisionTrainingTrace(int capacity = MaximumSamples)
     {

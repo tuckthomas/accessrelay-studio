@@ -85,7 +85,8 @@ public sealed partial class DesktopWindow : Window
                 {
                     if (_runtime is null)
                     {
-                        var input = new EliteInputMonitor(WindowNative.GetWindowHandle(this));
+                        nint hwnd = WindowNative.GetWindowHandle(this);
+                        var input = new CoPilotInputMonitor(new EliteInputMonitor(hwnd), () => new EliteInputMonitor(hwnd, monitorPaddles: false));
                         var feedback = new FeedbackDispatcher(new WindowsFeedbackOutput(input));
                         try
                         {

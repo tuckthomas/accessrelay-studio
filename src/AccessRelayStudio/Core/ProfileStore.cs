@@ -15,6 +15,7 @@ public sealed class ProfileStore
     private const string SelectionFile = "active-macro-profile.txt";
     private const string StickDeadzoneFile = "stick-deadzones.json";
     private const string FeedbackFile = "accessibility-feedback.json";
+    private const string CoPilotFile = "co-pilot-input.json";
     private sealed record ProfileDocument(int Version, StudioProfile Profile);
 
     private static readonly JsonSerializerOptions Format = new()
@@ -26,7 +27,9 @@ public sealed class ProfileStore
             new JsonStringEnumConverter<ControlId>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
             new JsonStringEnumConverter<ScriptKind>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
             new JsonStringEnumConverter<ShotVariant>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
-            new JsonStringEnumConverter<RecordingChannels>(JsonNamingPolicy.CamelCase, allowIntegerValues: false)
+            new JsonStringEnumConverter<RecordingChannels>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+            new JsonStringEnumConverter<CoPilotAxisOwner>(JsonNamingPolicy.CamelCase, allowIntegerValues: false),
+            new JsonStringEnumConverter<CoPilotButtonOwner>(JsonNamingPolicy.CamelCase, allowIntegerValues: false)
         }
     };
 
@@ -48,13 +51,31 @@ public sealed class ProfileStore
             if (settings is null) return new();
             settings.Validate(); return settings;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return new(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) { return new(); }
     }
 
     internal void SaveFeedbackSettings(FeedbackSettings settings)
     {
         settings.Validate();
         WriteAtomically(Path.Combine(DirectoryPath, FeedbackFile), stream => JsonSerializer.Serialize(stream, settings, Format));
+    }
+
+    internal CoPilotSettings LoadCoPilotSettings()
+    {
+        try
+        {
+            using var stream = File.Open(Path.Combine(DirectoryPath, CoPilotFile), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            if (stream.Length > 16 * 1024) return new();
+            var settings = JsonSerializer.Deserialize<CoPilotSettings>(stream, Format);
+            if (settings is null) return new();
+            settings.Validate(); return settings with { Enabled = false };
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) { return new(); }
+    }
+    internal void SaveCoPilotSettings(CoPilotSettings settings)
+    {
+        settings.Validate();
+        WriteAtomically(Path.Combine(DirectoryPath, CoPilotFile), stream => JsonSerializer.Serialize(stream, settings, Format));
     }
 
     public Guid? LoadSelectedId()

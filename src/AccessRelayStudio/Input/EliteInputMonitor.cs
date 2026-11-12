@@ -23,16 +23,21 @@ public readonly record struct ControllerSample(
     public ControllerDevice? Device { get; init; }
     public IReadOnlyList<ControllerDevice> Devices { get; init; } = Array.Empty<ControllerDevice>();
     public bool SupportsBackgroundInput { get; init; }
+    public bool PrimaryConnected { get; init; }
+    public bool CompanionConnected { get; init; }
+    public string CompanionDeviceId { get; init; } = "";
+    public ControllerState NavigationState { get; init; }
+    public bool NavigationConnected { get; init; }
 }
 
 /// <summary>Reads standardized physical Windows gamepads and the optional wired Elite keypad.</summary>
 /// <remarks>Construct and dispose on the HWND thread. Poll from one engine thread.</remarks>
-public sealed class EliteInputMonitor : IDisposable
+public sealed class EliteInputMonitor : IControllerInput
 {
     private const ushort MicrosoftVendor = 0x045E;
     private const ushort EliteSeries2Usb = 0x0B00;
     private const ushort VirtualXbox360 = 0x028E;
-    private readonly RawPaddleInput _paddles;
+    private readonly RawPaddleInput? _paddles;
     private readonly GameInputBackground? _background;
     private Gamepad? _gamepad;
     private ControllerDevice? _device;
@@ -49,9 +54,9 @@ public sealed class EliteInputMonitor : IDisposable
     private int _disposed;
     private int _outputActive;
 
-    public EliteInputMonitor(nint hwnd)
+    public EliteInputMonitor(nint hwnd, bool monitorPaddles = true)
     {
-        _paddles = new RawPaddleInput(hwnd);
+        _paddles = monitorPaddles ? new RawPaddleInput(hwnd) : null;
         _background = GameInputBackground.TryCreate();
         RawGameController.RawGameControllerAdded += OnControllerChanged;
         RawGameController.RawGameControllerRemoved += OnControllerChanged;
@@ -63,7 +68,7 @@ public sealed class EliteInputMonitor : IDisposable
         Interlocked.Exchange(ref _scanRequested, 1);
     }
 
-    internal Action<double>? CreateVibrationSink(long connectionVersion)
+    public Action<double>? CreateVibrationSink(long connectionVersion)
     {
         var target = Volatile.Read(ref _gamepad);
         if (target is null || Volatile.Read(ref _connectionVersion) != connectionVersion) return null;
@@ -113,8 +118,8 @@ public sealed class EliteInputMonitor : IDisposable
             state = default;
         }
 
-        var paddles = _paddles.Sample();
-        bool supportsKeypad = _device is { SupportsEliteKeypad: true };
+        var paddles = _paddles?.Sample() ?? default;
+        bool supportsKeypad = _paddles is not null && _device is { SupportsEliteKeypad: true };
         if (paddles.Version != _paddleVersion)
         {
             _paddleVersion = paddles.Version;
@@ -136,6 +141,7 @@ public sealed class EliteInputMonitor : IDisposable
         {
             Device = _device,
             Devices = _devices,
+            PrimaryConnected = connected, NavigationState = state, NavigationConnected = connected,
             SupportsBackgroundInput = _background?.IsBound == true
         };
     }
@@ -175,7 +181,7 @@ public sealed class EliteInputMonitor : IDisposable
                     string transport = transports.Length == 1 ? transports[0] : "USB or Bluetooth";
                     if (transport == "USB" && candidate.IsWireless)
                         transport = "Wireless adapter";
-                    bool keypad = elite && group.Key.Product == EliteSeries2Usb && transport == "USB" && physical.Length == 1;
+                    bool keypad = _paddles is not null && elite && group.Key.Product == EliteSeries2Usb && transport == "USB" && physical.Length == 1;
                     verified.Add((new(candidate.Id, candidate.Name, group.Key.Vendor, group.Key.Product, transport, elite, keypad),
                         candidate.Gamepad, uniqueIdentity));
                 }
@@ -327,6 +333,6 @@ public sealed class EliteInputMonitor : IDisposable
         RawGameController.RawGameControllerAdded -= OnControllerChanged;
         RawGameController.RawGameControllerRemoved -= OnControllerChanged;
         _background?.Dispose();
-        _paddles.Dispose();
+        _paddles?.Dispose();
     }
 }

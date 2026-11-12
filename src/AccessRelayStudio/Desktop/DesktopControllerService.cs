@@ -19,6 +19,7 @@ internal sealed class DesktopControllerService : IDesktopModule
     private StudioProfile _active = StudioProfile.CreateDefault(), _persisted;
     private StickDeadzone _deadzone;
     private FeedbackSettings _feedbackSettings;
+    private CoPilotSettings _coPilotSettings;
     private CancellationTokenSource? _outputStart;
     private Task? _outputTask;
     private string _notice = "Ready. Controller output and scripts start only when you turn them on.";
@@ -36,6 +37,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         _store = new ProfileStore(DesktopEnvironment.DataDirectory("ControllerProfiles"));
         _deadzone = _store.LoadStickDeadzone();
         _feedbackSettings = _store.LoadFeedbackSettings();
+        _coPilotSettings = _store.LoadCoPilotSettings();
         try
         {
             _profiles = _store.LoadAll();
@@ -70,6 +72,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         },
         devices = _runtime()?.Latest?.Input.Devices ?? [], selectedDeviceId = _runtime()?.Latest?.Input.DeviceId,
         deadzone = _deadzone, feedback = _feedbackSettings,
+        coPilot = _coPilotSettings with { Enabled = _runtime()?.CoPilotSettings.Enabled == true },
         controls = ControlMap.All.Select(control => new { id = EnumName(control), label = ControlLabel(control), mask = (uint)control }),
         scripts = Enum.GetValues<ScriptKind>().Select(script => new { id = EnumName(script), label = ScriptLabel(script) }),
         recordingChannels = Enum.GetValues<RecordingChannels>().Where(value => value != RecordingChannels.None)
@@ -99,6 +102,9 @@ internal sealed class DesktopControllerService : IDesktopModule
             training = runtime?.IsVisionTrainingRecording == true,
             navigation = runtime?.NavigationStatus,
             feedback = runtime?.FeedbackStatus,
+            coPilot = new { enabled = runtime?.CoPilotSettings.Enabled == true,
+                primaryConnected = sample?.Input.PrimaryConnected == true,
+                companionConnected = sample?.Input.CompanionConnected == true },
             recording = new { isRecording = recording?.IsRecording == true, hasInput = recording?.HasInput == true,
                 elapsedMs = recording?.ElapsedMs ?? 0, pending = recording?.Pending is { } pending ? RecordingSummary(pending) : null,
                 note = recording?.Note }, message = _notice
@@ -127,6 +133,31 @@ internal sealed class DesktopControllerService : IDesktopModule
             }
             case "feedbackTest":
                 return new { queued = Runtime.TestFeedback(), status = Runtime.FeedbackStatus };
+            case "coPilotSave":
+            {
+                RequireEditable();
+                var settings = args.GetProperty("settings").Read<CoPilotSettings>(); settings.Validate();
+                var runtime = Runtime;
+                var previous = runtime.CoPilotSettings;
+                string primaryBefore = runtime.Latest?.Input.DeviceId ?? previous.PrimaryDeviceId;
+                bool apply = settings.Enabled || previous.Enabled;
+                try
+                {
+                    if (apply) runtime.ConfigureCoPilot(settings);
+                    _store.SaveCoPilotSettings(settings); _coPilotSettings = settings;
+                }
+                catch
+                {
+                    if (apply)
+                    {
+                        try { runtime.ConfigureCoPilot(previous with { PrimaryDeviceId = previous.Enabled ? previous.PrimaryDeviceId : primaryBefore }); }
+                        catch { runtime.ConfigureCoPilot(new CoPilotSettings { PrimaryDeviceId = primaryBefore }); }
+                    }
+                    throw;
+                }
+                _notice = settings.Enabled ? "Co-pilot inputs connected. Release controls before returning to gameplay." : "Co-pilot input is off.";
+                break;
+            }
             case "deviceSelect": Runtime.SelectController(args.Text("id")); _notice = "Input controller selected."; break;
             case "outputStart": await StartOutputAsync(); break;
             case "outputStop": StopOutput(); break;

@@ -1,5 +1,5 @@
 export interface NavigationSnapshot {
-  enabled: boolean; generation: number; nowMs: number;
+  enabled: boolean; generation: number; nowMs: number; sourceConnected?: boolean;
   events: { sequence: number; timestampMs: number; action: 'step' | 'activate' }[];
 }
 export interface NavigationCursor { generation: number; sequence: number }

@@ -54,6 +54,44 @@ internal static class RuntimeAccessibilityChecks
         Smoothing();
         Navigation();
         Feedback();
+        CoPilot();
+    }
+
+    private static void CoPilot()
+    {
+        using var input = new EliteInputMonitor();
+        using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
+        runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest?.OutputActive == true, "Co-pilot output did not connect.");
+        var held = default(ControllerState) with { Buttons = (ushort)ControlId.A, RightX = 21000 };
+        input.SetCompanion(held);
+        runtime.ConfigureCoPilot(new() { Enabled = true, PrimaryDeviceId = "a", CompanionDeviceId = "b" });
+        Wait(() => runtime.Latest?.Input.State == held && runtime.Latest?.Output == default(ControllerState), "Configuration replayed a held input.");
+        input.SetCompanion(default); Wait(() => runtime.Latest?.Input.State == default(ControllerState), "Neutral pair was not observed.");
+        Thread.Sleep(10);
+        input.SetCompanion(held); input.SetState(held with { RightX = 0 });
+        Wait(() => runtime.Latest?.Output == held, "Merged controls did not reach the arbiter.");
+        input.SetCompanion(default, false);
+        Wait(() => runtime.Latest?.Output == held with { RightX = 0 }, "Disconnect released the other participant's held button.");
+        input.SetState(default); input.SetCompanion(default);
+        Wait(() => runtime.Latest?.Input.CompanionConnected == true && runtime.Latest?.Output == default(ControllerState), "Companion did not reconnect.");
+        runtime.StartRecording(RecordingChannels.All);
+        input.SetCompanion(held); Wait(() => runtime.Latest?.Output == held, "Recording changed merged physical input.");
+        runtime.StopRecording(); runtime.DiscardRecording();
+        runtime.StopOutput(true); runtime.Attach(new UsbipXboxOutput());
+        Wait(() => runtime.Latest?.OutputActive == true && runtime.Latest?.Output == default(ControllerState), "Stop replayed co-pilot holds.");
+        input.SetCompanion(default); Wait(() => runtime.Latest?.Input.State == default(ControllerState), "Stop neutral was not seen.");
+        Thread.Sleep(10);
+        input.SetCompanion(held); Wait(() => runtime.Latest?.Output == held, "Fresh companion input after Stop failed.");
+        input.SetState(default); input.SetCompanion(default);
+        Wait(() => runtime.Latest?.Output == default(ControllerState), "Pair did not return to neutral.");
+        runtime.ConfigureNavigation(new() { Enabled = true });
+        input.SetCompanion(default(ControllerState) with { Buttons = (ushort)ControlId.A });
+        Thread.Sleep(30);
+        if (runtime.NavigationStatus.Events.Length != 0) throw new InvalidOperationException("Companion activated primary navigation.");
+        input.SetConnection(false, 100);
+        Wait(() => !runtime.NavigationStatus.SourceConnected, "Primary disconnect was hidden by connected companion.");
+        Console.WriteLine("SUCCESS: co-pilot arbitration, neutral configuration, disconnect, recording, Stop and primary navigation with simulated devices.");
     }
 
     private static void Smoothing()

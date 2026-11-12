@@ -8,7 +8,7 @@ namespace EliteScriptStudio.Audio;
 
 /// <summary>Owned only by FeedbackDispatcher's worker. No WASAPI or rumble call
 /// is performed by the controller polling or release deadline thread.</summary>
-internal sealed class WindowsFeedbackOutput(EliteInputMonitor input) : IFeedbackOutput
+internal sealed class WindowsFeedbackOutput(IControllerInput input) : IFeedbackOutput
 {
     private WasapiOut? _audio;
     private MMDevice? _endpoint;

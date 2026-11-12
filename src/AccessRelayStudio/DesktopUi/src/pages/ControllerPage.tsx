@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
+import { CoPilotInput } from '../CoPilotInput';
 import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
 
 const INITIAL_TIMING = { startDelay: 0, downSweep: 0, downHold: 512, upSweep: 80, upHold: 48, centerHold: 120, flick: 64, settle: 240, flickX: 0, flickY: -32767 };
@@ -42,8 +43,8 @@ export function ControllerPage({ state, status, command }: PageProps) {
         <Button className="icon-button" title="Create a controller setup" aria-label="Create a controller setup" onClick={() => transition(() => nameAction('profileCreate'))}><Icon name="plus" /></Button></div>} />
     {error && <Notice tone="danger">{error}</Notice>}
     <div className="controller-topline"><div className="controller-device"><span className="device-icon"><Icon name="gamepad" size={25} /></span>
-      <select value={live.selectedDeviceId ?? state.selectedDeviceId ?? ''} aria-label="Input controller" onChange={event => perform('deviceSelect', { id: event.target.value })}>
-        <option value="">Choose a controller</option>{devices.map((device: any) => <option key={device.id} value={device.id}>{device.name}</option>)}</select>
+      <select value={live.selectedDeviceId ?? state.selectedDeviceId ?? ''} disabled={!!live.coPilot?.enabled} aria-label="Input controller" onChange={event => perform('deviceSelect', { id: event.target.value })}>
+        <option value="">Choose a controller</option>{live.coPilot?.enabled && !devices.some((device: any) => device.id === live.selectedDeviceId) && <option value={live.selectedDeviceId}>Primary controller unavailable</option>}{devices.map((device: any) => <option key={device.id} value={device.id}>{device.name}</option>)}</select>
       <Button variant="ghost" className="icon-button" busy={busy === 'deviceRefresh'} title="Refresh controllers" aria-label="Refresh controllers" onClick={() => perform('deviceRefresh')}><Icon name="refresh" size={18} /></Button></div>
       <Badge tone={live.connected ? 'success' : 'neutral'}>{live.connected ? 'Input connected' : 'No input'}</Badge><div className="split-divider" />
       <Toggle label="Sequences" checked={!!live.scriptsEnabled} disabled={!live.connected || !!live.training || !!live.recording?.isRecording} onChange={enabled => perform('scriptsSet', { enabled })} />
@@ -59,7 +60,7 @@ export function ControllerPage({ state, status, command }: PageProps) {
     {tab === 'input' && <InputResponse state={state} status={live} command={command} />}
     {tab === 'accessibility' && <div className="page-stack"><StickyInput key={'sticky-' + profile.id} state={state} status={live} command={command} />
       <SmoothingInput key={'smoothing-' + profile.id} state={state} status={live} command={command} />
-      <FeedbackInput state={state} status={live} command={command} /></div>}
+      <FeedbackInput state={state} status={live} command={command} /><CoPilotInput state={state} status={live} command={command} /></div>}
     <details className="details-section"><summary>Manage controller setups</summary><div className="row"><Button onClick={() => nameAction('profileRename')}><Icon name="pencil" size={16} />Rename</Button>
       <Button onClick={() => transition(() => nameAction('profileDuplicate'))}><Icon name="copy" size={16} />Duplicate</Button><Button onClick={() => transition(() => perform('profileImport'))}><Icon name="upload" size={16} />Import setup</Button>
       <Button onClick={() => perform('profileExport')}><Icon name="download" size={16} />Export setup</Button><Button variant="ghost" disabled={(state.profiles || []).length < 2} onClick={() => setDeleteProfile(true)}><Icon name="trash" size={16} />Delete setup</Button></div></details>

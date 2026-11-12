@@ -118,6 +118,7 @@ async function previewCommand(method: string, args: any): Promise<any> {
     } else if (action === 'stickySave') controller.activeProfile.stickyControls = args.controls;
     else if (action === 'smoothingSave') controller.activeProfile.smoothing = args.settings;
     else if (action === 'feedbackSave') controller.feedback = args.settings;
+    else if (action === 'coPilotSave') controller.coPilot = args.settings;
     else if (action === 'feedbackTest') return { queued: false, message: 'Design preview only. Run the installed app to hear or feel feedback.' };
     else if (action === 'deadzoneSave') controller.deadzone = args;
     else if (action === 'luaValidate') return { valid: true, message: 'Design preview only. Run the desktop app to validate Lua.' };

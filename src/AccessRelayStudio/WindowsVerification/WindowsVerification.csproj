@@ -13,6 +13,7 @@
     <Compile Include="RuntimeTrainingChecks.cs" />
     <Compile Include="RuntimeAccessibilityChecks.cs" />
     <Compile Include="RuntimeTestDevices.cs" />
+    <Compile Include="../Input/IControllerInput.cs" Link="Input/IControllerInput.cs" />
     <Compile Include="PreviewSessionChecks.cs" />
     <Compile Include="../StudioRuntime.cs" Link="StudioRuntime.cs" />
     <Compile Include="../PrecisionTimer.cs" Link="PrecisionTimer.cs" />

@@ -1,0 +1,43 @@
+import { useEffect, useState } from 'react';
+import { Button, Card, Field, Notice, Toggle, useUnsavedChanges, type PageProps } from './ui';
+
+const defaults = { enabled: false, primaryDeviceId: '', companionDeviceId: '', leftStick: 'primary', rightStick: 'companion', triggers: 'strongest', buttons: {} };
+export function CoPilotInput({ state, status, command }: PageProps) {
+  const saved = JSON.stringify({ ...defaults, ...state.coPilot });
+  const [settings, setSettings] = useState<any>(JSON.parse(saved)), [baseline, setBaseline] = useState(saved);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
+  const dirty = JSON.stringify(settings) !== baseline;
+  useUnsavedChanges(dirty);
+  useEffect(() => { if (!dirty) { setSettings(JSON.parse(saved)); setBaseline(saved); } }, [saved]);
+  const devices = status.devices || state.devices || [], locked = busy || status.training || status.recording?.isRecording || !!status.recording?.pending;
+  const update = (key: string, value: unknown) => { setSettings((current: any) => ({ ...current, [key]: value })); setMessage(''); };
+  const valid = !settings.enabled || (settings.primaryDeviceId && settings.companionDeviceId && settings.primaryDeviceId !== settings.companionDeviceId);
+  return <Card title="Co-pilot controllers" description="Combine two verified physical controllers into one output. Preferences are remembered; merging starts only when you enable and save it.">
+    <div className="stack"><Toggle label="Enable co-pilot merging" checked={settings.enabled} disabled={locked} onChange={value => update('enabled', value)} />
+      <p className="subtle">Shared buttons stay pressed while either participant holds them. Opposite D-pad directions cancel. A stick always comes from one participant; strongest wins by magnitude, with primary winning ties. Triggers use the larger value in strongest mode. Elite paddles, navigation and rumble belong to primary.</p>
+      <div className="form-grid">{(['primary', 'companion'] as const).map(role => <Field key={role} label={role === 'primary' ? 'Primary controller' : 'Companion controller'}>
+        <select value={settings[role + 'DeviceId']} disabled={locked} onChange={event => update(role + 'DeviceId', event.target.value)}>
+          <option value="">Choose a physical controller</option>
+          {settings[role + 'DeviceId'] && !devices.some((device: any) => device.id === settings[role + 'DeviceId']) && <option value={settings[role + 'DeviceId']}>Saved controller unavailable</option>}
+          {devices.map((device: any) => <option key={device.id} value={device.id}>{device.name}</option>)}
+        </select></Field>)}
+        {(['leftStick', 'rightStick', 'triggers'] as const).map(control => <Field key={control} label={control === 'leftStick' ? 'Left stick owner' : control === 'rightStick' ? 'Right stick owner' : 'Trigger owner'}>
+          <select value={settings[control]} disabled={locked} onChange={event => update(control, event.target.value)}>
+            <option value="primary">Primary</option><option value="companion">Companion</option><option value="strongest">Strongest</option>
+          </select></Field>)}
+      </div>
+      <details><summary>Button ownership</summary><div className="form-grid">{(state.controls || []).filter((control: any) => !/^(small|large)/.test(control.id) && !/Trigger$/.test(control.id)).map((control: any) =>
+        <Field key={control.id} label={control.label + ' owner'}><select value={settings.buttons[control.id] || 'shared'} disabled={locked} onChange={event => {
+          const buttons = { ...settings.buttons }; if (event.target.value === 'shared') delete buttons[control.id]; else buttons[control.id] = event.target.value; update('buttons', buttons);
+        }}><option value="shared">Shared</option><option value="primary">Primary</option><option value="companion">Companion</option></select></Field>)}</div></details>
+      {status.coPilot?.enabled && <Notice announce={false}>Primary: {status.coPilot.primaryConnected ? 'connected' : 'unavailable'}. Companion: {status.coPilot.companionConnected ? 'connected' : 'unavailable'}.</Notice>}
+      <p className="subtle">Saving pauses sequences, disarms vision and requires neutral controls. Disconnecting a participant clears synthetic holds and sequences; the other's physical holds continue under the chosen ownership rules. Recordings capture merged physical input. Stop everything disconnects output; release all controls before reconnecting.</p>
+      {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
+      <div className="row"><Button variant="primary" busy={busy} disabled={!dirty || locked || !valid} onClick={async () => {
+        const submitted = structuredClone(settings); setBusy(true); setError('');
+        try { await command('coPilotSave', { settings: submitted }); setBaseline(JSON.stringify(submitted)); setMessage(submitted.enabled ? 'Co-pilot saved. Release controls before continuing.' : 'Co-pilot disabled.'); }
+        catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+      }}>Save co-pilot preferences</Button><Button disabled={!dirty || locked} onClick={() => { setSettings(JSON.parse(saved)); setBaseline(saved); setError(''); }}>Discard co-pilot edits</Button></div>
+    </div>
+  </Card>;
+}

@@ -114,7 +114,7 @@ export function SwitchNavigation({ controller, status, command }: { controller: 
     // snapshots from before activation, including their old disabled/connection state.
     if (snapshot.generation < cursor.current.generation) return;
     if (!snapshot.enabled) { nativeActive.current = false; stop('Controller navigation ended.'); return; }
-    if (status.connected === false) { stop('Controller disconnected. Switch navigation stopped.'); return; }
+    if (snapshot.sourceConnected === false || status.connected === false) { stop('Controller disconnected. Switch navigation stopped.'); return; }
     try {
       const now = anchor.current.native + performance.now() - anchor.current.browser;
       const actions = navigationEvents(snapshot, cursor.current, now);
@@ -138,7 +138,7 @@ export function SwitchNavigation({ controller, status, command }: { controller: 
       <Field label="Scan mode"><select disabled={active || busy} value={settings.mode} onChange={event => setSettings(value => ({ ...value, mode: event.target.value as Settings['mode'] }))}>
         <option value="automatic">One switch · automatic scanning</option><option value="step">Two switches · step and select</option></select></Field>
       <Field label="Switch source"><select disabled={active || busy} value={settings.source} onChange={event => setSettings(value => ({ ...value, source: event.target.value as Settings['source'] }))}>
-        <option value="keyboard">Keyboard switches</option><option value="controller">Selected physical controller</option></select></Field>
+        <option value="keyboard">Keyboard switches</option><option value="controller">Primary physical controller</option></select></Field>
       {settings.source === 'controller' ? <><Notice>Controller navigation pauses gameplay output and sequences. Release controls before returning to the game. Scanning stops when Studio loses focus.</Notice>
         {(['step', 'activate'] as const).map(key => <Field key={key} label={key === 'step' ? 'Controller step switch' : 'Controller select switch'}><select disabled={active || busy} value={settings[key]} onChange={event => setSettings(value => ({ ...value, [key]: event.target.value }))}>
           {(controller.controls || []).map((control: any) => <option key={control.id} value={control.id}>{control.label}</option>)}</select></Field>)}</>

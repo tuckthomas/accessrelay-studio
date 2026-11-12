@@ -14,7 +14,8 @@ internal readonly record struct RecorderState(bool Connected, bool IsRecording, 
 
 internal sealed class StudioRuntime : IDisposable
 {
-    private readonly EliteInputMonitor _input;
+    private readonly IControllerInput _input;
+    private bool _configuringInput, _inputNeedsNeutral;
     private readonly MacroEngine _engine = new();
     private readonly StickyButtons _sticky = new();
     private readonly StickSmoother _smoother = new();
@@ -50,8 +51,34 @@ internal sealed class StudioRuntime : IDisposable
     public bool IsVisionTrainingRecording { get { lock (_sync) return _visionTrainingRecording; } }
     public double? RecentOutputHandoffMs { get { lock (_sync) return (_output as UsbipXboxOutput)?.RecentHandoffMs; } }
     public VisionStatusSnapshot VisionStatus { get { lock (_sync) return _vision.Status; } }
-    internal SwitchNavigationSnapshot NavigationStatus { get { lock (_sync) return _navigation.Snapshot(_clock.ElapsedMilliseconds); } }
+    internal SwitchNavigationSnapshot NavigationStatus { get { lock (_sync) return _navigation.Snapshot(_clock.ElapsedMilliseconds, _latest?.Input.NavigationConnected == true); } }
     internal FeedbackStatus? FeedbackStatus => _feedback?.Status;
+    internal CoPilotSettings CoPilotSettings => _input.CoPilotSettings;
+    internal void ConfigureCoPilot(CoPilotSettings settings)
+    {
+        settings.Validate();
+        bool begun = false;
+        try
+        {
+            lock (_sync)
+            {
+                RequireTrainingStoppedLocked("changing co-pilot inputs");
+                if (_recorder is not null) throw new InvalidOperationException("Finish macro recording before changing input contributors.");
+                _configuringInput = true; _inputNeedsNeutral = true; begun = true;
+                Interlocked.Increment(ref _selectionVersion);
+                _engine.SetEnabled(false); _sticky.Reset(); _smoother.Reset(); _navigation.ResetInput();
+                InvalidateVisionLocked("Input composition changed. Release controls and explicitly enable assistance again.");
+                _output?.Neutralize();
+            }
+            // Native enumeration/disposal may wait for a reader. Never hold the
+            // controller/deadline lock while configuring physical devices.
+            _input.ConfigureCoPilot(settings);
+        }
+        finally
+        {
+            if (begun) lock (_sync) { _configuringInput = false; _navigation.ResetInput(); Interlocked.Increment(ref _selectionVersion); }
+        }
+    }
     internal void ConfigureFeedback(FeedbackSettings settings) => (_feedback ?? throw new InvalidOperationException("Feedback devices are unavailable.")).Configure(settings);
     internal bool TestFeedback() => _feedback?.TryPublish(FeedbackCueKind.Test, new(-1, Interlocked.Increment(ref _testFeedbackToken)),
         _latest?.Input.ConnectionVersion ?? 0) == true;
@@ -61,8 +88,9 @@ internal sealed class StudioRuntime : IDisposable
         settings.Validate();
         lock (_sync)
         {
-            if (settings.Enabled && _latest?.Input.IsConnected != true)
+            if (settings.Enabled && _latest?.Input.NavigationConnected != true)
                 throw new InvalidOperationException("Connect the selected physical controller before using controller switches.");
+            if (_configuringInput) throw new InvalidOperationException("Controller inputs are being configured. Try again shortly.");
             if (settings.Enabled && (_visionTrainingRecording || _recorder is not null))
                 throw new InvalidOperationException("Finish recording before routing controller input to Studio navigation.");
             bool wasEnabled = _navigation.Enabled;
@@ -137,7 +165,7 @@ internal sealed class StudioRuntime : IDisposable
         {
             // The entry check and all script/recording transitions share this lock, so training
             // cannot race an enable request after VisionSession's earlier UI eligibility check.
-            if (recording && (_engine.ScriptsEnabled || _recorder is not null || _navigation.Enabled || _navigationNeedsNeutral))
+            if (recording && (_engine.ScriptsEnabled || _recorder is not null || _navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral))
                 throw new InvalidOperationException("Turn off sequences and controller navigation, release controls, and finish macro recording before recording manual gameplay training data.");
             _visionTrainingRecording = recording;
             _sticky.Reset();
@@ -155,6 +183,7 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             _visionTrainingTrace = trace;
+            trace?.SetInputComposition(_input.CoPilotSettings, _latest?.Input.PrimaryConnected == true, _latest?.Input.CompanionConnected == true);
             _visionTrainingTraceAttachedAt = Stopwatch.GetTimestamp();
         }
     }
@@ -170,7 +199,7 @@ internal sealed class StudioRuntime : IDisposable
         }
     }
 
-    public StudioRuntime(EliteInputMonitor input, StudioProfile initial, StickDeadzone stickDeadzone, FeedbackDispatcher? feedback = null)
+    public StudioRuntime(IControllerInput input, StudioProfile initial, StickDeadzone stickDeadzone, FeedbackDispatcher? feedback = null)
     {
         _input = input;
         _feedback = feedback;
@@ -246,7 +275,7 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             RequireTrainingStoppedLocked("starting a macro recording");
-            if (_navigation.Enabled || _navigationNeedsNeutral)
+            if (_navigation.Enabled || _navigationNeedsNeutral || _inputNeedsNeutral)
                 throw new InvalidOperationException("Exit controller navigation and release the controls before recording manual input.");
             if (_recorder is not null)
                 return;
@@ -336,6 +365,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void DisconnectOutput(string status = "Virtual output off")
     {
+        _inputNeedsNeutral |= _input.CoPilotSettings.Enabled;
         _lastReleaseFeedback = _vision.Status.AutomatedReleases;
         if (_navigation.Enabled) { _navigation.Stop(); _navigationNeedsNeutral = true; }
         _sticky.Reset();
@@ -409,12 +439,16 @@ internal sealed class StudioRuntime : IDisposable
                         InvalidateVisionLocked("Physical controller connection changed. Vision release is disarmed.");
                     }
                     ControllerState state;
-                    _navigation.Sample(input.State, input.HeldPaddles | input.PressedPaddles, input.IsConnected, now);
+                    if (!_configuringInput) _navigation.Sample(input.NavigationState, input.HeldPaddles | input.PressedPaddles, input.NavigationConnected, now);
+                    if (!_configuringInput && _inputNeedsNeutral && input.IsConnected
+                        && ControlMap.PressedMask(input.State, input.HeldPaddles | input.PressedPaddles) == 0
+                        && _stickDeadzone.Apply(input.State) is { LeftX: 0, LeftY: 0, RightX: 0, RightY: 0 })
+                        _inputNeedsNeutral = false;
                     if (!_navigation.Enabled && _navigationNeedsNeutral && input.IsConnected
                         && ControlMap.PressedMask(input.State, input.HeldPaddles | input.PressedPaddles) == 0
                         && _stickDeadzone.Apply(input.State) is { LeftX: 0, LeftY: 0, RightX: 0, RightY: 0 })
                         _navigationNeedsNeutral = false;
-                    if (_navigation.Enabled || _navigationNeedsNeutral)
+                    if (_navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral)
                         state = default;
                     else if (_recorder is not null)
                     {
@@ -494,7 +528,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private bool VisionMacroConflict()
     {
-        if (_navigation.Enabled || _navigationNeedsNeutral) return true;
+        if (_navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral) return true;
         if (_visionProfile.StickyControls.Contains(_vision.Settings.ShootButton)) return true;
         if (!_engine.ScriptsEnabled) return false;
         var binding = _visionProfile.GetBinding(_vision.Settings.ShootButton);
@@ -503,6 +537,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void RequireTrainingStoppedLocked(string action)
     {
+        if (_configuringInput) throw new InvalidOperationException("Controller inputs are being configured. Try again shortly.");
         if (_visionTrainingRecording)
             throw new InvalidOperationException($"Finish the gameplay training take before {action}. Training captures manual input only.");
     }

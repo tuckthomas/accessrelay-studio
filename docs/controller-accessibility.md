@@ -96,3 +96,35 @@ existing deadzone immediately neutralizes the stick. Stop/output changes, discon
 device/profile/deadzone changes, and recording transitions reset its history. A large
 polling gap or clock rollback starts a fresh sample. Recording paths retain physical
 input. Smoothing uses the same profile format 4 compatibility rules as sticky buttons.
+# Co-pilot controllers
+
+Controller → Accessibility → Co-pilot controllers combines two selected, verified
+physical gamepads. Standard gamepad controls from adaptive hubs are supported through
+the same Windows reader; arbitrary keyboard-only hubs are not controller inputs.
+Merging is off at every launch, even when device identities and ownership preferences
+were saved. The ordinary input selector is disabled while merging is enabled.
+
+Buttons default to shared OR ownership. Either participant can keep a shared button
+held after the other releases or disconnects. Individual buttons can instead belong
+to primary or companion. Opposite D-pad directions cancel. Stick ownership selects a
+whole vector; strongest compares squared magnitude and breaks ties toward primary.
+Triggers can belong to either participant or use the larger value. Missing devices
+contribute neutral values, without transferring their exclusive controls to the
+other participant. Elite paddle capture, switch navigation and vibration stay with
+primary. Each reader retains the existing physical-bus verification and virtual
+Xbox identity exclusion while output is active.
+
+Configuration pauses sequences, disarms vision and neutralizes output until merged
+physical controls are neutral. Input topology changes clear synthetic sticky/filter/
+macro state and disarm vision; the remaining participant's physical controls continue.
+Sticky buttons and smoothing process the merged intent, then macros compose output,
+then the host vision arbiter owns release suppression. Macro recordings capture the
+merged physical state; connection changes cancel a take. Gameplay evidence additionally
+records immutable contributor identities and ownership settings, and initial connection
+state. Connection-version changes remain in the controller trace. Stop disconnects
+output and requires a neutral merged sample before restarting co-pilot gameplay.
+
+Portable verification covers merging, ownership, conflicts, disconnected contributors,
+numeric limits and preferences that never auto-enable. Windows runtime checks use
+simulated contributors. Real multi-device input, feedback-loop exclusion, adaptive
+hardware behavior and native WebView interaction still require Windows acceptance.

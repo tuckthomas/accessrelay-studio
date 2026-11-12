@@ -12,7 +12,7 @@ internal sealed record SwitchNavigationSettings(bool Enabled = false, ControlId 
 
 internal enum SwitchNavigationAction { Step, Activate }
 internal readonly record struct SwitchNavigationEvent(long Sequence, long TimestampMs, SwitchNavigationAction Action);
-internal sealed record SwitchNavigationSnapshot(bool Enabled, long Generation, long NowMs, SwitchNavigationEvent[] Events);
+internal sealed record SwitchNavigationSnapshot(bool Enabled, long Generation, long NowMs, SwitchNavigationEvent[] Events, bool SourceConnected = true);
 
 /// <summary>Bounded ordered physical edges for the UI. Repeated status reads do not
 /// consume events; generation/sequence numbers let the UI reject replay and gaps.</summary>
@@ -56,5 +56,5 @@ internal sealed class SwitchNavigationInput
         _events.Enqueue(new(++_sequence, nowMs, action));
     }
 
-    internal SwitchNavigationSnapshot Snapshot(long nowMs) => new(Enabled, _generation, nowMs, _events.ToArray());
+    internal SwitchNavigationSnapshot Snapshot(long nowMs, bool sourceConnected = true) => new(Enabled, _generation, nowMs, _events.ToArray(), sourceConnected);
 }
