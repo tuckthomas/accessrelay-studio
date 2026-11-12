@@ -59,7 +59,17 @@ Frame labeling has finite temporal resolution: a 60 FPS source provides observat
 
 Use nonoverlapping reviewed intervals. Endpoints are inclusive, so one interval's end cannot also be the next interval's start. The review dialog rejects overlapping labels on save/load, and the offline loader rejects them before producing training samples. Negative intervals have `isTargetShot=false` and omit `targetReleaseTicks`. Include pump fakes, dribbles, passes, menus, stream artifacts, another player shooting, occlusions and camera movement. `playerIdentityConfirmed=false` labels wrong/unknown-player intervals. Target intervals require confirmed identity.
 
-Assign complete sessions to `train`, `validation`, or `held-out`. Never divide frames from one take across those splits. Keep each training run bound to one exact shot-profile fingerprint. Changes in player height, three-point rating, base, either upper release, shot speed, release blend, meter mode or active meter release type create a new fingerprint and require a matching model/profile evaluation.
+Assign complete sessions to `train`, `validation`, or `held-out`. Never divide frames from one take across those splits. Keep each training run bound to one exact shot-profile fingerprint. Changes in player height, three-point rating, base, either upper release, shot speed, release blend, meter mode, active meter release type or camera view create a new fingerprint and require a matching model/profile evaluation.
+
+### Camera provenance
+
+The shot profile records `cameraView` as exactly **`2K`**, **`2K Low`**, or **`2K Legacy`**. Camera changes are part of the shot-profile configuration fingerprint and invalidate prior model/calibration associations. Set the profile to the actual in-game view before recording; metadata cannot independently prove which camera the game rendered.
+
+Training derives the model's `cameraConfiguration` from recorded `session.json` → `shotProfile.cameraView`. It rejects mixed or unsupported camera views, including across the train/validation split. The optional `--camera` argument is only a consistency check and must match the recorded view; it cannot relabel footage. Evaluation requires the dataset camera, model, training provenance and locked-threshold camera to agree.
+
+Legacy application profiles without a camera field default to `2K`. Legacy recorded datasets are different: their original camera cannot be inferred from missing metadata. Offline tools reject missing `shotProfile.cameraView` by default. After reviewing that the old footage actually used `2K`, the explicit `--assume-legacy-camera-2k` option allows that assumption and records the affected session IDs in training/evaluation provenance. It never overrides an explicitly unsupported or conflicting camera value. Older model candidates without camera-bound training provenance need a reviewed re-export/evaluation.
+
+The camera-aware profile fingerprint format is version 3. The legacy-camera assumption flag does **not** migrate an older fingerprint, rewrite its provenance, or make a legacy exported model match a current profile. Reconcile the complete reviewed shot configuration with its current fingerprint and revalidate the data/model association, or record new takes. Merely asserting `2K` cannot unlock automatic release.
 
 ## Offline training and export
 
@@ -72,7 +82,7 @@ python ./scripts/Train-VisionModel.py `
   --train C:/VisionData/train-take-01 C:/VisionData/train-take-02 `
   --validation C:/VisionData/validation-take-01 `
   --game-version "NBA 2K27 build being evaluated" `
-  --camera "Recorded camera settings" `
+  --camera "2K" `
   --out C:/VisionModels/candidate-01
 ```
 
@@ -97,7 +107,7 @@ This deliberately exports random, **untrained** weights. It is useful for loadin
 
 Install the Python ONNX Runtime CPU package in the offline environment. Evaluation deliberately uses CPU inference as a numerical reference; it is not a production CPU fallback.
 
-Choose thresholds from development/validation/calibration results. Save `locked-thresholds.json` with schema 1, `datasetId`, the exact `animationProfile`, `calibrationProcedureVersion`, `minimumConfidence`, `maximumUncertaintyMs`, `maximumFrameAgeMs`, `meterOff`, `noPlayerIconRequired`, and `lockedBeforeFinalEvaluation`. Set the last flag only after freezing these choices for the final held-out run. Maintain the dated configuration and dataset provenance; the flag alone cannot prove that process was followed.
+Choose thresholds from development/validation/calibration results. Save `locked-thresholds.json` with schema 1, `datasetId`, the exact `animationProfile`, matching `cameraConfiguration` (`2K`, `2K Low`, or `2K Legacy`), `calibrationProcedureVersion`, `minimumConfidence`, `maximumUncertaintyMs`, `maximumFrameAgeMs`, `meterOff`, `noPlayerIconRequired`, and `lockedBeforeFinalEvaluation`. Set the last flag only after freezing these choices for the final held-out run. Maintain the dated configuration and dataset provenance; the flag alone cannot prove that process was followed.
 
 ```powershell
 python ./scripts/Evaluate-VisionModel.py `

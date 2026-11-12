@@ -78,6 +78,7 @@ public sealed partial class Nba2K27PluginPanel : UserControl
             ShotRelease1Percent.Value = profile.Release1Percent;
             ShotRelease2Percent.Value = profile.Release2Percent;
             ShotSpeed.SelectedIndex = profile.ShotSpeed - 1;
+            ShotCameraView.SelectedIndex = profile.CameraView switch { "2K" => 0, "2K Low" => 1, "2K Legacy" => 2, _ => -1 };
             ShotUsesMeter.IsOn = profile.UsesShotMeter;
             ShotMeterReleaseType.Text = profile.MeterReleaseType;
             _shotDraftDirty = false;
@@ -117,6 +118,7 @@ public sealed partial class Nba2K27PluginPanel : UserControl
     private void ShotTextChanged(object sender, TextChangedEventArgs args) => ShotDraftChanged();
     private void ShotNumberChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => ShotDraftChanged();
     private void ShotSpeedChanged(object sender, SelectionChangedEventArgs args) => ShotDraftChanged();
+    private void ShotCameraViewChanged(object sender, SelectionChangedEventArgs args) => ShotDraftChanged();
     private void ShotMeterChanged(object sender, RoutedEventArgs args) => ShotDraftChanged();
 
     private void ShotBlend1Changed(NumberBox sender, NumberBoxValueChangedEventArgs args) => UpdateShotBlend(firstChanged: true);
@@ -156,7 +158,7 @@ public sealed partial class Nba2K27PluginPanel : UserControl
         ShotProfilePicker.IsEnabled = editable;
         ShotProfileName.IsEnabled = ShotPlayerHeight.IsEnabled = ShotThreePointRating.IsEnabled =
             ShotBase.IsEnabled = ShotUpperRelease1.IsEnabled = ShotUpperRelease2.IsEnabled =
-            ShotRelease1Percent.IsEnabled = ShotRelease2Percent.IsEnabled = ShotSpeed.IsEnabled = ShotUsesMeter.IsEnabled = editable;
+            ShotRelease1Percent.IsEnabled = ShotRelease2Percent.IsEnabled = ShotSpeed.IsEnabled = ShotCameraView.IsEnabled = ShotUsesMeter.IsEnabled = editable;
         ShotMeterReleaseType.IsEnabled = editable && ShotUsesMeter.IsOn;
         NewShotProfileButton.IsEnabled = editable;
         SaveShotProfileButton.IsEnabled = editable && (_shotDraftDirty || _selectedShotProfile is null);
@@ -180,6 +182,9 @@ public sealed partial class Nba2K27PluginPanel : UserControl
             throw new InvalidDataException("Upper-release percentages must be whole numbers that total 100%.");
         if (ShotSpeed.SelectedIndex is < 0 or > 3)
             throw new InvalidDataException("Choose one of the four shot speeds.");
+        if (ShotCameraView.SelectedItem is not ComboBoxItem { Tag: string cameraView } ||
+            cameraView is not ("2K" or "2K Low" or "2K Legacy"))
+            throw new InvalidDataException("Choose the 2K, 2K Low, or 2K Legacy camera view.");
         var result = original with
         {
             Name = ShotProfileName.Text.Trim(),
@@ -190,6 +195,7 @@ public sealed partial class Nba2K27PluginPanel : UserControl
             UpperRelease2 = ShotUpperRelease2.Text.Trim(),
             Release1Percent = (int)ShotRelease1Percent.Value,
             ShotSpeed = ShotSpeed.SelectedIndex + 1,
+            CameraView = cameraView,
             UsesShotMeter = ShotUsesMeter.IsOn,
             MeterReleaseType = ShotUsesMeter.IsOn ? ShotMeterReleaseType.Text.Trim() : ""
         };

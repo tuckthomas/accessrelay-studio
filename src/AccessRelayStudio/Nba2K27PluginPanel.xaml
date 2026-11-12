@@ -121,6 +121,12 @@
                         <ComboBoxItem Content="3 of 4" />
                         <ComboBoxItem Content="4 of 4 (fastest)" />
                     </ComboBox>
+                    <ComboBox x:Name="ShotCameraView" Header="Camera view" FontSize="14" HorizontalAlignment="Stretch"
+                              AutomationProperties.Name="NBA 2K27 camera view" SelectionChanged="ShotCameraViewChanged">
+                        <ComboBoxItem Content="2K" Tag="2K" />
+                        <ComboBoxItem Content="2K Low" Tag="2K Low" />
+                        <ComboBoxItem Content="2K Legacy" Tag="2K Legacy" />
+                    </ComboBox>
                     <ToggleSwitch x:Name="ShotUsesMeter" Header="Use shot meter" OnContent="Meter on" OffContent="Meter off"
                                   FontSize="14" AutomationProperties.Name="Use a shot meter for this shot profile" Toggled="ShotMeterChanged" />
                     <TextBox x:Name="ShotMeterReleaseType" Header="Meter release type" MaxLength="120" FontSize="14"

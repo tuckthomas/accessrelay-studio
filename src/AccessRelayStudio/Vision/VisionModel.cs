@@ -49,6 +49,8 @@ internal sealed class VisionModel : IDisposable
         settings.Validate();
         cancellation.ThrowIfCancellationRequested();
         var (manifest, hash) = VisionModelManifest.Read(manifestPath);
+        if (settings.CameraView.Length != 0 && settings.CameraView != manifest.CameraConfiguration)
+            throw new InvalidDataException("The animation model does not match the selected camera view.");
         string modelPath = VisionModelManifest.ResolveChildFile(manifestPath, manifest.ModelFile);
         if (!string.Equals(Path.GetExtension(modelPath), ".onnx", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The vision model must be an ONNX file.");

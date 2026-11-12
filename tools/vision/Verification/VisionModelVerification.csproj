@@ -9,6 +9,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.31.1" />
     <Compile Include="../../../src/AccessRelayStudio/Core/ControllerState.cs" Link="Core/ControllerState.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionSettings.cs" Link="Core/VisionSettings.cs" />
+    <Compile Include="../../../src/AccessRelayStudio/Core/Nba2K27ShotProfile.cs" Link="Core/Nba2K27ShotProfile.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/VisionPrediction.cs" Link="Core/VisionPrediction.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Core/ControllerOutputArbiter.cs" Link="Core/ControllerOutputArbiter.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/CapturedVisionFrame.cs" Link="Vision/CapturedVisionFrame.cs" />

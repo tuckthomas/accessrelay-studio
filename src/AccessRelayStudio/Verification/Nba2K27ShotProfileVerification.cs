@@ -10,6 +10,7 @@ internal static class Nba2K27ShotProfileVerification
         PersistenceAndSelection();
         BoundedReadsAndIdentity();
         MeterSpeedBlendAndLegacyDefaults();
+        CameraViewsAndMigration();
     }
 
     private static Nba2K27ShotProfile Complete(string name = "Standing jumper") =>
@@ -32,7 +33,8 @@ internal static class Nba2K27ShotProfileVerification
             profile with { Base = "Different base" }, profile with { UpperRelease1 = "Different upper one" },
             profile with { UpperRelease2 = "Different upper two" },
             profile with { UsesShotMeter = true, MeterReleaseType = "Custom release type" },
-            profile with { ShotSpeed = 3 }, profile with { Release1Percent = 40 }
+            profile with { ShotSpeed = 3 }, profile with { Release1Percent = 40 },
+            profile with { CameraView = "2K Low" }, profile with { CameraView = "2K Legacy" }
         }) Check(profile.ConfigurationFingerprint != changed.ConfigurationFingerprint, "Every game-setting edit invalidates configuration identity.");
         foreach (var invalid in new[]
         {
@@ -45,6 +47,9 @@ internal static class Nba2K27ShotProfileVerification
             profile with { UsesShotMeter = true, MeterReleaseType = "bad\nrelease" },
             profile with { ShotSpeed = 0 }, profile with { ShotSpeed = 5 },
             profile with { Release1Percent = -1 }, profile with { Release1Percent = 101 },
+            profile with { CameraView = "" }, profile with { CameraView = "2k" },
+            profile with { CameraView = "2K low" }, profile with { CameraView = " 2K" },
+            profile with { CameraView = "Broadcast" }, profile with { CameraView = null! },
             profile with { UpperRelease1 = new string('x', 121) }, profile with { UpperRelease2 = " " }
         }) Expect<InvalidDataException>(invalid.Validate);
         Equal("6' 6\"", Nba2K27ShotProfile.FormatHeight(78));
@@ -89,6 +94,44 @@ internal static class Nba2K27ShotProfileVerification
             Equal(50, restored.Release2Percent);
             store.Select(restored.Id);
             Equal<Guid?>(restored.Id, store.LoadSelectedId());
+        });
+    }
+
+    private static void CameraViewsAndMigration()
+    {
+        Equal("2K", Nba2K27ShotProfile.Create().CameraView);
+        Check(Nba2K27ShotProfile.CameraViews.SequenceEqual(new[] { "2K", "2K Low", "2K Legacy" }),
+            "Exactly the requested camera views are exposed.");
+        var profile = Complete();
+        var fingerprints = new HashSet<string>(StringComparer.Ordinal);
+        WithDirectory(directory =>
+        {
+            var store = new Nba2K27ShotProfileStore(directory);
+            foreach (string camera in Nba2K27ShotProfile.CameraViews)
+            {
+                var edited = profile with { CameraView = camera };
+                edited.Validate();
+                fingerprints.Add(edited.ConfigurationFingerprint);
+                store.Save(edited); store.Select(edited.Id);
+                Equal(edited, new Nba2K27ShotProfileStore(directory).Load(edited.Id));
+                Equal<Guid?>(edited.Id, store.LoadSelectedId());
+            }
+            Equal(3, fingerprints.Count);
+            var duplicate = store.Duplicate(profile.Id, "Copied legacy-camera shot");
+            Equal("2K Legacy", duplicate.CameraView);
+            Equal(store.Load(profile.Id).ConfigurationFingerprint, duplicate.ConfigurationFingerprint);
+
+            string path = Path.Combine(directory, profile.Id.ToString("N") + ".json");
+            var document = JsonNode.Parse(File.ReadAllText(path))!;
+            document["profile"]!.AsObject().Remove("cameraView");
+            File.WriteAllText(path, document.ToJsonString());
+            var legacy = store.Load(profile.Id);
+            Equal("2K", legacy.CameraView);
+            Equal(profile.ConfigurationFingerprint, legacy.ConfigurationFingerprint);
+            document["profile"]!["cameraView"] = "Unsupported view";
+            File.WriteAllText(path, document.ToJsonString());
+            Expect<InvalidDataException>(() => store.Load(profile.Id));
+            Equal<Guid?>(null, store.LoadSelectedId());
         });
     }
 

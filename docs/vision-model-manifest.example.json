@@ -16,7 +16,7 @@
   "rgbStandardDeviation": [1, 1, 1],
   "animationProfile": "replace-with-selected-shot-profile-fingerprint",
   "gameVersion": "unvalidated",
-  "cameraConfiguration": "unvalidated",
+  "cameraConfiguration": "2K",
   "license": "Review actual model and training-data rights",
   "validation": null
 }

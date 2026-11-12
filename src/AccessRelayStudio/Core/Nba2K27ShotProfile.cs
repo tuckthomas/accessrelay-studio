@@ -9,11 +9,12 @@ namespace EliteScriptStudio.Core;
 /// <summary>Player and custom shot configuration. Entry guards are not a game animation catalog.</summary>
 internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches, int ThreePointRating,
     string Base, string UpperRelease1, string UpperRelease2, bool UsesShotMeter = false,
-    string MeterReleaseType = "", int ShotSpeed = 4, int Release1Percent = 50)
+    string MeterReleaseType = "", int ShotSpeed = 4, int Release1Percent = 50, string CameraView = "2K")
 {
     public const int MaximumProfiles = 64;
     public const int MinimumHeightInches = 36;
     public const int MaximumHeightInches = 108;
+    public static IReadOnlyList<string> CameraViews { get; } = Array.AsReadOnly(new[] { "2K", "2K Low", "2K Legacy" });
 
     // An incomplete draft can be displayed and edited, but cannot be persisted or selected.
     public static Nba2K27ShotProfile Create() => new(Guid.NewGuid(), "New shot profile", 78, 80, "", "", "");
@@ -26,6 +27,8 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
             throw new InvalidDataException($"Player height must be between {MinimumHeightInches} and {MaximumHeightInches} inches. These are data-entry limits, not game catalog limits.");
         if (ThreePointRating is < 0 or > 100)
             throw new InvalidDataException("The three-point rating must be between 0 and 100.");
+        if (CameraView is not ("2K" or "2K Low" or "2K Legacy"))
+            throw new InvalidDataException("Choose the camera view 2K, 2K Low, or 2K Legacy.");
         CheckLabel(Base, 120, "Base");
         CheckLabel(UpperRelease1, 120, "Upper Release 1");
         CheckLabel(UpperRelease2, 120, "Upper Release 2");
@@ -48,7 +51,7 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
             // same game configuration share an identity; actual game-setting edits invalidate it.
             string canonical = JsonSerializer.Serialize(new
             {
-                version = 2, heightInches = HeightInches, threePointRating = ThreePointRating,
+                version = 3, heightInches = HeightInches, threePointRating = ThreePointRating, cameraView = CameraView,
                 @base = Normalize(Base), upperRelease1 = Normalize(UpperRelease1), upperRelease2 = Normalize(UpperRelease2),
                 usesShotMeter = UsesShotMeter, meterReleaseType = UsesShotMeter ? Normalize(MeterReleaseType) : "",
                 shotSpeed = ShotSpeed, release1Percent = Release1Percent, release2Percent = Release2Percent

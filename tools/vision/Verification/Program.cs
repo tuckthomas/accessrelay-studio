@@ -95,6 +95,10 @@ static void CanonicalPreprocessing(string? directory)
 static void InvalidModels()
 {
     Manifest().Validate();
+    (VisionSettings.Default with { CameraView = "2K Low" }).Validate();
+    Throws(() => (VisionSettings.Default with { CameraView = "Unsupported view" }).Validate());
+    Require((Manifest() with { CameraConfiguration = "2K" }).CheckArmingEvidence("unused.json",
+        VisionSettings.Default with { CameraView = "2K Low" }).Contains("camera view"), "A mismatched camera was not rejected.");
     Throws(() => (Manifest() with { HistoryLength = 0 }).Validate());
     Throws(() => (Manifest() with { RgbStandardDeviation = [1, float.NaN, 1] }).Validate());
     Throws(() => VisionModel.ValidateObservation([1, 1, float.NaN, 1, .5f], 1000));
@@ -239,6 +243,7 @@ static void CalibrationAndDiagnostics()
     Throws(() => imported.ValidateContext(hash, manifest, settings with { CorrectionMs = 20 }, 1920, 1080));
     Throws(() => imported.ValidateContext(hash, manifest, settings, 1280, 720));
     Throws(() => (imported with { GameVersion = "other-game" }).ValidateContext(hash, manifest, settings, 1920, 1080));
+    Throws(() => imported.ValidateContext(hash, manifest, settings with { CameraView = "2K Legacy" }, 1920, 1080));
     var diagnostics = new VisionDiagnostics();
     for (int index = 0; index < 600; index++) diagnostics.Record(VisionDiagnosticKind.Preprocessed, index, 1, 1);
     var events = diagnostics.ExportEvents();

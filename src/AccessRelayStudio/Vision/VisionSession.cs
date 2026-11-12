@@ -264,6 +264,8 @@ internal sealed class VisionSession : IDisposable
             if (_recorder?.IsRecording == true) throw new InvalidOperationException("A training take is already recording.");
             if (_activeSettings.AnimationProfile != "nba2k27:" + profile.ConfigurationFingerprint)
                 throw new InvalidOperationException("Restart observation using the selected NBA 2K27 shot profile before recording.");
+            if (_activeSettings.CameraView != profile.CameraView)
+                throw new InvalidOperationException("Restart observation using the selected camera view before recording.");
             _runtime.SetVisionTrainingRecording(true);
             _trainingInhibited = true;
             _status = _status with { CanArm = false };

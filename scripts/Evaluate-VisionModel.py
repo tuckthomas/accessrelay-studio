@@ -22,6 +22,8 @@ def main() -> int:
     parser.add_argument("--sessions", required=True, type=Path, nargs="+")
     parser.add_argument("--split", choices=("validation", "held-out"), required=True)
     parser.add_argument("--locked-thresholds", required=True, type=Path)
+    parser.add_argument("--assume-legacy-camera-2k", action="store_true",
+                        help="Explicitly allow reviewed legacy datasets missing cameraView as 2K")
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
     if (args.out / "accuracy-report.json").exists() or (args.out / "predictions.jsonl").exists():
@@ -43,6 +45,8 @@ def main() -> int:
         raise ValueError("Locked thresholds are outside the runtime contract")
     if thresholds.get("animationProfile") != manifest["animationProfile"] or not thresholds.get("datasetId") or not thresholds.get("calibrationProcedureVersion"):
         raise ValueError("Threshold file must bind the exact profile, dataset and calibration procedure")
+    if manifest.get("cameraConfiguration") not in training.CAMERA_VIEWS or thresholds.get("cameraConfiguration") != manifest["cameraConfiguration"]:
+        raise ValueError("Thresholds and model must bind the same supported cameraConfiguration")
     if args.split == "held-out" and thresholds.get("lockedBeforeFinalEvaluation") is not True:
         raise ValueError("Lock thresholds using validation/calibration before evaluating the final held-out set")
     model_path = training.child_file(args.manifest.parent, manifest["modelFile"])
@@ -52,8 +56,12 @@ def main() -> int:
     run = training.read_json(args.manifest.with_name("training-run.json"))
     if run.get("diagnosticFixture") or run.get("modelSha256") != actual_hash:
         raise ValueError("Diagnostic/untrained fixtures cannot produce validation evidence")
-    loaded = training.load_sessions(args.sessions, args.split, manifest["historyLength"], manifest["historyIntervalMs"])
-    sessions, samples, session_ids, fingerprint = loaded
+    if run.get("cameraConfiguration") != manifest["cameraConfiguration"]:
+        raise ValueError("Training provenance camera differs from the model; legacy candidates need re-export with reviewed camera provenance")
+    loaded = training.load_sessions(args.sessions, args.split, manifest["historyLength"], manifest["historyIntervalMs"], args.assume_legacy_camera_2k)
+    sessions, samples, session_ids, fingerprint, recorded_camera = loaded
+    if recorded_camera != manifest["cameraConfiguration"]:
+        raise ValueError("Evaluation shotProfile.cameraView differs from the model cameraConfiguration")
     if manifest["animationProfile"] != "nba2k27:" + fingerprint:
         raise ValueError("Evaluation sessions use a different shot profile")
     if args.split == "held-out" and session_ids & set(run.get("trainingSessionIds", []) + run.get("validationSessionIds", [])):
@@ -133,6 +141,11 @@ def main() -> int:
     }
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "accuracy-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    provenance = {"schemaVersion": 1, "datasetId": thresholds["datasetId"], "cameraConfiguration": recorded_camera,
+                  "sessionIds": sorted(session_ids), "legacyCameraAssumptionSessionIds": sorted(
+                      session["sessionId"] for _, session in sessions
+                      if "shotProfile" not in session or "cameraView" not in session["shotProfile"])}
+    (args.out / "evaluation-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     with (args.out / "predictions.jsonl").open("w", encoding="utf-8") as output:
         for prediction in accepted.values():
             output.write(json.dumps(prediction) + "\n")

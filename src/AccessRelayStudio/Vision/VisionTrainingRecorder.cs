@@ -145,6 +145,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
         {
             schemaVersion = 1, sessionId = Path.GetFileName(DirectoryPath), createdAtUtc = _createdAtUtc,
             shotProfileFingerprint = _profile.ConfigurationFingerprint, animationProfile = _settings.AnimationProfile,
+            cameraView = _profile.CameraView,
             captureWidth = _width, captureHeight = _height, stride = _width * 4, crop = _settings.Crop,
             storedWidth = StoredWidth, storedHeight = StoredHeight, storedStride = StoredWidth * 4, pixelFormat = "BGRA8",
             preprocessing = "bgra8-player-crop-nearest256-bilinear-rgb-unit-ntchw-v2",

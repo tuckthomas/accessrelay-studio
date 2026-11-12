@@ -18,6 +18,8 @@ import sys
 
 from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
 
+CAMERA_VIEWS = ("2K", "2K Low", "2K Legacy")
+
 
 def read_json(path: Path) -> dict:
     if path.stat().st_size > 16 * 1024 * 1024:
@@ -56,9 +58,36 @@ def validate_non_overlapping_intervals(shots: list[dict]) -> None:
             raise ValueError(f"Reviewed intervals overlap or share an inclusive endpoint: {previous[2]} / {current[2]}")
 
 
-def load_sessions(directories: list[Path], split: str, history: int, interval_ms: float):
+def recorded_camera(session: dict, assume_legacy_camera_2k: bool = False) -> str:
+    profile = session.get("shotProfile")
+    if "shotProfile" not in session or (isinstance(profile, dict) and "cameraView" not in profile):
+        if assume_legacy_camera_2k:
+            camera = "2K"
+        else:
+            raise ValueError("Legacy dataset has no shotProfile.cameraView; review it and explicitly pass --assume-legacy-camera-2k only if it used 2K")
+    else:
+        if not isinstance(profile, dict) or profile.get("cameraView") not in CAMERA_VIEWS:
+            raise ValueError("Recorded cameraView must be exactly 2K, 2K Low, or 2K Legacy")
+        camera = profile["cameraView"]
+    for field in ("cameraView", "cameraConfiguration"):
+        if field in session and session[field] != camera:
+            raise ValueError("Top-level camera metadata differs from shotProfile.cameraView or the explicit legacy 2K assumption")
+    return camera
+
+
+def select_training_camera(training_camera: str, validation_camera: str, requested_camera: str | None) -> str:
+    if training_camera not in CAMERA_VIEWS or validation_camera not in CAMERA_VIEWS or training_camera != validation_camera:
+        raise ValueError("Training and validation must use the same supported recorded camera view")
+    if requested_camera is not None and requested_camera != training_camera:
+        raise ValueError("--camera must match the recorded shotProfile.cameraView; it cannot relabel the data")
+    return training_camera
+
+
+def load_sessions(directories: list[Path], split: str, history: int, interval_ms: float,
+                  assume_legacy_camera_2k: bool = False):
     sessions, samples, ids = [], [], set()
     fingerprint = None
+    camera = None
     for directory in directories:
         session = read_json(directory / "session.json")
         labels = read_json(directory / "labels.json")
@@ -71,6 +100,10 @@ def load_sessions(directories: list[Path], split: str, history: int, interval_ms
         if session["sessionId"] in ids:
             raise ValueError("A session was provided twice")
         ids.add(session["sessionId"])
+        current_camera = recorded_camera(session, assume_legacy_camera_2k)
+        if camera is not None and current_camera != camera:
+            raise ValueError("Mixed recorded camera views are not allowed in one dataset/model")
+        camera = current_camera
         current = session.get("shotProfileFingerprint")
         if not current or (fingerprint is not None and fingerprint != current):
             raise ValueError("Each exported model must use one exact shot-profile configuration")
@@ -141,7 +174,7 @@ def load_sessions(directories: list[Path], split: str, history: int, interval_ms
                 samples.append((session_index, selected, [float(identity), float(is_target), horizon, 0.0, min(1.0, phase)]))
     if not samples:
         raise ValueError(f"No usable reviewed temporal windows in {split} data")
-    return sessions, samples, ids, fingerprint
+    return sessions, samples, ids, fingerprint, camera
 
 
 def main() -> int:
@@ -152,7 +185,10 @@ def main() -> int:
     parser.add_argument("--diagnostic-fixture", action="store_true", help="Export random, untrained weights for GPU compatibility checks; cannot arm")
     parser.add_argument("--animation-profile", default="diagnostic-untrained")
     parser.add_argument("--game-version", default="unvalidated")
-    parser.add_argument("--camera", default="unvalidated")
+    parser.add_argument("--camera", choices=CAMERA_VIEWS, default=None,
+                        help="Optional consistency check; trained models derive this from recorded shotProfile.cameraView")
+    parser.add_argument("--assume-legacy-camera-2k", action="store_true",
+                        help="Explicitly treat old datasets missing cameraView as 2K after reviewing their camera provenance")
     parser.add_argument("--width", type=int, default=160)
     parser.add_argument("--height", type=int, default=160)
     parser.add_argument("--history", type=int, default=4)
@@ -199,15 +235,20 @@ def main() -> int:
     training_log = []
     dataset_fingerprint = None
     training_session_ids, validation_session_ids = [], []
+    legacy_camera_session_ids = []
+    resolved_camera = args.camera or "2K"
     if not args.diagnostic_fixture:
         if not args.train or not args.validation:
             raise ValueError("Training requires distinct --train and --validation session directories")
-        train = load_sessions(args.train, "train", args.history, args.interval_ms)
-        validation = load_sessions(args.validation, "validation", args.history, args.interval_ms)
+        train = load_sessions(args.train, "train", args.history, args.interval_ms, args.assume_legacy_camera_2k)
+        validation = load_sessions(args.validation, "validation", args.history, args.interval_ms, args.assume_legacy_camera_2k)
+        resolved_camera = select_training_camera(train[4], validation[4], args.camera)
         if train[2] & validation[2] or train[3] != validation[3]:
             raise ValueError("Train/validation sessions overlap or use different shot-profile configurations")
         dataset_fingerprint = train[3]
         training_session_ids, validation_session_ids = sorted(train[2]), sorted(validation[2])
+        legacy_camera_session_ids = sorted(session["sessionId"] for _, session in train[0] + validation[0]
+                                           if "shotProfile" not in session or "cameraView" not in session["shotProfile"])
         args.animation_profile = "nba2k27:" + dataset_fingerprint
 
         class Windows(torch.utils.data.Dataset):
@@ -279,7 +320,7 @@ def main() -> int:
         "preprocessing": PREPROCESSING_ID, "inputWidth": args.width, "inputHeight": args.height,
         "historyLength": args.history, "historyIntervalMs": args.interval_ms, "maximumPredictionHorizonMs": 2000,
         "rgbMean": [0, 0, 0], "rgbStandardDeviation": [1, 1, 1], "animationProfile": args.animation_profile,
-        "gameVersion": args.game_version, "cameraConfiguration": args.camera, "license": "0BSD (architecture code); recorded-data and trained-weight rights must be reviewed",
+        "gameVersion": args.game_version, "cameraConfiguration": resolved_camera, "license": "0BSD (architecture code); recorded-data and trained-weight rights must be reviewed",
         "validation": None
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -287,6 +328,7 @@ def main() -> int:
         "diagnosticFixture": args.diagnostic_fixture, "validationPassed": False, "datasetFingerprint": dataset_fingerprint,
         "trainingSessionIds": training_session_ids, "validationSessionIds": validation_session_ids,
         "labelTimeBasis": "captured-target-game-phase",
+        "cameraConfiguration": resolved_camera, "legacyCameraAssumptionSessionIds": legacy_camera_session_ids,
         "training": training_log, "modelSha256": model_hash,
         "limitations": "No held-out accuracy or Remote Play hardware timing result is supplied. This model cannot arm automatic release."}, indent=2) + "\n", encoding="utf-8")
     print(f"Exported {model_path}. validation=null; automatic release remains disabled.")

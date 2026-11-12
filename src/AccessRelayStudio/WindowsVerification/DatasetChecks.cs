@@ -12,10 +12,11 @@ internal static class DatasetChecks
         try
         {
             var profile = new Nba2K27ShotProfile(Guid.NewGuid(), "Verification shot", 78, 83, "Test base", "Test upper one", "Test upper two",
-                UsesShotMeter: true, MeterReleaseType: "Verification release type", ShotSpeed: 3, Release1Percent: 35);
+                UsesShotMeter: true, MeterReleaseType: "Verification release type", ShotSpeed: 3, Release1Percent: 35, CameraView: "2K Legacy");
             var settings = VisionSettings.Default with
             {
                 AnimationProfile = "nba2k27:" + profile.ConfigurationFingerprint,
+                CameraView = profile.CameraView,
                 Crop = new(.25, .25, .5, .5)
             };
             CompleteTake(directory, profile, settings);
@@ -53,6 +54,8 @@ internal static class DatasetChecks
         var storedProfile = root.GetProperty("shotProfile");
         Check(storedProfile.GetProperty("usesShotMeter").GetBoolean() && storedProfile.GetProperty("meterReleaseType").GetString() == "Verification release type", "Meter-specific settings were not preserved.");
         Check(storedProfile.GetProperty("shotSpeed").GetInt32() == 3 && storedProfile.GetProperty("release1Percent").GetInt32() == 35, "Shot speed or upper-release blend was not preserved.");
+        Check(storedProfile.GetProperty("cameraView").GetString() == "2K Legacy", "The selected camera view was not preserved.");
+        Check(root.GetProperty("cameraView").GetString() == "2K Legacy", "Top-level dataset camera provenance does not match the shot profile.");
         Check(root.GetProperty("stopwatchFrequency").GetInt64() == Stopwatch.Frequency, "QPC frequency missing.");
         var frames = root.GetProperty("frames");
         Check(frames.GetArrayLength() == 2, "A queued training frame was lost.");

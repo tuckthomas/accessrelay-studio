@@ -73,6 +73,8 @@ internal sealed record VisionModelManifest
     internal string CheckArmingEvidence(string manifestPath, VisionSettings settings, out VisionValidationReport? acceptedReport)
     {
         acceptedReport = null;
+        if (settings.CameraView.Length != 0 && settings.CameraView != CameraConfiguration)
+            return "The selected camera view does not match the model's camera configuration.";
         if (Validation is not { } evidence)
             return "Observation only: this model has no held-out validation and hardware report.";
         try

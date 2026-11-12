@@ -30,6 +30,7 @@ internal sealed record VisionCalibrationImport
             ModelManifestHash != manifestHash || AnimationProfile != settings.AnimationProfile ||
             AnimationProfile != manifest.AnimationProfile || GameVersion != manifest.GameVersion ||
             CameraConfiguration != manifest.CameraConfiguration || string.IsNullOrWhiteSpace(ProcedureVersion) ||
+            (settings.CameraView.Length != 0 && settings.CameraView != CameraConfiguration) ||
             width <= 0 || height <= 0 || CaptureWidth != width || CaptureHeight != height || Crop != settings.Crop ||
             PreviousCorrectionMs != settings.CorrectionMs || EstimatedVideoDelayMs != settings.EstimatedVideoDelayMs ||
             EstimatedInputDelayMs != settings.EstimatedInputDelayMs || Attempts is null)

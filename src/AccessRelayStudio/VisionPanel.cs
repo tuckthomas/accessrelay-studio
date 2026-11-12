@@ -189,7 +189,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
         catch (Exception error) { Populate(VisionSettings.Default); _notice.Text = error.Message; }
     }
     private void UpdateShotProfileText() => _shotProfileInfo.Text = _shotProfile is { } profile
-        ? $"NBA 2K27 · {profile.Name} · height {profile.HeightInches} in · 3PT {profile.ThreePointRating}\nBase: {profile.Base} · Upper 1: {profile.UpperRelease1} · Upper 2: {profile.UpperRelease2}\nSpeed {profile.ShotSpeed}/4 · Blend {profile.Release1Percent}% / {profile.Release2Percent}% · Meter {(profile.UsesShotMeter ? "on · " + profile.MeterReleaseType : "off · release type not applicable")}"
+        ? $"NBA 2K27 · {profile.Name} · height {profile.HeightInches} in · 3PT {profile.ThreePointRating} · Camera {profile.CameraView}\nBase: {profile.Base} · Upper 1: {profile.UpperRelease1} · Upper 2: {profile.UpperRelease2}\nSpeed {profile.ShotSpeed}/4 · Blend {profile.Release1Percent}% / {profile.Release2Percent}% · Meter {(profile.UsesShotMeter ? "on · " + profile.MeterReleaseType : "off · release type not applicable")}"
         : "Select a saved NBA 2K27 player/shot profile in Plugins before collecting training data.";
     private void LoadContextSettings()
     {
@@ -199,6 +199,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
             string configuration = "nba2k27:" + profile.ConfigurationFingerprint;
             if (settings.AnimationProfile != configuration)
                 settings = settings with { AnimationProfile = configuration, ModelManifestPath = "", CorrectionMs = 0 };
+            settings = settings with { CameraView = profile.CameraView };
         }
         Populate(settings); _animation.IsReadOnly = _shotProfile is not null; UpdateShotProfileText();
     }
@@ -216,6 +217,7 @@ internal sealed class VisionPanel : UserControl, IDisposable
         var settings = _loadedSettings with
         {
             ModelManifestPath = _manifest.Text.Trim(), AnimationProfile = _shotProfile is { } profile ? "nba2k27:" + profile.ConfigurationFingerprint : _animation.Text.Trim(),
+            CameraView = _shotProfile?.CameraView ?? _loadedSettings.CameraView,
             ShootButton = _shoot.SelectedItem is ControlId button ? button : ControlId.X,
             Crop = new(_left.Value / 100, _top.Value / 100, _width.Value / 100, _height.Value / 100),
             MinimumConfidence = _confidence.Value / 100, MaximumUncertaintyMs = _uncertainty.Value,
@@ -326,6 +328,8 @@ internal sealed class VisionPanel : UserControl, IDisposable
                 var imported = _store.Import(file.Path);
                 if (_shotProfile is { } profile && imported.AnimationProfile != "nba2k27:" + profile.ConfigurationFingerprint)
                     throw new InvalidDataException("These settings belong to a different player/shot configuration. Select the matching shot profile first.");
+                if (_shotProfile is { } selectedProfile && imported.CameraView != selectedProfile.CameraView)
+                    throw new InvalidDataException("These settings use a different camera view. Select the matching shot profile first.");
                 Populate(imported);
                 _notice.Text = "Imported settings. Save and review calibration before starting observation. Automatic release is off.";
             }
@@ -430,7 +434,8 @@ internal sealed class VisionPanel : UserControl, IDisposable
                 _source.SelectedItem is not CaptureSource selected || selected.Hwnd != _lastObservedSource)
                 throw new InvalidOperationException("Observe the selected source, then stop observation before exporting its calibration context.");
             var (manifest, hash) = VisionModelManifest.Read(settings.ModelManifestPath);
-            if (manifest.AnimationProfile != settings.AnimationProfile)
+            if (manifest.AnimationProfile != settings.AnimationProfile ||
+                (settings.CameraView.Length != 0 && manifest.CameraConfiguration != settings.CameraView))
                 throw new InvalidDataException("Select the model for this player/shot configuration first.");
             var template = new VisionCalibrationImport
             {
