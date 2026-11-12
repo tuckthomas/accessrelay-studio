@@ -30,9 +30,14 @@ operator activation must remain compatible.
 - [x] Add browser tests for keyboard wrapping, background isolation, nested dialogs,
       and restoration; preserve existing action-menu tests.
 - [x] Run frontend unit tests, browser tests, and production build.
-- [ ] Push implementation and record its commit SHA and validation here.
+- [x] Push implementation and record its commit SHA and validation here.
 
-Implementation commit: pending. Validation: pending.
+Implementation commit: `a7bc6a32d988a8b1253420ed43eedcc9249babe9`.
+Validation: 44 unit tests, 8 Chromium browser tests, TypeScript and Vite production
+build passed. Browser checks cover nested dialogs, Tab/Shift+Tab wrapping, blocked
+background focus, descriptions, Escape, and menu-trigger/opener restoration.
+Native Windows/WebView2 and screen-reader listening checks remain separate from
+the verified browser behavior.
 
 ## 2. Meaningful status announcements and menu regression coverage
 
