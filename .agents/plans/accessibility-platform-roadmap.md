@@ -13,7 +13,7 @@ passing Windows CI with simulated devices; physical-device acceptance remains op
 Sections 5–7 are implemented and passed Windows CI with simulated inputs. Section 8
 has local phrase/template recognition and bounded host arbitration implemented;
 Windows native CI and real microphone evaluation remain to be recorded.
-Section 10 has the session-provenance guard implemented; its conversion/data work
+Section 10 has session and footage-provenance guards implemented; its conversion/data work
 remains open. Section 9 now has NBA extraction and the versioned pack SDK/import/tuning UI
 implemented; native CI and Windows interaction acceptance remain to be recorded.
 Sections 11–12 are queued, not implemented.
@@ -215,7 +215,7 @@ physical delivery latency remain open; no such measurement is claimed.
 - [x] Test malformed manifests, path traversal, oversized assets, hashes, compatibility,
       cancellation, and backward migration. A hash is integrity, not publisher authenticity.
 - [ ] Validate real Windows pack import/UI/model integration before completion.
-- [ ] Validate host integration before considering an `accessrelay-packs` repository;
+- [x] Validate host integration before considering an `accessrelay-packs` repository;
       do not create/publish a marketplace or distribute third-party weights prematurely.
 - [x] Push migration features separately and record section commit SHAs here.
 
@@ -229,15 +229,16 @@ output/tuning and profile-v5/legacy persistence checks, portable author CLI, 57
 frontend unit tests, 20 browser workflows, TypeScript/Vite build, desktop evidence
 checks and Windows/vision verification compilation passed. The second pack has no
 NBA/vision dependency. See `docs/game-packs.md` for exact bounds, typed adapter
-compatibility, trust limits and activation behavior. Native CI is next; real
-Windows UI/model/device acceptance remains open.
+compatibility, trust limits and activation behavior. Windows publish and simulated-device runtime CI passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43286208711.
+Real Windows UI/model/device acceptance remains open.
 Marketplace split: deferred until the contract is proven.
 
 ## 10. Dataset provenance and training interoperability
 
 - [x] Add direct regression coverage for existing train/validation/held-out session
       separation. Validation evaluation now rejects training IDs even if labels are relabeled.
-- [ ] Evaluate duplicate footage under distinct session IDs; identity checks alone
+- [x] Evaluate duplicate footage under distinct session IDs; identity checks alone
       do not establish footage independence.
 - [ ] Complete reviewed conversion of enriched recorded evidence, preserving source
       identity, teacher/student mapping, camera/profile provenance, and meter exclusion.
@@ -253,7 +254,10 @@ passed with Python site packages disabled (`-S`); image preprocessing also retai
 its expected RGB tensor behavior with NumPy installed. Windows CI now runs the
 stdlib-only suite and passed on Windows:
 https://github.com/tuckthomas/accessrelay-studio/actions/runs/43257634331. Enriched
-conversion and footage deduplication remain unimplemented. Prerequisites: reviewed
+conversion remains in progress. Footage reuse guard commit: `855717a127df3fa175438319b3f1daf91ad83cdc`. Validation: all 33 stdlib-only dataset/footage tests passed.
+The trainer and evaluator record/check RGB frame/window hashes independently of
+session IDs and reject reused configuration-reference footage. These exact checks
+cannot detect every transformation and do not replace source review. Prerequisites: reviewed
 source clips for functional training validation.
 
 ## 11. Measured model experiments
