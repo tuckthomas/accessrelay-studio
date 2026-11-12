@@ -15,6 +15,7 @@ from pathlib import Path
 import sys
 
 from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
+from footage_integrity import footage_index, validate_evaluation_footage
 
 EXECUTION_PROVIDERS = ("CPUExecutionProvider", "CUDAExecutionProvider")
 
@@ -99,6 +100,7 @@ def main() -> int:
     if manifest["animationProfile"] != "nba2k27:" + fingerprint:
         raise ValueError("Evaluation sessions use a different shot profile")
     validate_evaluation_sessions(args.split, session_ids, run)
+    validate_evaluation_footage(args.split, footage_index(sessions, min(4, manifest["historyLength"])), run)
     session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     expected = [1, manifest["historyLength"], 3, manifest["inputHeight"], manifest["inputWidth"]]
     if len(session.get_inputs()) != 1 or session.get_inputs()[0].shape != expected or session.get_outputs()[0].shape != [1, 5]:

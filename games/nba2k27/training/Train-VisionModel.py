@@ -20,6 +20,7 @@ import random
 import sys
 
 from vision_preprocessing import PREPROCESSING_ID, resize_stored_bgra
+from footage_integrity import footage_index, validate_independent
 
 CAMERA_VIEWS = ("2K", "2K Low", "2K Legacy")
 
@@ -256,6 +257,7 @@ def main() -> int:
     training_log = []
     dataset_fingerprint = None
     training_session_ids, validation_session_ids = [], []
+    training_footage, validation_footage = None, None
     legacy_camera_session_ids = []
     resolved_camera = args.camera or "2K"
     if not args.diagnostic_fixture:
@@ -265,6 +267,9 @@ def main() -> int:
         validation = load_sessions(args.validation, "validation", args.history, args.interval_ms, args.assume_legacy_camera_2k)
         resolved_camera = select_training_camera(train[4], validation[4], args.camera)
         validate_session_splits(train[2], validation[2])
+        training_footage = footage_index(train[0], min(4, args.history))
+        validation_footage = footage_index(validation[0], min(4, args.history))
+        validate_independent(training_footage, validation_footage)
         if train[3] != validation[3]:
             raise ValueError("Train/validation sessions use different shot-profile configurations")
         dataset_fingerprint = train[3]
@@ -349,6 +354,7 @@ def main() -> int:
     (args.out / "training-run.json").write_text(json.dumps({"schemaVersion": 1, "seed": args.seed,
         "diagnosticFixture": args.diagnostic_fixture, "validationPassed": False, "datasetFingerprint": dataset_fingerprint,
         "trainingSessionIds": training_session_ids, "validationSessionIds": validation_session_ids,
+        "trainingFootage": training_footage, "validationFootage": validation_footage,
         "labelTimeBasis": "captured-target-game-phase",
         "cameraConfiguration": resolved_camera, "legacyCameraAssumptionSessionIds": legacy_camera_session_ids,
         "training": training_log, "modelSha256": model_hash,

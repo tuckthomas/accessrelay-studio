@@ -205,3 +205,21 @@ python ./scripts/Check-VisionPreprocessing.py C:/VisionChecks/preprocessing-v2
 ```
 
 The C# check also compares live-source processing with explicitly recorded canonical 256×256 BGRA data. This detects crop-coordinate, channel-order, interpolation, normalization and antialiasing differences before training. It establishes transform parity, not release prediction accuracy.
+# Footage independence
+
+Training now fingerprints canonical player RGB frames and 2–4-frame windows (alpha
+and claimed timestamps are ignored). It rejects reused footage across train/validation,
+including renamed sessions, overlapping/reversed clips and resampling that preserves
+enough original frames. Repeated windows under different IDs within one group also
+fail. Exact static/loading frames can trigger this conservative check; review and
+trim noninformative footage rather than relabeling it to bypass the guard.
+
+Training provenance records separate training/validation footage indexes. Validation
+evaluation checks the training index; final held-out evaluation checks both indexes
+and excludes configuration-reference sessions. Older candidates lacking these indexes
+must be re-exported from audited sources before producing current validation reports.
+The bounded stdlib-only index permits 50,000 frame/window hashes per group.
+
+These are exact RGB reuse checks, not proof of statistical independence. Re-encoding,
+different crops, overlays and other transformations can evade exact hashes. Human
+source-footage review and independently collected held-out sessions remain required.
