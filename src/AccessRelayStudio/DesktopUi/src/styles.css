@@ -120,7 +120,9 @@ svg { flex-shrink: 0; }
 .empty-icon { width: 62px; height: 62px; border-radius: 19px; background: #e6eddf; display: grid; place-items: center; color: #6c8b76; margin-bottom: 5px; }
 .empty-state .button { margin-top: 8px; }
 .divider { height: 1px; background: var(--line); margin: 5px 0; }
-.modal-backdrop { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 28px; background: #142e3e60; backdrop-filter: blur(4px); z-index: 100; }
+.modal-backdrop { position: fixed; inset: 0; margin: 0; width: 100%; height: 100%; max-width: none; max-height: none; border: 0; padding: 28px; color: inherit; background: #142e3e60; backdrop-filter: blur(4px); }
+.modal-backdrop[open] { display: flex; align-items: center; justify-content: center; }
+.modal-backdrop::backdrop { background: transparent; }
 .modal { width: min(560px, 100%); max-height: calc(100vh - 56px); background: var(--surface); border: 1px solid #c8d2c1; border-radius: 20px; box-shadow: 0 22px 90px #102a3750; display: flex; flex-direction: column; min-height: 0; }
 .modal-wide { width: min(1000px, 100%); }
 .modal-heading { padding: 23px 25px 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }

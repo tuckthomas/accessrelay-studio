@@ -12,6 +12,9 @@ import {
 
 export interface PageProps { state: any; status: any; command: (action: string, args?: any) => Promise<any> }
 const unsavedDrafts = new Set<symbol>();
+const openModals = new Set<HTMLDialogElement>();
+const modalOpeners = new WeakMap<Element, HTMLElement>();
+let originalBodyOverflow = '';
 const draftListeners = new Set<(dirty: boolean) => void>();
 let lastDirty = false;
 function publishDraftState() {
@@ -69,7 +72,10 @@ export function ActionMenu({ label, children }: { label: string; children: React
         // to the menu button behind it; Escape still returns focus to the trigger.
         const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
         const dialog = dialogs[dialogs.length - 1];
-        if (dialog && !dialog.contains(trigger.current)) event.preventDefault();
+        if (dialog && trigger.current && !dialog.contains(trigger.current)) {
+          modalOpeners.set(dialog, trigger.current);
+          event.preventDefault();
+        }
       }}>
       {children}
     </DropdownMenu.Content></DropdownMenu.Portal>
@@ -149,38 +155,44 @@ export function Meter({ value = 0, label, max = 100, tone = 'mint' }: { value?: 
 export function Modal({ open, onClose, title, description, children, footer, wide = false }: {
   open: boolean; onClose: () => void; title: string; description?: ReactNode; children?: ReactNode; footer?: ReactNode; wide?: boolean;
 }) {
-  const ref = useRef<HTMLDivElement>(null); const titleId = useId(); const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  const ref = useRef<HTMLDialogElement>(null); const titleId = useId(), descriptionId = useId();
   useEffect(() => {
     if (!open) return;
+    const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
-    const focus = () => {
-      const elements = ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]');
-      return [...(elements || [])].filter(item => item.offsetParent !== null);
+    // The browser's top layer makes the rest of the document inert, also when a
+    // second dialog opens. React can remove the node before effect cleanup, so
+    // explicitly restore the opener after close() as well.
+    dialog.showModal();
+    if (!openModals.size) { originalBodyOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; }
+    openModals.add(dialog);
+    return () => {
+      dialog.close(); openModals.delete(dialog);
+      if (!openModals.size) document.body.style.overflow = originalBodyOverflow;
+      const opener = modalOpeners.get(dialog) ?? previous;
+      modalOpeners.delete(dialog);
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
-    const timer = window.setTimeout(() => (focus()[0] || ref.current)?.focus(), 0);
-    const keydown = (event: KeyboardEvent) => {
-      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
-      if (dialogs[dialogs.length - 1] !== ref.current) return;
-      if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); }
-      if (event.key === 'Tab') {
-        const elements = focus(); if (!elements.length) { event.preventDefault(); return; }
-        const first = elements[0], last = elements[elements.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      }
-    };
-    document.addEventListener('keydown', keydown);
-    const overflow = document.body.style.overflow; document.body.style.overflow = 'hidden';
-    return () => { window.clearTimeout(timer); document.removeEventListener('keydown', keydown); document.body.style.overflow = overflow; previous?.focus(); };
   }, [open]);
   if (!open) return null;
-  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className={'modal ' + (wide ? 'modal-wide' : '')} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={ref}>
-      <div className="modal-heading"><div><h2 id={titleId}>{title}</h2>{description && <p>{description}</p>}</div>
+  return <dialog className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}
+    aria-describedby={description ? descriptionId : undefined} ref={ref} tabIndex={-1}
+    onCancel={event => { event.preventDefault(); onClose(); }}
+    onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}
+    onKeyDown={event => {
+      if (event.key !== 'Tab' || event.defaultPrevented || (event.target as Element).closest('dialog') !== ref.current) return;
+      const elements = [...event.currentTarget.querySelectorAll<HTMLElement>('a[href],button,input,select,textarea,summary,[tabindex],[contenteditable="true"]')]
+        .filter(item => item.tabIndex >= 0 && !item.matches(':disabled') && !item.closest('[inert]') && item.getClientRects().length > 0);
+      const first = elements[0], last = elements[elements.length - 1];
+      if (!first) { event.preventDefault(); ref.current?.focus(); }
+      else if (event.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === ref.current)) { event.preventDefault(); first.focus(); }
+    }}>
+    <div className={'modal ' + (wide ? 'modal-wide' : '')}>
+      <div className="modal-heading"><div><h2 id={titleId}>{title}</h2>{description && <p id={descriptionId}>{description}</p>}</div>
         <Button variant="ghost" className="icon-button" aria-label="Close dialog" onClick={onClose}><Icon name="x" /></Button></div>
       <div className="modal-body">{children}</div>{footer && <div className="modal-footer">{footer}</div>}
-    </div></div>;
+    </div></dialog>;
 }
 export function ConfirmDialog({ open, title, description, onClose, onConfirm, confirmLabel = 'Delete' }: {
   open: boolean; title: string; description: ReactNode; onClose: () => void; onConfirm: () => void | Promise<void>; confirmLabel?: string;

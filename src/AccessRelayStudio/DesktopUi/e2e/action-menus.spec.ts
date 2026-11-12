@@ -71,6 +71,8 @@ test('voice actions open below when space allows, dismiss outside and support ke
   await expect(menu).not.toBeVisible();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('dialog').locator(':focus')).toHaveCount(1);
+  await page.getByRole('dialog').getByRole('button', { name: 'Close dialog' }).click();
+  await expect(trigger).toBeFocused();
 });
 
 test('saved sequence actions use the same adaptive menu inside the scrolling list', async ({ page }) => {

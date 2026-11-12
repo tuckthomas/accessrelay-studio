@@ -10,7 +10,8 @@ operator activation must remain compatible.
 
 ## Delivery and evidence
 
-- [ ] Push this plan to GitHub `main` before implementing any checklist item.
+- [x] Push this plan to GitHub `main` before implementing any checklist item.
+      Plan commit: `caf215d823ef1ef77d767207cdcd816b59a84366` (remote verified before implementation).
 - [ ] Implement each feature in a separate commit containing its relevant tests.
 - [ ] Update this checklist as requirements are completed; leave unverified items open.
 - [ ] Record each completed section's full implementation commit SHA and validation
@@ -22,13 +23,13 @@ operator activation must remain compatible.
 
 ## 1. Modal containment
 
-- [ ] Make background content inert while a modal is active, including nested dialogs.
-- [ ] Contain forward/reverse Tab navigation and recover escaped focus.
-- [ ] Preserve Escape dismissal, modal descriptions, action-menu-to-dialog focus,
+- [x] Make background content inert while a modal is active, including nested dialogs.
+- [x] Contain forward/reverse Tab navigation and recover escaped focus.
+- [x] Preserve Escape dismissal, modal descriptions, action-menu-to-dialog focus,
       opener focus restoration, and existing page layout.
-- [ ] Add browser tests for keyboard wrapping, background isolation, nested dialogs,
+- [x] Add browser tests for keyboard wrapping, background isolation, nested dialogs,
       and restoration; preserve existing action-menu tests.
-- [ ] Run frontend unit tests, browser tests, and production build.
+- [x] Run frontend unit tests, browser tests, and production build.
 - [ ] Push implementation and record its commit SHA and validation here.
 
 Implementation commit: pending. Validation: pending.
