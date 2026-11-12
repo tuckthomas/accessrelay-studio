@@ -16,8 +16,14 @@ assert(['127.0.0.1', 'localhost'].includes(new URL(endpoint).hostname), 'Only a 
 
 (async () => {
   const browser = await chromium.connectOverCDP(endpoint);
-  const page = browser.contexts().flatMap(context => context.pages()).find(page => page.url() === 'https://studio.local/index.html');
-  assert(page, 'The local native desktop interface is not open.');
+  let page;
+  const startupDeadline = Date.now() + 20000;
+  do {
+    page = browser.contexts().flatMap(context => context.pages()).find(page => page.url() === 'https://studio.local/index.html');
+    if (page) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < startupDeadline);
+  if (!page) { await browser.close(); throw new Error('The local native desktop interface did not finish opening.'); }
   let safeSession = false, sourceProcess;
   const passed = [];
   const command = (method, params = {}) => page.evaluate(({ method, params }) => new Promise((resolve, reject) => {
