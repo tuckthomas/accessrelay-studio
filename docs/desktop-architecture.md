@@ -12,6 +12,9 @@ flowchart TD
     Host["AccessRelayStudio: desktop presentation"] --> Runtime["AccessRelayStudio.Runtime: Windows workers"]
     Host --> Engine["AccessRelayStudio.Engine: portable Core"]
     Runtime --> Engine
+    Host --> Application["AccessRelayStudio.Application: shared assistant use cases"]
+    Application --> Engine
+    Mcp["AccessRelayStudio.Mcp: console SDK adapter"] --> Application
 ```
 
 `AccessRelayStudio.Engine` targets plain `net10.0`. It owns controller/macro
@@ -31,6 +34,13 @@ native file pickers and translate the versioned WebView2 command/status protocol
 The host references the engine/runtime assemblies and deploys the Windows native
 ONNX package, app assets and virtual-device/neural helpers as before. Paths continue
 to resolve against AppContext.BaseDirectory, independent of the worker assembly.
+
+The portable Application project owns assistant context, permissions, diagnostics,
+drafts, real-engine rehearsal and bounded offline jobs. It references Engine and
+the BCL, with no Runtime, WinUI or MCP SDK dependency. The desktop adapter marshals
+host context and reviewed commits onto the owner thread. The separate console MCP
+bridge uses the official SDK and local private IPC; real-time workers never depend
+on it. See [MCP assistant workflows](mcp-assistant.md) for data flow and activation.
 
 Source files remain at their established Core/Audio/Input/Output/Vision paths and
 are linked by their owning library projects, preserving helper/build/training paths.

@@ -44,6 +44,9 @@ internal sealed class DesktopVisionService : IDesktopModule
     private long _sourcesRefreshedAt, _performanceRefreshedAt;
     private CancellationTokenSource _operation = new();
     internal bool HasActiveTrainingRecording => _session?.TrainingSnapshot.IsRecording == true;
+    internal bool AssistantBusy => Volatile.Read(ref _busy) != 0 || _session?.IsStopping == true;
+    internal (bool Running, bool ModelReady, bool CanArm, bool SourceStale) AssistantFacts =>
+        (_session?.Status.Running == true, _session?.Status.ModelReady == true, _session?.Status.CanArm == true, _session?.Status.SourceStale == true);
 
     internal DesktopVisionService(WindowId owner, Func<StudioRuntime?> runtime, Func<StudioProfile> activeProfile,
         Func<Task> connectOutput)

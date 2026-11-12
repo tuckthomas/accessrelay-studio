@@ -33,6 +33,14 @@ internal sealed class DesktopControllerService : IDesktopModule
     private CancellationTokenSource? _packOperation;
 
     internal StudioProfile ActiveProfile => _active;
+    internal long AssistantRevision => _revision;
+    internal bool AssistantStarting => _outputTask is { IsCompleted: false } || _packOperation is not null;
+    internal void ApplyAssistantProfile(StudioProfile profile)
+    {
+        if (profile.Id != _active.Id) throw new InvalidOperationException("The selected setup changed.");
+        if (_runtime()?.HasOutput == true || _runtime()?.ScriptsEnabled == true) throw new InvalidOperationException("Stop output and sequences first.");
+        Save(profile with { ScriptsEnabled = false });
+    }
     internal StickDeadzone Deadzone => _deadzone;
     internal FeedbackSettings FeedbackSettings => _feedbackSettings;
     internal string ProfileDirectory => _store.DirectoryPath;

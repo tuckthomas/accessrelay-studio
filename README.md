@@ -15,6 +15,7 @@ The interface is organized around **Workspace**, **Controller**, **Remote Play**
 - **Remote Play Vision (experimental)** captures a selected window, records synchronized player/court/meter/feedback evidence and actual controller trajectories, and integrates selectable CPU or CUDA temporal inference with cancellable release deadlines. Local timing statistics and saved run comparisons assess pipeline performance. No trained gameplay model is bundled. Explicit reviewed evidence conversion is available; automatic label extraction and measured meter-off gameplay validation remain pending. [Model and training workflow](docs/vision-model-workflow.md) · [Implementation plan](docs/remote-play-vision-implementation-plan.md)
 - **Voice access** offers pitch and tone effects, headphone preview, waveform trimming, and optional local reference-voice models and dialogue isolation. [Local voice commands](docs/voice-commands.md) add opt-in Windows phrase recognition and personalized sound templates for bounded controller presses or existing sequences.
 - **Workspace** gives a concise view of active processing and entry points to each task. Controller setups and voice profiles are selected within their own workspaces; **Stop everything** remains available throughout the app.
+- **Assistant access (MCP)** is opt-in under Settings. Compatible clients can inspect redacted status, propose reviewed controller changes, rehearse the actual Lua engine and run bounded local dataset/experiment jobs. [Setup, permissions and limits](docs/mcp-assistant.md)
 
 ## Build on Windows
 

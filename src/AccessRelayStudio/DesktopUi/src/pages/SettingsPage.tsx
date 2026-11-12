@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Badge, Button, Card, Icon, Notice, SectionHeader, type PageProps } from '../ui';
+import { AssistantPanel } from './AssistantPanel';
 
 export function SettingsPage({ state, command }: PageProps) {
   const [result, setResult] = useState(''); const [busy, setBusy] = useState('');
@@ -21,6 +22,7 @@ export function SettingsPage({ state, command }: PageProps) {
           <p className="subtle">Training clips are saved in the folder you choose when recording.</p></div>
       </Card>
     </div>
+    <AssistantPanel initial={state.assistant} command={command} />
     <Card title="About this Studio" description="A local workspace for controller input, gameplay capture and voice.">
       <div className="detail-list"><div className="detail-line"><span>Installed build</span><strong>{state.version || 'Local build'}</strong></div>
         <div className="detail-line"><span>Platform</span><span>{state.platform || 'Windows x64'}</span></div>

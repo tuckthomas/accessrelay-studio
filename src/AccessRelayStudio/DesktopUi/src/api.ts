@@ -99,6 +99,31 @@ async function previewCommand(method: string, args: any): Promise<any> {
   if (method === 'app.bootstrap') return structuredClone(previewState);
   if (method === 'app.page') return null;
   if (method === 'app.draftState') return null;
+  if (method.startsWith('app.assistant')) {
+    const assistant = previewState.settings.assistant ||= { access: { enabled: false, drafts: false, offline: false }, bridgeAvailable: false,
+      drafts: [], jobs: [], canUndo: false, registration: { inputs: [], interpreterRegistered: false, workspaceRegistered: false }, clientConfiguration: 'Design preview — no MCP server is running.' };
+    if (action === 'assistantState') return structuredClone(assistant);
+    if (action === 'assistantConfigure') {
+      if (args.enabled && !assistant.bridgeAvailable) throw new Error('Enable assistant access in the installed app.');
+      assistant.access = { ...args, expiresAtUtc: args.enabled ? new Date(Date.now() + args.minutes * 60000).toISOString() : null };
+      assistant.drafts = []; return structuredClone(assistant);
+    }
+    if (action === 'assistantReview') {
+      const draft = assistant.drafts.find((item: any) => item.id === args.id);
+      if (!draft) throw new Error('This draft is unavailable.');
+      return { view: draft, original: structuredClone(controller.activeProfile), proposed: draft.proposed,
+        warning: 'Preview fixture only. Rehearsal covers specified synthetic events, not hardware or general safety.' };
+    }
+    if (action === 'assistantApply') {
+      const draft = assistant.drafts.find((item: any) => item.id === args.id);
+      if (!draft) throw new Error('This draft is unavailable.');
+      assistant.original = structuredClone(controller.activeProfile); Object.assign(controller.activeProfile, draft.proposed);
+      assistant.drafts = []; assistant.canUndo = true; return structuredClone(assistant);
+    }
+    if (action === 'assistantUndo') { Object.assign(controller.activeProfile, assistant.original); assistant.canUndo = false; return structuredClone(assistant); }
+    if (action === 'assistantDiscard') { assistant.drafts = assistant.drafts.filter((item: any) => item.id !== args.id); return structuredClone(assistant); }
+    throw new Error('Register local files and run jobs in the installed desktop app.');
+  }
   if (method.startsWith('controller.')) {
     if (action === 'profileCreate' || action === 'profileDuplicate') {
       const id = crypto.randomUUID(), name = args.name || 'New setup';

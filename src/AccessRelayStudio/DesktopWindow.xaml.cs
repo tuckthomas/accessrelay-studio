@@ -29,6 +29,7 @@ public sealed partial class DesktopWindow : Window
     private DesktopControllerService? _controller;
     private DesktopVisionService? _vision;
     private DesktopVoiceService? _voice;
+    private DesktopAssistantService? _assistant;
     private readonly SystemPerformanceMonitor _performance = new();
     private readonly DispatcherQueueTimer _statusTimer;
     private readonly HashSet<string> _requests = new(StringComparer.Ordinal);
@@ -101,6 +102,8 @@ public sealed partial class DesktopWindow : Window
                 catch (Exception error) { _startupError = "Controller monitoring is unavailable: " + error.Message; }
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync());
+                _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
+                    () => _runtime, () => _hasUnsavedChanges);
                 _started = true;
             }
             string assets = Path.Combine(AppContext.BaseDirectory, "DesktopUi");
@@ -199,6 +202,9 @@ public sealed partial class DesktopWindow : Window
             var parameters = request.TryGetProperty("params", out var supplied) && supplied.ValueKind == JsonValueKind.Object
                 ? supplied.Clone() : JsonSerializer.SerializeToElement(new { });
             object? result;
+            if ((method.StartsWith("controller.", StringComparison.Ordinal) || method.StartsWith("vision.", StringComparison.Ordinal) || method.StartsWith("voice.", StringComparison.Ordinal))
+                && method.Split('.')[1] is not ("state" or "recordGet" or "luaGet" or "trajectory"))
+                _assistant?.ForegroundCommand();
             if (method.StartsWith("controller.", StringComparison.Ordinal)) result = await _controller!.InvokeAsync(method[11..], parameters);
             else if (method.StartsWith("vision.", StringComparison.Ordinal)) result = await _vision!.InvokeAsync(method[7..], parameters);
             else if (method.StartsWith("voice.", StringComparison.Ordinal)) result = await _voice!.InvokeAsync(method[6..], parameters);
@@ -216,6 +222,8 @@ public sealed partial class DesktopWindow : Window
 
     private async Task<object?> AppCommandAsync(string method, JsonElement args)
     {
+        if (method.StartsWith("app.assistant", StringComparison.Ordinal))
+            return await (_assistant ?? throw new InvalidOperationException("The assistant adapter is unavailable.")).InvokeAsync(method[4..], args);
         switch (method)
         {
             case "app.bootstrap":
@@ -250,7 +258,7 @@ public sealed partial class DesktopWindow : Window
         settings = new { driverAvailable = VirtualMicDriver.IsAvailable, buildFolder = AppContext.BaseDirectory, appDirectory = AppContext.BaseDirectory,
             profileDirectory = _controller!.ProfileDirectory,
             engine = "C# / .NET", interfaceTechnology = "React / WebView2 · local bundled files", platform = "Windows x64",
-            startupError = _startupError, isVerification = DesktopEnvironment.IsVerification },
+            startupError = _startupError, isVerification = DesktopEnvironment.IsVerification, assistant = _assistant?.UiState() },
         system = _performance.Latest
     };
 
@@ -316,6 +324,7 @@ public sealed partial class DesktopWindow : Window
 
     private async Task StopAllAsync()
     {
+        _assistant?.Stop();
         var failures = new List<Exception>();
         try { _controller?.StopOutput(); } catch (Exception error) { failures.Add(error); }
         try { if (_vision is not null) await _vision.InvokeAsync("stop", JsonSerializer.SerializeToElement(new { })); } catch (Exception error) { failures.Add(error); }
@@ -341,8 +350,10 @@ public sealed partial class DesktopWindow : Window
         _closing = true; _statusTimer.Stop();
         try
         {
+            _assistant?.Stop();
             Cleanup(() => _controller?.StopOutput()); Cleanup(() => _controller?.Dispose());
             Cleanup(() => _vision?.Dispose()); Cleanup(() => _voice?.Dispose());
+            if (_assistant is not null) await _assistant.DisposeAsync();
             try { if (_controller is not null) await _controller.WaitForOutputAsync(); } catch (Exception) { }
         }
         finally

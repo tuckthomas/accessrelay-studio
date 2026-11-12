@@ -18,6 +18,9 @@ button { color: inherit; }
 button:disabled { opacity: .52; }
 input, select, textarea { width: 100%; min-width: 0; min-height: 43px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-raised); padding: 9px 12px; color: var(--ink); transition: border-color .16s, box-shadow .16s; }
 input:hover, select:hover, textarea:hover { border-color: #809b90; }
+.assistant-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 24rem; }
+.assistant-panel code { overflow-wrap: anywhere; }
+.assistant-panel .detail-line { flex-wrap: wrap; align-items: flex-start; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 input[type=checkbox], input[type=radio] { width: 18px; height: 18px; min-height: 0; accent-color: var(--accent); flex-shrink: 0; padding: 0; }
 input[type=range] { padding: 0; border: 0; box-shadow: none; accent-color: var(--accent); background: transparent; }

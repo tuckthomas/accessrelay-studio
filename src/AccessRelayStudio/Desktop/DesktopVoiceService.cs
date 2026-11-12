@@ -42,6 +42,8 @@ internal sealed class DesktopVoiceService : IDesktopModule
     private Task _commandRetiring = Task.CompletedTask;
     private bool _commandStarting;
     private string? _commandLoadError;
+    internal bool AssistantVoiceActive => _session.Status.IsRunning || _operation is not null;
+    internal bool AssistantCommandsActive => _commandSession?.Status.Running == true || _commandLearning is not null || _commandStarting;
 
     private void RefreshCommandProfile()
     {

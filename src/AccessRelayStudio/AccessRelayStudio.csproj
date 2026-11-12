@@ -29,6 +29,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../AccessRelayStudio.Engine/AccessRelayStudio.Engine.csproj" />
+    <ProjectReference Include="../AccessRelayStudio.Application/AccessRelayStudio.Application.csproj" />
     <ProjectReference Include="../AccessRelayStudio.Runtime/AccessRelayStudio.Runtime.csproj" />
     <Compile Include="App.xaml.cs;DesktopWindow.xaml.cs;BuildInfo.cs;Desktop/*.cs;Diagnostics/*.cs" />
     <Content Include="../../games/nba2k27/pack.json" TargetPath="GamePacks/nba2k27/pack.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -79,6 +80,10 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
+  <Target Name="PublishAssistantBridge" AfterTargets="Publish">
+    <MSBuild Projects="../AccessRelayStudio.Mcp/AccessRelayStudio.Mcp.csproj" Targets="Restore;Publish"
+             Properties="Configuration=$(Configuration);TargetFramework=net10.0;RuntimeIdentifier=win-x64;SelfContained=true;PublishDir=$([MSBuild]::EnsureTrailingSlash('$(PublishDir)'))Mcp/" />
+  </Target>
   <Target Name="ValidateXamlOutputPath" BeforeTargets="PrepareForBuild">
     <!-- WinUI appends resource names to OutputPath when compiling XAML. -->
     <Error Condition="'$(OutputPath)' != '' And !HasTrailingSlash('$(OutputPath)')"
