@@ -65,7 +65,7 @@ export function WorkspacePage({ state, status, command, navigate }: {
       : commandListening ? 'Voice commands are listening' : active.voice ? 'Starting voice…' : unavailable.voice || 'Voice processing is off' },
   ];
   return <div className="page-stack">
-    <SectionHeader eyebrow="A space for your setup" title="Your workspace" description="Your controller, your voice, your way to play." />
+    <SectionHeader title="Your workspace" description="Your controller, your voice, your way to play." />
     <div className="workspace-grid">
       <section className="workspace-hero">
         <div className="hero-kicker"><Icon name="gamepad" size={20} />Controller workspace</div>
@@ -142,15 +142,15 @@ function ResourceUse({ metrics, enabled, busy, onToggle }: { metrics: SystemStat
           <span className="subtle">of {bytes(metrics.memoryTotalBytes)} · {percent(ramPercent)}</span>
           {ramPercent !== null && <Meter value={ramPercent} label="System RAM used" />}
           <span className="subtle">Available {valid(metrics.memoryTotalBytes) && valid(metrics.memoryUsedBytes) ? bytes(Math.max(0, metrics.memoryTotalBytes - metrics.memoryUsedBytes)) : '—'}</span></div>
-        <div className="resource-tile"><span className="stat-label">GPU · busiest engine</span><strong>{percent(metrics.gpuPercent)}</strong>
+        <div className="resource-tile"><span className="stat-label">GPU</span><strong>{percent(metrics.gpuPercent)}</strong>
           <span className="subtle">{metrics.gpuName || 'GPU information unavailable'}</span>
           <UsageChart label="GPU" values={history.map(sample => sample.gpuPercent)} /></div>
-        <div className="resource-tile"><span className="stat-label">Dedicated video memory</span><strong>{bytes(metrics.vramUsedBytes)}</strong>
+        <div className="resource-tile"><span className="stat-label">GPU Memory</span><strong>{bytes(metrics.vramUsedBytes)}</strong>
           <span className="subtle">of {bytes(metrics.vramTotalBytes)} · {percent(vramPercent)}</span>
           {vramPercent !== null && <Meter value={vramPercent} label="Video memory used" />}
           <span className="subtle">{valid(metrics.vramTotalBytes) ? 'Selected GPU' : 'Dedicated capacity not reported'}</span></div>
       </div>
-      <div className="resource-host"><div className="resource-status"><strong>Studio host process</strong><span className="subtle">WebView and helper processes are separate.</span></div>
+      <div className="resource-host"><div className="resource-status"><strong>Studio host process</strong></div>
         <dl className="resource-host-values"><div><dt>CPU · share of PC</dt><dd>{percent(metrics.appCpuPercent)}</dd></div>
           <div><dt>RAM in use</dt><dd>{bytes(metrics.appMemoryBytes)}</dd></div><div><dt>Private memory</dt><dd>{bytes(metrics.appPrivateBytes)}</dd></div>
           <div><dt>Threads</dt><dd>{metrics.appThreadCount ?? '—'}</dd></div></dl></div>
