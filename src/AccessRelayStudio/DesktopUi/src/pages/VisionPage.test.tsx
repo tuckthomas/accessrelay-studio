@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { VisionPage } from './VisionPage';
+import { Nba2K27VisionWorkspace as VisionPage } from '../game-plugins/nba2k27/VisionWorkspace';
 import { hasUnsavedChanges } from '../ui';
 
 afterEach(cleanup);

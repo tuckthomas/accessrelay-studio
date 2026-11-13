@@ -1,4 +1,3 @@
-using EliteScriptStudio.Packs.Nba2K27;
 using System.Collections.Immutable;
 using System.Text.Json;
 using EliteScriptStudio.Audio;
@@ -16,6 +15,7 @@ internal sealed class DesktopControllerService : IDesktopModule
     private readonly Func<StudioRuntime?> _runtime;
     private readonly Func<Task> _stopAll;
     private readonly ProfileStore _store;
+    private readonly IReadOnlyList<IGameControllerPlugin> _gamePlugins;
     private IReadOnlyList<StudioProfile> _profiles = [];
     private StudioProfile _active = StudioProfile.CreateDefault(), _persisted;
     private StickDeadzone _deadzone;
@@ -45,9 +45,9 @@ internal sealed class DesktopControllerService : IDesktopModule
     internal FeedbackSettings FeedbackSettings => _feedbackSettings;
     internal string ProfileDirectory => _store.DirectoryPath;
 
-    internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll, Func<string, Task>? importPackModel = null)
+    internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll, Func<string, Task>? importPackModel = null, IReadOnlyList<IGameControllerPlugin>? gamePlugins = null)
     {
-        _owner = owner; _runtime = runtime; _stopAll = stopAll; _importPackModel = importPackModel;
+        _owner = owner; _runtime = runtime; _stopAll = stopAll; _importPackModel = importPackModel; _gamePlugins = gamePlugins ?? [];
         _store = new ProfileStore(DesktopEnvironment.DataDirectory("ControllerProfiles"));
         _deadzone = _store.LoadStickDeadzone();
         _feedbackSettings = _store.LoadFeedbackSettings();
@@ -421,14 +421,13 @@ internal sealed class DesktopControllerService : IDesktopModule
                 if (!_active.LuaScripts.ContainsKey(args.Id())) throw new InvalidOperationException("That Lua script no longer exists.");
                 Save(_active.WithoutLuaScript(args.Id())); break;
             case "trajectory": return BuildTrajectory(args);
-            case "nbaFeedback":
+            case "nbaFeedback": // Compatibility alias for older clients; still requires the linked pack.
+            case "packAction":
             {
-                var timingFeedback = args.EnumValue<Nba2K27TimingFeedback>("timingFeedback");
-                var tempoFeedback = args.EnumValue<Nba2K27TempoFeedback>("tempoFeedback");
-                var adjustment = Nba2K27Tuning.Suggest(timingFeedback, tempoFeedback);
-                if (Guid.TryParse(args.Text("id"), out var id)) Save(_active.WithRecording(Nba2K27Tuning.Apply(Recording(id), adjustment)));
-                else { var variant = args.EnumValue<ShotVariant>("variant"); Save(_active.WithTiming(variant, Nba2K27Tuning.Apply(_active.GetTiming(variant), adjustment))); }
-                return adjustment;
+                var plugin = _gamePlugins.FirstOrDefault(item => item.Id == _active.GamePack?.Id)
+                    ?? throw new InvalidOperationException("This action requires a matching game pack setup.");
+                var result = plugin.ApplyControllerAction(_active, action == "nbaFeedback" ? "feedback" : args.Text("action"), args);
+                Save(result.Profile); return result.Result;
             }
             default: throw new InvalidOperationException("This controller action is not supported: " + action);
         }

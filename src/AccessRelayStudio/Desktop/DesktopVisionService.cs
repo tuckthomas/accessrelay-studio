@@ -1,4 +1,3 @@
-using EliteScriptStudio.Packs.Nba2K27;
 using System.Diagnostics;
 using System.Text.Json;
 using EliteScriptStudio.Core;
@@ -19,12 +18,12 @@ internal sealed class DesktopVisionService : IDesktopModule
     private readonly Func<StudioRuntime?> _runtime;
     private readonly Func<StudioProfile> _activeProfile;
     private readonly Func<Task> _connectOutput;
-    private readonly Nba2K27ShotProfileStore _profiles = new(DesktopEnvironment.DataDirectory("ShotProfiles"));
+    private readonly IReadOnlyList<IVisionGamePlugin> _plugins;
+    private IVisionGamePlugin? _plugin;
+    private IVisionCaptureProfile? _profile => _plugin?.SelectedProfile;
     private readonly VisionSettingsStore _settingsStore = new(DesktopEnvironment.DataDirectory("Vision"));
     private readonly VisionModelLibrary _library = new(DesktopEnvironment.DataDirectory("VisionModels"));
     private readonly object _mediaGate = new();
-    private Nba2K27ShotProfile[] _savedProfiles = [];
-    private Nba2K27ShotProfile? _profile;
     private VisionSettings _settings = VisionSettings.Default;
     private Guid _settingsProfile;
     private CaptureSource[] _sources = [];
@@ -39,7 +38,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     private VisionPerformanceRun? _baseline;
     private CalibrationProposal? _calibration;
     private VisionPerformanceSnapshot? _performance;
-    private string _notice = "Choose a player setup and a Remote Play window to begin.";
+    private string _notice = "Choose a window to preview gameplay.";
     private int _busy, _encodingPreview, _version;
     private long _sourcesRefreshedAt, _performanceRefreshedAt;
     private CancellationTokenSource _operation = new();
@@ -49,11 +48,9 @@ internal sealed class DesktopVisionService : IDesktopModule
         (_session?.Status.Running == true, _session?.Status.ModelReady == true, _session?.Status.CanArm == true, _session?.Status.SourceStale == true);
 
     internal DesktopVisionService(WindowId owner, Func<StudioRuntime?> runtime, Func<StudioProfile> activeProfile,
-        Func<Task> connectOutput)
+        Func<Task> connectOutput, IReadOnlyList<IVisionGamePlugin> plugins)
     {
-        _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput;
-        ReloadProfiles();
-        if (_profiles.LoadSelectedId() is Guid selected) _profile = _savedProfiles.FirstOrDefault(p => p.Id == selected);
+        _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput; _plugins = plugins;
         LoadSettings(); RefreshSources();
         var context = _settings;
         _ = Task.Run(() => _library.Discover(context)).ContinueWith(task =>
@@ -72,9 +69,11 @@ internal sealed class DesktopVisionService : IDesktopModule
         var selectedModel = _models.FirstOrDefault(m => m.ManifestPath == _settings.ModelManifestPath);
         return new
         {
-            profiles = _savedProfiles, selectedProfile = _profile, selectedFingerprint = _profile?.ConfigurationFingerprint,
+            plugins = _plugins.Select(plugin => new { plugin.Id, plugin.Name, plugin.OutputContract }), selectedPluginId = _plugin?.Id ?? "",
+            profiles = _plugin?.Profiles.Select(profile => profile.ExportProfile()) ?? [],
+            selectedProfile = _profile?.ExportProfile(), selectedFingerprint = _profile?.ConfigurationFingerprint,
             sources = _sources.Select(s => new { id = SourceId(s), s.Title, s.ProcessId }), selectedSourceId = _selectedSourceId,
-            settings = _settings, cameraViews = Nba2K27ShotProfile.CameraViews,
+            settings = _settings, cameraViews = _plugin?.CameraViews ?? [],
             models = _models.Select(m => new { id = ModelId(m), name = m.DisplayName, version = m.ModelVersion,
                 compatible = m.IsCompatible, evidenceAccepted = m.EvidenceAccepted, m.Status }),
             selectedModelId = selectedModel is null ? "" : ModelId(selectedModel), modelScanComplete = _modelScanComplete,
@@ -132,6 +131,18 @@ internal sealed class DesktopVisionService : IDesktopModule
         {
             switch (action)
             {
+                case "pluginSelect":
+                {
+                    RequireStopped(); string pluginId = args.Text("id");
+                    var plugin = pluginId.Length == 0 ? null : _plugins.FirstOrDefault(item => item.Id == pluginId)
+                        ?? throw new InvalidOperationException("Choose an installed game plugin.");
+                    if (plugin == _plugin) return null;
+                    _runtime()?.SetVisionArmed(false);
+                    _session?.Dispose(); _session = null; _review?.Dispose(); _review = null;
+                    _plugin = plugin; _version++; ClearPreview(); _calibration = null; _baseline = null; _performance = null;
+                    LoadSettings(); await RefreshModelsAsync();
+                    _notice = ""; return null;
+                }
                 case "sourceRefresh": RefreshSources(); return null;
                 case "sourceSelect":
                     RequireStopped();
@@ -151,27 +162,22 @@ internal sealed class DesktopVisionService : IDesktopModule
                 case "profileSave":
                 {
                     RequireStopped();
-                    var profile = args.GetProperty("profile").Read<Nba2K27ShotProfile>();
-                    if (profile.Id == Guid.Empty) profile = profile with { Id = Guid.NewGuid() };
-                    profile.Validate();
-                    string expected = args.Text("expectedFingerprint");
-                    if (expected.Length != 0 && _savedProfiles.Any(p => p.Id == profile.Id)
-                        && _profiles.Load(profile.Id).ConfigurationFingerprint != expected)
-                        throw new InvalidOperationException("This setup changed elsewhere. Reopen it before saving.");
-                    _profiles.Save(profile); ReloadProfiles(); SelectProfile(profile.Id); await RefreshModelsAsync();
-                    _notice = "Shot setup saved. Its current camera, animation and meter settings travel with each clip.";
-                    return profile;
+                    var profile = RequirePlugin().SaveProfile(args.GetProperty("profile"), args.Text("expectedFingerprint"));
+                    SelectProfile(profile.Id); ClearPreview(); _calibration = null; await RefreshModelsAsync();
+                    _notice = "Game plugin profile saved."; return profile.ExportProfile();
                 }
                 case "profileDuplicate":
                 {
-                    RequireStopped(); var copy = _profiles.Duplicate(args.Id(), args.Text("name")); ReloadProfiles(); SelectProfile(copy.Id);
-                    await RefreshModelsAsync(); _notice = "Shot setup duplicated."; return copy;
+                    RequireStopped(); var copy = RequirePlugin().DuplicateProfile(args.Id(), args.Text("name"));
+                    SelectProfile(copy.Id); await RefreshModelsAsync(); _notice = "Game plugin profile duplicated."; return copy.ExportProfile();
                 }
                 case "profileDelete":
                     RequireStopped();
-                    var deleteId = args.Id(); _profiles.Delete(deleteId); ReloadProfiles();
-                    if (_profile?.Id == deleteId) { _profile = null; LoadSettings(); ClearPreview(); }
-                    _notice = "Shot setup deleted. Recorded clips are unchanged."; return null;
+                    var deleteId = args.Id(); bool selected = _profile?.Id == deleteId;
+                    RequirePlugin().DeleteProfile(deleteId);
+                    if (selected) { LoadSettings(); ClearPreview(); _calibration = null; }
+                    await RefreshModelsAsync();
+                    _notice = "Game plugin profile deleted. Recorded clips are unchanged."; return null;
                 case "settingsSave":
                     RequireStopped();
                     var edited = args.GetProperty("settings").Read<VisionSettings>();
@@ -220,7 +226,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                 case "reviewSave":
                     if (_review is null || args.Text("token") != _review.Token) throw new InvalidOperationException("Open the clip before saving its review.");
                     _review.Save(args.GetProperty("labels").Read<DesktopVisionDataset.LabelDocument>());
-                    _notice = "Reviewed labels saved with this clip. Automatic meter-derived training is still pending.";
+                    _notice = "Reviewed labels saved with this clip.";
                     return _review.Snapshot();
                 case "reviewClose": _review?.Dispose(); _review = null; return null;
                 case "openClipFolder":
@@ -241,12 +247,12 @@ internal sealed class DesktopVisionService : IDesktopModule
         finally { Interlocked.Exchange(ref _busy, 0); }
     }
 
-    private void ReloadProfiles() => _savedProfiles = _profiles.LoadAll().ToArray();
+    private IVisionGamePlugin RequirePlugin() => _plugin ?? throw new InvalidOperationException("Choose a game plugin for this action.");
     private void SelectProfile(Guid id)
     {
-        var previous = _profile;
-        _profile = _profiles.Load(id); _profiles.Select(id); LoadSettings();
-        if (previous?.ConfigurationFingerprint != _profile.ConfigurationFingerprint) { ClearPreview(); _calibration = null; }
+        string? previous = _profile?.ConfigurationFingerprint;
+        RequirePlugin().SelectProfile(id); LoadSettings();
+        if (previous != _profile?.ConfigurationFingerprint) { ClearPreview(); _calibration = null; }
         _version++;
     }
     private void LoadSettings()
@@ -255,12 +261,15 @@ internal sealed class DesktopVisionService : IDesktopModule
         var loaded = _settingsStore.Load(_settingsProfile);
         if (_profile is { } profile)
         {
-            string animation = "nba2k27:" + profile.ConfigurationFingerprint;
+            string animation = profile.AnimationProfile;
             if (loaded.CameraView != profile.CameraView)
                 loaded = loaded with { TrainingCapture = loaded.TrainingCapture with { Configured = false } };
             if (loaded.AnimationProfile != animation) loaded = loaded with { ModelManifestPath = "", CorrectionMs = 0 };
             loaded = loaded with { AnimationProfile = animation, CameraView = profile.CameraView };
         }
+        else
+            loaded = loaded with { AnimationProfile = "Default", CameraView = "", ModelManifestPath = "", CorrectionMs = 0,
+                Crop = new VisionCrop(0, 0, 1, 1), TrainingCapture = new VisionTrainingCaptureSettings() };
         _settings = loaded;
     }
     private void SaveSettings() { _settings.Validate(); _settingsStore.Save(_settingsProfile, _settings); _runtime()?.ConfigureVision(_settings); }
@@ -274,7 +283,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     private static string SourceId(CaptureSource source) => source.Hwnd.ToInt64().ToString("x") + "-" + source.ProcessId;
     private static string ModelId(VisionModelLibraryEntry model) => Path.GetFileName(Path.GetDirectoryName(model.ManifestPath))!;
     private CaptureSource SelectedSource() => _sources.FirstOrDefault(s => SourceId(s) == _selectedSourceId)
-        ?? throw new InvalidOperationException("Choose the window showing Xbox Remote Play.");
+        ?? throw new InvalidOperationException("Choose a gameplay window.");
     private void RefreshSources()
     {
         _sourcesRefreshedAt = Stopwatch.GetTimestamp();
@@ -292,18 +301,26 @@ internal sealed class DesktopVisionService : IDesktopModule
         if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
             throw new InvalidOperationException("Finish saving the current clip before changing its setup.");
         if (_session?.Status.Running == true || _session?.IsStopping == true)
-            throw new InvalidOperationException("Stop live view before changing its player, source, model or timing settings.");
+            throw new InvalidOperationException("Stop live view before changing its plugin, profile, source, model or timing settings.");
     }
     private void Start(bool loadModel)
     {
         RequireStopped(); RefreshSources(); var source = SelectedSource();
+        if (loadModel)
+        {
+            var plugin = RequirePlugin();
+            if (_profile is null) throw new InvalidOperationException("Choose a game plugin profile before starting analysis.");
+            if (_settings.ModelManifestPath.Length == 0) throw new InvalidOperationException("Choose a model before starting analysis.");
+            var (manifest, _) = VisionModelManifest.Read(_settings.ModelManifestPath);
+            if (manifest.OutputContract != plugin.OutputContract) throw new InvalidDataException("The model does not match this game plugin's vision contract.");
+        }
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
         _session.Start(source.Hwnd, _settings, loadModel); _lastObservedSourceId = _selectedSourceId;
         _notice = loadModel && _settings.ModelManifestPath.Length != 0
             ? "Preparing live analysis. Assistance remains disarmed until you arm it."
-            : "Preview is live. Record a clip to save footage; viewing alone does not save it.";
+            : "Preview is live. Frames are not being saved.";
     }
     private void UpdatePreview()
     {
@@ -329,7 +346,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     private void ClearPreview() { lock (_mediaGate) { Volatile.Write(ref _preview, null); _frozen = null; } }
     private async Task<object> FreezeAsync(int version, CancellationToken cancellation)
     {
-        if (_profile is null) throw new InvalidOperationException("Save a player shot setup before marking capture areas.");
+        if (_profile is null) throw new InvalidOperationException("Choose a game plugin profile before marking training areas.");
         if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
             throw new InvalidOperationException("Finish the current clip before changing its capture areas.");
         if (_session?.Status.Running != true) Start(loadModel: false);
@@ -349,7 +366,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         var frozen = new FrozenImage(Guid.NewGuid().ToString("N"), image, _selectedSourceId, _profile.Id,
             _profile.ConfigurationFingerprint, _settings);
         lock (_mediaGate) _frozen = frozen;
-        _notice = "Preview paused for marking. Mark the gameplay, player, meter and feedback areas, then save the layout.";
+        _notice = "Preview paused. Mark the game plugin capture areas, then save the layout.";
         return new { token = frozen.Token, url = "https://media.accessrelay.test/vision/frozen/" + frozen.Token,
             sourceWidth = image.SourceWidth, sourceHeight = image.SourceHeight, sequence = image.Sequence,
             player = _settings.Crop, layout = _settings.TrainingCapture };
@@ -363,17 +380,17 @@ internal sealed class DesktopVisionService : IDesktopModule
             throw new InvalidOperationException("The capture context changed. Open a fresh preview to mark the areas again.");
         var layout = args.GetProperty("layout").Read<VisionTrainingCaptureSettings>() with
         { Configured = true, SourceWidth = frozen.Image.SourceWidth, SourceHeight = frozen.Image.SourceHeight };
-        var crop = args.GetProperty("player").Read<VisionCrop>(); crop.Validate(); layout.ValidateForRecording(_profile);
+        var crop = args.GetProperty("player").Read<VisionCrop>(); crop.Validate(); _profile.ValidateCapture(layout);
         if (!VisionTrainingCaptureSettings.Contains(layout.GameplayRegion, crop))
             throw new InvalidDataException("Keep the player area inside the gameplay area.");
         _settings = _settings with { Crop = crop, TrainingCapture = layout, CorrectionMs = 0 }; SaveSettings(); _calibration = null;
-        _notice = "Capture areas saved. Keep playing through the shot feedback when recording your next clip.";
+        _notice = "Capture areas saved.";
         return null!;
     }
     private async Task<object?> RecordAsync(int version, CancellationToken cancellation)
     {
-        var profile = _profile ?? throw new InvalidOperationException("Save a player shot setup first.");
-        _settings.TrainingCapture.ValidateForRecording(profile);
+        var profile = _profile ?? throw new InvalidOperationException("Choose a game plugin profile first.");
+        profile.ValidateCapture(_settings.TrainingCapture);
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
         if (runtime.ScriptsEnabled || runtime.Recording.IsRecording)
             throw new InvalidOperationException("Turn off macro scripts and finish macro recording before collecting manual gameplay clips.");
@@ -383,7 +400,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         var folder = await new FolderPicker(_owner).PickSingleFolderAsync();
         CheckOperation(version, cancellation); if (folder is null) return null;
         if (_settings != settings || _profile?.ConfigurationFingerprint != profile.ConfigurationFingerprint || sourceId != _selectedSourceId)
-            throw new InvalidOperationException("The shot or source changed while selecting a folder. Review the setup and try again.");
+            throw new InvalidOperationException("The plugin profile or source changed while selecting a folder. Review the setup and try again.");
         RefreshSources(); var source = SelectedSource();
         if (_session?.Status.Running != true) Start(loadModel: false);
         long began = Stopwatch.GetTimestamp();
@@ -396,7 +413,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         }
         CheckOperation(version, cancellation);
         _session.StartTraining(folder.Path, profile, source.Title);
-        _notice = "Recording up to 10 seconds. Return focus to Remote Play and keep playing until shot feedback appears.";
+        _notice = "Recording up to 10 seconds. Return focus to gameplay to capture the action.";
         return null;
     }
     private async Task<object?> ReviewOpenAsync(JsonElement args, int version, CancellationToken cancellation)

@@ -2,6 +2,13 @@ using EliteScriptStudio.Packs.Nba2K27;
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
+if (args is ["--game-plugin"])
+{
+    Nba2K27ShotProfileVerification.Run();
+    Console.WriteLine("SUCCESS Game plugin profile contracts and saved-profile compatibility.");
+    return;
+}
+
 var tests = new (string Name, Action Run)[]
 {
     ("Bounded allocation-free runtime lock measurements, epochs, freeze and percentiles", RuntimeLockVerification.Run),

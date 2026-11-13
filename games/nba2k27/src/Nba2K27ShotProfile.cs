@@ -11,7 +11,7 @@ namespace EliteScriptStudio.Packs.Nba2K27;
 /// <summary>Player and custom shot configuration. Entry guards are not a game animation catalog.</summary>
 internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches, int ThreePointRating,
     string Base, string UpperRelease1, string UpperRelease2, bool UsesShotMeter = false,
-    string MeterReleaseType = "", int ShotSpeed = 4, int Release1Percent = 50, string CameraView = "2K") : ITrainingCaptureProfile
+    string MeterReleaseType = "", int ShotSpeed = 4, int Release1Percent = 50, string CameraView = "2K") : IVisionCaptureProfile
 {
     public const int MaximumProfiles = 64;
     public const int MinimumHeightInches = 36;
@@ -42,6 +42,9 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
     }
 
     bool ITrainingCaptureProfile.UsesSupervisionOverlay => UsesShotMeter;
+    string IVisionCaptureProfile.AnimationProfile => "nba2k27:" + ConfigurationFingerprint;
+    object IVisionCaptureProfile.ExportProfile() => this;
+    void IVisionCaptureProfile.ValidateCapture(VisionTrainingCaptureSettings settings) => settings.ValidateForRecording(this);
 
     public int Release2Percent => 100 - Release1Percent;
 

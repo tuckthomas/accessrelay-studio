@@ -1,4 +1,3 @@
-using EliteScriptStudio.Packs.Nba2K27;
 using System.Diagnostics;
 using System.Buffers;
 using System.Text.Json;
@@ -347,7 +346,7 @@ internal sealed class VisionSession : IDisposable
         File.WriteAllText(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    internal void StartTraining(string directory, Nba2K27ShotProfile profile, string sourceTitle)
+    internal void StartTraining(string directory, IVisionCaptureProfile profile, string sourceTitle)
     {
         lock (_gate)
         {
@@ -356,11 +355,11 @@ internal sealed class VisionSession : IDisposable
             if (_runtime.ScriptsEnabled || _runtime.Recording.IsRecording)
                 throw new InvalidOperationException("Turn off macro scripts and finish macro recording before capturing manual gameplay training data.");
             if (_recorder?.IsRecording == true) throw new InvalidOperationException("A training take is already recording.");
-            if (_activeSettings.AnimationProfile != "nba2k27:" + profile.ConfigurationFingerprint)
-                throw new InvalidOperationException("Restart observation using the selected NBA 2K27 shot profile before recording.");
+            if (_activeSettings.AnimationProfile != profile.AnimationProfile)
+                throw new InvalidOperationException("Restart observation using the selected game plugin profile before recording.");
             if (_activeSettings.CameraView != profile.CameraView)
                 throw new InvalidOperationException("Restart observation using the selected camera view before recording.");
-            _activeSettings.TrainingCapture.ValidateForRecording(profile);
+            profile.ValidateCapture(_activeSettings.TrainingCapture);
             if (_status.CaptureWidth != _activeSettings.TrainingCapture.SourceWidth ||
                 _status.CaptureHeight != _activeSettings.TrainingCapture.SourceHeight)
                 throw new InvalidOperationException("Wait for a fresh live preview and confirm training capture setup for the current window size.");

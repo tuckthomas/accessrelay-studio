@@ -80,8 +80,10 @@ public sealed partial class DesktopWindow : Window
         {
             if (!_started)
             {
+                var gamePlugins = EliteScriptStudio.Packs.BuiltInVisionPlugins.Load(Path.Combine(AppContext.BaseDirectory, "GamePacks"), DesktopEnvironment.DataDirectory);
                 _controller ??= new DesktopControllerService(AppWindow.Id, () => _runtime, StopAllAsync,
-                    path => _vision?.ImportGamePackModelAsync(path) ?? throw new InvalidOperationException("Vision is unavailable."));
+                    path => _vision?.ImportGamePackModelAsync(path) ?? throw new InvalidOperationException("Vision is unavailable."),
+                    gamePlugins.OfType<IGameControllerPlugin>().ToArray());
                 try
                 {
                     if (_runtime is null)
@@ -100,7 +102,8 @@ public sealed partial class DesktopWindow : Window
                 }
                 catch (Exception error) { _startupError = "Controller monitoring is unavailable: " + error.Message; }
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
-                _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync());
+                _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync(),
+                    gamePlugins);
                 _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
                     () => _runtime, () => _hasUnsavedChanges);
                 _started = true;

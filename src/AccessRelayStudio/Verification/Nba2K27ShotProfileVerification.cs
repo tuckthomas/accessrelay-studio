@@ -12,7 +12,32 @@ internal static class Nba2K27ShotProfileVerification
         BoundedReadsAndIdentity();
         MeterSpeedBlendAndLegacyDefaults();
         CameraViewsAndMigration();
+        PluginOwnsProfileData();
     }
+
+    private static void PluginOwnsProfileData() => WithDirectory(directory =>
+    {
+        IVisionGamePlugin plugin = new Nba2K27VisionPlugin(directory);
+        Equal("nba2k27", plugin.Id);
+        Expect<InvalidOperationException>(() => ((IGameControllerPlugin)plugin).ApplyControllerAction(
+            StudioProfile.CreateDefault(), "feedback", System.Text.Json.JsonSerializer.SerializeToElement(new { })));
+        Check(plugin.SelectedProfile is null && plugin.Profiles.Count == 0, "A plugin starts without inventing a profile.");
+        var original = Complete();
+        var saved = plugin.SaveProfile(System.Text.Json.JsonSerializer.SerializeToElement(original), "");
+        Equal("nba2k27:" + original.ConfigurationFingerprint, saved.AnimationProfile);
+        var exported = System.Text.Json.JsonSerializer.SerializeToElement(saved.ExportProfile());
+        Equal(original.Base, exported.GetProperty("Base").GetString());
+        Equal(original.ThreePointRating, exported.GetProperty("ThreePointRating").GetInt32());
+        IVisionGamePlugin reopened = new Nba2K27VisionPlugin(directory);
+        Equal(original.Id, reopened.SelectedProfile!.Id);
+        var changed = original with { Base = "Another base" };
+        plugin.SaveProfile(System.Text.Json.JsonSerializer.SerializeToElement(changed), original.ConfigurationFingerprint);
+        Expect<InvalidOperationException>(() => plugin.SaveProfile(System.Text.Json.JsonSerializer.SerializeToElement(original), original.ConfigurationFingerprint));
+        var copy = plugin.DuplicateProfile(original.Id, "Copy");
+        Check(copy.Id != original.Id, "Duplicating a plugin profile creates a new identity.");
+        plugin.DeleteProfile(copy.Id);
+        Check(plugin.SelectedProfile is null && plugin.Profiles.Count == 1, "Deleting the selected plugin profile leaves other saved data intact.");
+    });
 
     private static Nba2K27ShotProfile Complete(string name = "Standing jumper") =>
         Nba2K27ShotProfile.Create() with

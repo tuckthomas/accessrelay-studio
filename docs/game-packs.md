@@ -9,6 +9,28 @@ the imported scripts' numeric tuning, preserves user mappings, and refuses to ov
 edited Lua sources. Exported profiles include scripts/tuning and need no installed
 pack to replay; re-tuning requires the exact installed manifest hash/version.
 
+Remote Play is a platform workspace. With **Game plugin → None**, select any
+capturable game window and start a preview without creating a player or shot profile.
+Preview does not start inference, recording or controller output. Select an installed
+game plugin to open its training and assistance workspace. Changing plugins requires
+capture and clip finalization to stop; switching never starts processing or arms output.
+
+The host accepts `IVisionGamePlugin` / `IVisionCaptureProfile` contracts. Each reviewed
+plugin owns profile fields, persistence, camera choices, capture validation and its
+animation identity. Capture, inference execution, freshness, cancellation and final
+output ownership remain in the host. The shared temporal-release tracker is not an NBA
+profile dependency. Native adapters are registered in `games/BuiltInVisionPlugins.cs`;
+UI adapters are registered in `DesktopUi/src/game-plugins/registry.ts`. A pack manifest
+cannot load a DLL or execute arbitrary UI code. Other vision tasks still require a
+reviewed typed contract; this does not create a marketplace or a universal model.
+
+NBA setup, meter/feedback regions and shot review live in its optional workspace.
+Existing NBA profile files, selection, configuration fingerprints and recorded metadata
+remain compatible. The NBA controller feedback action and controls are available only
+on controller setups linked to that pack; ordinary sequence editors do not show them.
+The Remote Play plugin choice starts at None and does not infer a game from saved NBA
+profiles. Selecting NBA restores its saved profile without editing the stored data.
+
 Bundled examples:
 
 - [`games/nba2k27/pack.json`](../games/nba2k27/pack.json): optional rhythm Lua/tuning,

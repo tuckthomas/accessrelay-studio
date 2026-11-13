@@ -1,4 +1,3 @@
-using EliteScriptStudio.Packs.Nba2K27;
 using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
@@ -26,7 +25,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
     private readonly Channel<Pending> _frames = Channel.CreateBounded<Pending>(new BoundedChannelOptions(8)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly List<FrameEntry> _index = [];
-    private readonly Nba2K27ShotProfile _profile;
+    private readonly IVisionCaptureProfile _profile;
     private readonly VisionSettings _settings;
     private readonly string _sourceTitle;
     private readonly Task _writer;
@@ -58,13 +57,13 @@ internal sealed class VisionTrainingRecorder : IDisposable
         }
     }
 
-    internal VisionTrainingRecorder(string parentDirectory, Nba2K27ShotProfile profile, VisionSettings settings, string sourceTitle,
+    internal VisionTrainingRecorder(string parentDirectory, IVisionCaptureProfile profile, VisionSettings settings, string sourceTitle,
         Func<string, Stream>? streamFactory = null, TimeSpan? durationLimit = null,
         VisionTrainingTrace? controllerTrace = null, Action? detachControllerTrace = null, long? byteLimit = null)
     {
         profile.Validate(); settings.Validate();
         // Legacy primary-only fixtures remain readable; the UI/session requires configured multi-region evidence.
-        if (settings.TrainingCapture.Configured) settings.TrainingCapture.ValidateForRecording(profile);
+        if (settings.TrainingCapture.Configured) profile.ValidateCapture(settings.TrainingCapture);
         var regions = new List<StoredRegion> { new("player", "frames.bgra", StoredWidth, StoredHeight, settings.Crop) };
         if (settings.TrainingCapture.Configured)
         {
@@ -74,7 +73,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
             regions.Add(new("scene", "scene.bgra", 640, 360, layout.GameplayRegion));
             if (layout.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && layout.MeterRegion is { } meter)
                 regions.Add(new("meter", "meter.bgra", 256, 256, meter));
-            regions.Add(new("feedback", "feedback.bgra", 640, 192, layout.FeedbackRegion!.Value));
+            if (layout.FeedbackRegion is { } feedback)
+                regions.Add(new("feedback", "feedback.bgra", 640, 192, feedback));
         }
         _regions = regions.ToArray();
         _bytesPerFrame = _regions.Sum(region => region.ByteLength);
@@ -245,7 +245,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
             captureWidth = _width, captureHeight = _height, stride = _width * 4, crop = _settings.Crop,
             storedWidth = StoredWidth, storedHeight = StoredHeight, storedStride = StoredWidth * 4, pixelFormat = "BGRA8",
             preprocessing = "bgra8-player-crop-nearest256-bilinear-rgb-unit-ntchw-v2",
-            sourceTitle = _sourceTitle, shotProfile = _profile, stopwatchFrequency = Stopwatch.Frequency,
+            sourceTitle = _sourceTitle, shotProfile = _profile.ExportProfile(), stopwatchFrequency = Stopwatch.Frequency,
             frames = _index, droppedFrames = Interlocked.Read(ref _dropped), complete,
             labelsRequired = "Target release labels require reviewed practice experiments; physical release and ball departure are not automatically ground truth.",
             timingScope = "PC capture timestamps; original Xbox render time is not measured.",

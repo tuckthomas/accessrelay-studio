@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
 import { CoPilotInput } from '../CoPilotInput';
 import { GamePacks } from '../GamePacks';
+import { gameControllerTuning } from '../game-plugins/registry';
 import { currentTheme, themeChanged } from '../theme';
 import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
 
@@ -254,7 +255,7 @@ function Sequences({ state, status, command }: PageProps) {
           <ActionMenuItem onSelect={()=>void command('recordExport',{id:item.id}).catch(()=>{})}><Icon name="download" size={16}/>Export</ActionMenuItem>
           <ActionMenuItem onSelect={()=>setDeleteItem(item)}><Icon name="trash" size={16}/>Delete</ActionMenuItem></ActionMenu></div>)}</div>}
     </Card><RecordPanel state={state} status={status} command={command}/></div>:<TimingEditor state={state} status={status} command={command}/>}
-    {editId&&<RecordingEditor id={editId} command={command} onClose={()=>setEditId(null)}/>}
+    {editId&&<RecordingEditor id={editId} pluginId={state.activeProfile?.gamePack?.id} command={command} onClose={()=>setEditId(null)}/>}
     <ConfirmDialog open={!!deleteItem} onClose={()=>setDeleteItem(null)} title="Delete this sequence?" description={'“'+deleteItem?.name+'” will be removed. Its mappings will be cleared.'}
       onConfirm={()=>command('recordDelete',{id:deleteItem.id})} confirmLabel="Delete sequence"/>
     <Modal open={!!duplicateItem} onClose={()=>setDuplicateItem(null)} title="Make another version" description="The original sequence stays as it is."
@@ -288,6 +289,7 @@ function RecordPanel({state,status,command}:PageProps){
 }
 
 function TimingEditor({state,status,command}:PageProps){
+  const Tuning = gameControllerTuning(state.activeProfile?.gamePack?.id);
   const timings=state.activeProfile?.timings||[],[variant,setVariant]=useState(timings[0]?.variant||'rhythm');
   const item=timings.find((entry:any)=>entry.variant===variant)||timings[0];
   const [draft,setDraft]=useState<any>(item?.timing||INITIAL_TIMING),[chart,setChart]=useState<any>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
@@ -296,7 +298,7 @@ function TimingEditor({state,status,command}:PageProps){
   const changed=JSON.stringify(draft)!==JSON.stringify(item?.timing);
   useUnsavedChanges(changed);
   const [nextVariant, setNextVariant] = useState<string | null>(null);
-  return <div className="split-grid"><Card title="Shape the sequence" description="Adjust each phase, then save it to the current controller setup."><div className="stack">
+  return <div className={Tuning ? "split-grid" : "stack"}><Card title="Shape the sequence" description="Adjust each phase, then save it to the current controller setup."><div className="stack">
     <Field label="Built-in sequence"><select value={variant} onChange={event=>{if(changed)setNextVariant(event.target.value);else setVariant(event.target.value);}}>{timings.map((entry:any)=><option key={entry.variant} value={entry.variant}>{entry.label}</option>)}</select></Field>
     <div className="timing-grid">{delayFields.map(([key,label,min])=><div className="timing-row" key={key}><label htmlFor={'timing-'+key}>{label}</label><div className="field-unit">
       <input id={'timing-'+key} type="number" min={min} max={10000} value={draft[key]??min} onChange={event=>setDraft({...draft,[key]:Number(event.target.value)})}/><span>ms</span></div></div>)}</div>
@@ -306,7 +308,7 @@ function TimingEditor({state,status,command}:PageProps){
     <div className="editor-actions"><span className="saved-note">{changed?'Unsaved changes':'All changes saved'}</span><Button disabled={!changed||busy} onClick={()=>setDraft(item.timing)}>Reset</Button>
       <Button variant="primary" busy={busy} disabled={!changed||status.training} onClick={async()=>{setBusy(true);setError('');try{await command('timingSave',{variant,timing:draft});setMessage('Sequence timing saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}}><Icon name="save" size={16}/>Save timing</Button></div>
   </div></Card><div className="stack"><Card title="How it moves" description="The saved right-stick trajectory, from beginning to end."><TrajectoryChart data={chart}/><p className="subtle" style={{marginTop:12}}>The preview reflects saved settings. It does not send controller input.</p></Card>
-    <Card title="Fine-tune from shot feedback" description="Optional manual tuning for NBA 2K27."><FeedbackTuning variant={variant} command={command} disabled={status.training||changed}/></Card></div>
+    {Tuning && <Tuning variant={variant} command={command} disabled={status.training||changed}/>}</div>
     <DiscardDialog open={nextVariant!==null} onKeep={()=>setNextVariant(null)} onDiscard={()=>{if(nextVariant)setVariant(nextVariant);setNextVariant(null);}}/></div>;
 }
 
@@ -325,17 +327,8 @@ export function TrajectoryChart({data,recording}:{data?:any;recording?:any}){
     </svg><div className="chart-labels"><span>0 ms</span><span>{formatDuration(duration)}</span></div></div>;
 }
 
-function FeedbackTuning({command,variant,id,disabled,onApplied}:{command:PageProps['command'];variant?:string;id?:string;disabled?:boolean;onApplied?:()=>Promise<void>}){
-  const [timing,setTiming]=useState('none'),[tempo,setTempo]=useState('none'),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
-  return <div className="stack"><div className="form-grid"><Field label="Timing feedback"><select value={timing} onChange={event=>setTiming(event.target.value)}>
-    {['none','early','slightlyEarly','excellent','slightlyLate','late'].map(value=><option value={value} key={value}>{value==='none'?'No adjustment':humanize(value)}</option>)}</select></Field>
-    <Field label="Tempo feedback"><select value={tempo} onChange={event=>setTempo(event.target.value)}>{['none','fast','slightlyFast','excellent','slightlySlow','slow'].map(value=><option value={value} key={value}>{value==='none'?'No adjustment':humanize(value)}</option>)}</select></Field></div>
-    <p className="subtle">Applies a small timing adjustment to this saved sequence. Feedback is a tuning hint, not a measured latency correction.</p>
-    <Button busy={busy} disabled={disabled||(timing==='none'&&tempo==='none')} onClick={async()=>{setBusy(true);setMessage('');try{await command('nbaFeedback',{id,variant,timingFeedback:timing,tempoFeedback:tempo});await onApplied?.();setMessage('Feedback adjustment applied to the saved sequence.');}catch(e){setMessage(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}}><Icon name="sliders" size={16}/>Apply feedback adjustment</Button>
-    {message&&<Notice>{message}</Notice>}</div>;
-}
-
-function RecordingEditor({id,command,onClose}:{id:string;command:PageProps['command'];onClose:()=>void}){
+function RecordingEditor({id,pluginId,command,onClose}:{id:string;pluginId?:string;command:PageProps['command'];onClose:()=>void}){
+  const Tuning = gameControllerTuning(pluginId);
   const [recording,setRecording]=useState<any>(null),[original,setOriginal]=useState<any>(null),[index,setIndex]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [trimStart,setTrimStart]=useState(0),[trimEnd,setTrimEnd]=useState(0),[intervalStart,setIntervalStart]=useState(0),[intervalEnd,setIntervalEnd]=useState(1),[intervalMs,setIntervalMs]=useState(100);
   const load=useCallback(async()=>{const value=await command('recordGet',{id});setRecording(value);setOriginal(value);setTrimEnd(Math.max(0,value.frames.length-1));},[id,command]);
@@ -368,7 +361,7 @@ function RecordingEditor({id,command,onClose}:{id:string;command:PageProps['comm
         <div className="frame-fields" style={{marginTop:15}}>{['timeMs','rightX','rightY','leftX','leftY','leftTrigger','rightTrigger','buttons'].map(key=><Field key={key} label={humanize(key)}>
           <input type="number" min={key==='timeMs'||key.includes('Trigger')||key==='buttons'?0:-32768} max={key==='buttons'?65535:key.includes('Trigger')?255:key==='timeMs'?recording.durationMs:32767}
             value={key==='timeMs'?frame?.timeMs||0:frame?.state[key]||0} onChange={event=>updateFrame(key,Number(event.target.value))}/></Field>)}</div></details>
-      <details><summary>NBA 2K27 feedback tuning</summary><FeedbackTuning id={id} command={command} disabled={dirty} onApplied={load}/></details>
+      {Tuning && <Tuning id={id} command={command} disabled={dirty} onApplied={load}/>}
     </>:!error&&<p className="subtle">Opening your saved sequence…</p>}
   </Modal><DiscardDialog open={closeRequested} onKeep={()=>setCloseRequested(false)} onDiscard={onClose}/></>;
 }

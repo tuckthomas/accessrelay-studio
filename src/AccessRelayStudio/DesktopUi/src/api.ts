@@ -86,7 +86,7 @@ export const previewState: StudioState = {
     recordingChannels: [['rightStick', 'Right stick'], ['leftStick', 'Left stick'], ['buttons', 'Buttons'], ['leftTrigger', 'Left trigger'], ['rightTrigger', 'Right trigger']].map(([id, label]) => ({ id, label })),
     driverAvailable: true, profileDirectory: 'Local profile storage', status: disconnected
   },
-  vision: { sources: [], profiles: [], shotProfiles: [], models: [], selectedProfileId: null,
+  vision: { plugins: [{ id: 'nba2k27', name: 'NBA 2K27', outputContract: 'temporal-release-v1' }], selectedPluginId: '', sources: [], profiles: [], shotProfiles: [], models: [], selectedProfileId: null,
     selectedShotProfileId: null, selectedSource: null, settings: {}, status: { running: false, message: 'Choose your Remote Play window to begin.' } },
   voice: { devices: { microphones: [], outputs: [] }, models: [], profiles: [], selectedProfileId: null, selectedModelId: null,
     microphoneId: '', outputId: '', destination: 'virtual', settings: { preset: 'clean', pitchSemitones: 0, gainDb: 0, muted: false },
@@ -174,6 +174,7 @@ async function previewCommand(method: string, args: any): Promise<any> {
   }
   if (method === 'voice.commandsSave') { voice.commands = { ...voice.commands, settings: args.settings }; return null; }
   if (method === 'voice.commandsStop') return null;
+  if (method === 'vision.pluginSelect') { previewState.vision.selectedPluginId = args.id; return null; }
   if (method.startsWith('app.')) throw new Error('This is a design preview. System actions are available in the installed desktop app.');
   throw new Error('This is a design preview. Capture and audio actions are available in the installed desktop app.');
 }

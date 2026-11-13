@@ -141,12 +141,22 @@ describe('controller workflows', () => {
   });
   it('draws full normalized trajectory amplitude and does not amplify tiny int16 recording values', () => {
     const view = render(<TrajectoryChart data={{ normalized: true, durationMs: 100, frames: [{ timeMs: 0, rightY: -1 }, { timeMs: 100, rightY: 1 }] }} />);
-    expect(view.container.querySelector('path[stroke="#367456"]')?.getAttribute('d')).toBe('M20.0,164.0 L880.0,16.0');
+    expect(view.container.querySelector('path[stroke="var(--accent)"]')?.getAttribute('d')).toBe('M20.0,164.0 L880.0,16.0');
     view.rerender(<TrajectoryChart recording={{ durationMs: 100, frames: [{ timeMs: 0, state: { rightY: 1 } }, { timeMs: 100, state: { rightY: -1 } }] }} />);
-    expect(view.container.querySelector('path[stroke="#367456"]')?.getAttribute('d')).toBe('M20.0,90.0 L880.0,90.0');
+    expect(view.container.querySelector('path[stroke="var(--accent)"]')?.getAttribute('d')).toBe('M20.0,90.0 L880.0,90.0');
+  });
+  it('keeps NBA feedback controls out of an ordinary controller setup', async () => {
+    const state = setup(), command = vi.fn().mockResolvedValue(null);
+    render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Sequences/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Built-in sequences' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('trajectory', expect.anything()));
+    expect(screen.queryByText('Fine-tune from shot feedback')).toBeNull();
+    expect(screen.queryByText('NBA 2K27 feedback tuning')).toBeNull();
   });
   it('reloads feedback-adjusted recording timing before a later edit is saved', async () => {
     const state = setup(), id = '57e31ee3-bb31-45b7-adb5-99fb9059ade6';
+    state.activeProfile.gamePack = { id: 'nba2k27' };
     let recording = { id, name: 'Test sequence', channels: 'rightStick', durationMs: 120, frames: [
       { timeMs: 0, state: { buttons: 0, leftTrigger: 0, rightTrigger: 0, leftX: 0, leftY: 0, rightX: 0, rightY: -32767 } },
       { timeMs: 80, state: { buttons: 0, leftTrigger: 0, rightTrigger: 0, leftX: 0, leftY: 0, rightX: 0, rightY: 32767 } }
@@ -154,7 +164,7 @@ describe('controller workflows', () => {
     state.activeProfile.recordings = [{ id, name: recording.name, durationMs: 120, frameCount: 2 }];
     const command = vi.fn(async (action: string) => {
       if (action === 'recordGet') return structuredClone(recording);
-      if (action === 'nbaFeedback') recording = { ...recording, durationMs: 136, frames: [recording.frames[0], { ...recording.frames[1], timeMs: 96 }] };
+      if (action === 'packAction') recording = { ...recording, durationMs: 136, frames: [recording.frames[0], { ...recording.frames[1], timeMs: 96 }] };
       return null;
     });
     render(<ControllerPage state={state} status={state.status} command={command} />);
