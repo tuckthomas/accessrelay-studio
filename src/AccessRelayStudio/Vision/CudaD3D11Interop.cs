@@ -16,7 +16,7 @@ internal sealed class CudaD3D11Interop : IDisposable
 
     internal CudaD3D11Interop(int frameLength, int historyLength)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("D3D11/CUDA preprocessing requires Windows and an NVIDIA driver.");
+        if (!OperatingSystem.IsWindows() || !Environment.Is64BitProcess) throw new PlatformNotSupportedException("D3D11/CUDA preprocessing requires 64-bit Windows and an NVIDIA driver.");
         _frameBytes = checked((nuint)frameLength * 4); _bytes = checked(_frameBytes * (nuint)historyLength);
         if (frameLength <= 0 || historyLength is < 2 or > 16 || _bytes > 64u * 1024 * 1024)
             throw new InvalidDataException("GPU temporal input exceeds its 64 MiB tensor budget.");
@@ -37,6 +37,7 @@ internal sealed class CudaD3D11Interop : IDisposable
 
     internal static nint FindAdapter()
     {
+        if (!OperatingSystem.IsWindows() || !Environment.Is64BitProcess) throw new PlatformNotSupportedException("GPU preprocessing requires 64-bit Windows and an NVIDIA driver.");
         try
         {
             Check(cuInit(0), "initialize the NVIDIA driver"); Check(cuDeviceGet(out int device, 0), "select CUDA device 0");
@@ -133,7 +134,10 @@ internal sealed class CudaD3D11Interop : IDisposable
         public void Dispose() => Check(cuCtxSetCurrent(_previous), "restore the prior CUDA context");
     }
     private static void Check(int result, string action)
-    { if (result != 0) throw new InvalidOperationException($"Could not {action} (CUDA driver result {result}). GPU preprocessing stopped; select CPU preprocessing to recover."); }
+    {
+        if (result == 100) throw new NotSupportedException("No NVIDIA CUDA device is available. Select CPU preprocessing.");
+        if (result != 0) throw new InvalidOperationException($"Could not {action} (CUDA driver result {result}). GPU preprocessing stopped; select CPU preprocessing to recover.");
+    }
 
     public void Dispose()
     {

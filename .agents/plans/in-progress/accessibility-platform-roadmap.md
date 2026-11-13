@@ -374,6 +374,14 @@ format-2 compatibility. Inference/transfer time remains an honest aggregate; no
 GPU shader, buffer interoperability or lock-free optimization is claimed.
 Prerequisites for remaining measurements: Windows capture/GPU and representative runs.
 
+Experimental GPU implementation follow-up: the new
+[GPU RGB preprocessing checklist](gpu-rgb-preprocessing.md) implements the same v2
+RGB contract using D3D11 preparation, owned GPU frame leases and device-bound CUDA
+history. CPU remains the default and the host keeps this mode observation-only.
+Software correctness, backend-specific diagnostics and an executable NVIDIA probe
+are tracked there; actual CUDA interoperability and representative CPU/GPU timings
+remain open. This does not complete the optimization-promotion items above.
+
 Deadline freshness correction: `bfc997ecb7345b1c4d9ed4a97e9640dff94eecd3`. A deterministic
 actual-runtime regression reproduced a release using a pre-lock callback timestamp.
 The callback now reads QPC after acquiring controller ownership. The complete

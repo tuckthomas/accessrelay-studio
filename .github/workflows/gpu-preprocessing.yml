@@ -25,3 +25,17 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Check actual D3D11 WARP shader parity and GPU ownership
         run: dotnet run --project ./src/AccessRelayStudio/WindowsVerification/WindowsVerification.csproj -c Release -- --gpu-preprocessing-only
+      - name: Record CUDA capability without claiming hardware acceptance
+        shell: pwsh
+        run: |
+          dotnet run --project ./src/AccessRelayStudio/WindowsVerification/WindowsVerification.csproj -c Release -- --cuda-preprocessing-probe
+          $probeExit = $LASTEXITCODE
+          if ($probeExit -eq 2) {
+            Write-Host 'CUDA unavailable on this runner. NVIDIA interoperability and inference remain unverified.'
+            exit 0
+          }
+          if ($probeExit -eq 3) {
+            Write-Host 'CUDA tensor probe passed; actual model inference was not requested. Hardware acceptance remains open.'
+            exit 0
+          }
+          exit $probeExit

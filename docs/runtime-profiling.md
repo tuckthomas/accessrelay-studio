@@ -2,8 +2,10 @@
 
 Remote Play → Performance runs & diagnostics reports capture readback/copy,
 preprocessing, inference plus transfers, frame age and frame-to-decision timing.
-The existing CPU path and explicit CUDA selection remain available. No GPU resize
-or lock-free output rewrite is introduced by this instrumentation.
+The existing CPU path and explicit CUDA selection remain available. The optional
+[GPU RGB preparation path](gpu-rgb-preprocessing.md) is experimental and
+observation-only; CPU preparation remains the default. No lock-free output rewrite
+is introduced by this instrumentation.
 
 Readback uses QPC around staging-texture preparation, D3D copy/map, managed row
 copy, sparse fingerprinting and pixel-slot publication. It includes CPU scheduling,
@@ -26,8 +28,10 @@ allocates no objects; percentile work uses bounded copies outside the controller
 lock. Existing generation validation, atomic output arbitration and frame leases are
 preserved. There is no new lock-free ownership path.
 
-Saved performance format 2 includes optional readback and runtime-lock measurements.
-Format 1 remains readable with missing stages unavailable. Cross-format comparisons
+Saved performance format 3 identifies preparation backends, optional image-download
+latency/bytes and small freshness readbacks. Formats 1/2 remain readable with missing
+stages unavailable. Format 2 introduced automatic capture readback and lock measurements.
+Cross-format comparisons
 require a fresh baseline so instrumentation changes cannot masquerade as improvement.
 The existing comparison still requires matching model/settings/profile/camera/crop/
 source size, the same assistance state, no training capture and at least 100 model
@@ -45,10 +49,11 @@ For representative Windows CPU/CUDA evaluation:
 4. Inference/transfer wall time remains an aggregate. Use an appropriate ONNX/GPU
    profiler with validated clock/fence interpretation before attributing it to GPU
    kernels versus host/device transfers. CPU launch timings alone cannot do this.
-5. Consider GPU preprocessing only after measuring the bottleneck and designing
-   explicit D3D/ONNX buffer interoperability. Resize inside ONNX does not remove the
-   existing CPU staging copies. Require numerical parity with the canonical v2 CPU
-   transform, bounded resources and stop/source-change race coverage before promotion.
+5. The experimental GPU path uses explicit D3D11/CUDA buffer interoperability and
+   device-bound model input. Its preparation timings include synchronization and
+   small metadata readbacks, not just GPU arithmetic. Preview/recording may still
+   download images. Run the NVIDIA probe and measure matched real runs before any
+   promotion; WARP parity does not establish NVIDIA interoperability or benefit.
 
 Portable checks cover percentile/count integrity, missing stages, zero-allocation
 recording, profiler ownership/freeze, readback metadata across reused frame slots,

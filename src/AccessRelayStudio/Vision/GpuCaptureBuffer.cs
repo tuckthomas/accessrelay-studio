@@ -38,7 +38,7 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
                 slot.State = 2; _pending = slot; _generation = generation; return true;
             }
         }
-        catch { lock (_gate) slot.State = 0; throw; }
+        catch { lock (_gate) { slot.State = 0; if (_disposed) slot.Dispose(); } throw; }
     }
 
     internal bool TryAcquireLatest(out CapturedVisionFrame? frame)

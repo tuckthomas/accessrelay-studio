@@ -5,7 +5,8 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace EliteScriptStudio.Vision;
 
-/// <summary>Explicit CPU or CUDA session with reusable host tensors; CUDA transfers are measured.</summary>
+/// <summary>Explicit CPU/CUDA session with reusable host tensors or experimental
+/// device-bound RGB history. Producer allocations outlive the native session.</summary>
 /// <remarks>Load, PushFrame and Dispose run on the vision worker. RequestStop may be called from another thread.</remarks>
 internal sealed class VisionModel : IDisposable
 {
@@ -26,6 +27,7 @@ internal sealed class VisionModel : IDisposable
     internal bool CanArm { get; }
     internal string ValidationSummary { get; }
     internal VisionDiagnostics Diagnostics { get; } = new();
+    internal ModelObservation? LatestObservation { get; private set; }
 
     private VisionModel(VisionModelManifest manifest, string manifestHash, VisionSettings settings,
         InferenceSession session, RunOptions runOptions, float[] input, OrtValue inputValue, OrtValue outputValue,
@@ -149,8 +151,9 @@ internal sealed class VisionModel : IDisposable
             binding?.Dispose();
             outputValue?.Dispose();
             inputValue?.Dispose();
-            try { deviceInput?.Dispose(); }
-            finally { run?.Dispose(); session?.Dispose(); }
+            run?.Dispose();
+            try { session?.Dispose(); }
+            finally { deviceInput?.Dispose(); }
         }
     }
 
@@ -239,7 +242,9 @@ internal sealed class VisionModel : IDisposable
         ValidateObservation(_output, Manifest.MaximumPredictionHorizonMs);
         double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         Diagnostics.InferenceCompleted(elapsed, _output[0], _output[1], _output[3], _output[4]);
-        return new(_output[0], _output[1], _output[2], _output[3], _output[4], elapsed);
+        var observation = new ModelObservation(_output[0], _output[1], _output[2], _output[3], _output[4], elapsed);
+        LatestObservation = observation;
+        return observation;
     }
 
     private static void RequireMetadata(IReadOnlyDictionary<string, NodeMetadata> metadata, string name, int[] shape, string kind)
@@ -267,8 +272,9 @@ internal sealed class VisionModel : IDisposable
         _binding?.Dispose();
         _outputs[0].Dispose();
         _inputs[0].Dispose();
-        try { _deviceInput?.Dispose(); }
-        finally { _runOptions.Dispose(); _session.Dispose(); }
+        _runOptions.Dispose();
+        try { _session.Dispose(); }
+        finally { _deviceInput?.Dispose(); }
         Diagnostics.SetStatus("Vision model stopped");
     }
 }

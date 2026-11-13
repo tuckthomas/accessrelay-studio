@@ -42,6 +42,22 @@ internal static class GpuPreprocessingChecks
         Console.WriteLine($"SUCCESS actual D3D11 WARP RGB shader: {cases} gradient/crop/shape/normalization cases; maximum absolute error {maximumError:G9}; exact source fingerprints and player freeze/reset. WARP is not hardware/performance evidence.");
         LeaseChecks();
         OutsidePlayerFreeze(graphics);
+        NonfiniteNormalization(graphics);
+    }
+
+    private static void NonfiniteNormalization(CaptureD3D11 graphics)
+    {
+        nint texture = 0, view = 0;
+        try
+        {
+            texture = Texture(graphics, 1, 1, [255, 255, 255, 255]);
+            Marshal.ThrowExceptionForHR(Method<CreateView>(graphics.NativeDevice, 7)(graphics.NativeDevice, texture, 0, out view));
+            using var shader = new D3D11RgbPreprocessor(graphics, new(1, 1, new(0, 0, 1, 1), 1, 1, [0, 0, 0], [float.Epsilon, 1, 1]));
+            try { shader.Process(view); throw new Exception("Nonfinite GPU input was accepted."); }
+            catch (InvalidDataException) { }
+        }
+        finally { Release(ref view); Release(ref texture); }
+        Console.WriteLine("SUCCESS GPU normalization faults reject nonfinite tensors before CUDA history or inference.");
     }
 
     private static void OutsidePlayerFreeze(CaptureD3D11 graphics)

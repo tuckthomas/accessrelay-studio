@@ -59,6 +59,8 @@ jobs:
           }
       - name: Check controller logic and profiles
         run: dotnet run --project ./src/AccessRelayStudio/Verification/Verification.csproj -c Release
+      - name: Check actual D3D11 RGB shader parity and GPU frame ownership
+        run: dotnet run --project ./src/AccessRelayStudio/WindowsVerification/WindowsVerification.csproj -c Release -- --gpu-preprocessing-only
       - name: Check actual MCP SDK, private IPC, drafts, workers and offline jobs
         shell: pwsh
         run: dotnet run --project ./tools/assistant/Verification/AssistantVerification.csproj -c Release -- --bridge ./artifacts/Run/Mcp/AccessRelayStudio.Mcp.exe --python (Get-Command python).Source

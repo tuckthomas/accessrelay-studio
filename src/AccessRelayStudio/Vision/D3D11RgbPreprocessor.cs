@@ -83,6 +83,7 @@ internal sealed class D3D11RgbPreprocessor : IDisposable
             Marshal.ThrowExceptionForHR(Method<Map>(context, 14)(context, _flagsReadback, 0, 1, 0, out var mapped));
             try { Marshal.Copy(mapped.Data, _metadata, 0, 4); }
             finally { Method<Unmap>(context, 15)(context, _flagsReadback, 0); }
+            if (_metadata[3] != 0) throw new InvalidDataException("GPU RGB normalization produced nonfinite values. Review the model normalization or select CPU preparation.");
             _previous = next; _hasPrevious = true;
             return new(_rgb[next], _metadata[0] != 0, (uint)_metadata[1] | ((ulong)(uint)_metadata[2] << 32));
         }
@@ -159,6 +160,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     precise float3 second = p01 + (p11 - p01) * sx.fraction;
     precise float3 unit = (first + (second - first) * sy.fraction) / 255.0f;
     precise float3 rgb = (unit - Mean.rgb) / StandardDeviation.rgb;
+    if (!all(isfinite(rgb))) { uint ignored; InterlockedOr(Flags[3], 1u, ignored); }
     uint offset = id.y * Width + id.x, plane = Width * Height;
     Output[offset] = rgb.r; Output[plane + offset] = rgb.g; Output[2 * plane + offset] = rgb.b;
     if (!HasPrevious || rgb.r != Previous[offset] || rgb.g != Previous[plane + offset] || rgb.b != Previous[2 * plane + offset]) {

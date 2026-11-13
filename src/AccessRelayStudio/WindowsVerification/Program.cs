@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args.Contains("--cuda-preprocessing-probe", StringComparer.Ordinal))
+{
+    Environment.ExitCode = CudaPreprocessingProbe.Run(args);
+    return;
+}
+
 if (args.Contains("--gpu-preprocessing-only", StringComparer.Ordinal))
 {
     GpuPreprocessingChecks.Run();
