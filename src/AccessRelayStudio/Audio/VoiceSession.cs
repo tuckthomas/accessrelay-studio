@@ -15,7 +15,6 @@ public sealed class VoiceSession : IDisposable
 {
     private readonly object _gate = new();
     private VoiceStream? _stream;
-    private NeuralVoicePreview? _preview;
     private string _message = "Voice processing is off.";
     private string? _error;
     private bool _disposed;
@@ -26,8 +25,6 @@ public sealed class VoiceSession : IDisposable
         {
             lock (_gate)
             {
-                if (_preview is { } preview)
-                    return preview.Status;
                 return _stream is { } stream
                     ? new(true, _message, stream.InputPeak, stream.OutputPeak, stream.BufferedMilliseconds)
                     : new(false, _message, 0, 0, 0, _error);
@@ -47,25 +44,14 @@ public sealed class VoiceSession : IDisposable
     internal async Task StartPreviewAsync(string microphoneId, string outputId, VoiceSettings settings,
         VoiceModelOption model, VoiceProfile? profile, CancellationToken cancellation)
     {
-        if (!model.UsesReference)
-        {
-            StartStream(microphoneId, outputId, settings, null, null, null, cancellation);
-            return;
-        }
-
-        var neural = (await OpenModelAsync(model, profile, cancellation).ConfigureAwait(false))!;
+        var neural = await OpenModelAsync(model, profile, cancellation).ConfigureAwait(false);
         try
         {
-            lock (_gate)
-            {
-                EnsureCanStart(cancellation);
-                _error = null;
-                _preview = new NeuralVoicePreview(microphoneId, outputId, settings, neural, OnPreviewFinished);
-            }
+            StartStream(microphoneId, outputId, settings, null, null, neural, cancellation);
         }
         catch
         {
-            neural.Dispose();
+            neural?.Dispose();
             throw;
         }
     }
@@ -156,7 +142,7 @@ public sealed class VoiceSession : IDisposable
     {
         cancellation.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_stream is not null || _preview is not null)
+        if (_stream is not null)
             throw new InvalidOperationException("Stop the current voice session before starting a new one.");
     }
 
@@ -165,7 +151,6 @@ public sealed class VoiceSession : IDisposable
         lock (_gate)
         {
             _stream?.SetSettings(settings);
-            _preview?.SetSettings(settings);
         }
     }
 
@@ -175,31 +160,13 @@ public sealed class VoiceSession : IDisposable
 
     private void Stop(bool disposing)
     {
-        NeuralVoicePreview? preview;
         lock (_gate)
         {
             if (disposing)
                 _disposed = true;
             StopStream();
-            preview = _preview;
-            preview?.RequestStop();
             _message = "Voice processing is off.";
             _error = null;
-        }
-        preview?.WaitForStop();
-    }
-
-    private void OnPreviewFinished(NeuralVoicePreview preview, string message, bool failed)
-    {
-        lock (_gate)
-        {
-            bool stopped = preview.StopRequested;
-            preview.DisposeCancellation();
-            if (_preview != preview)
-                return;
-            _preview = null;
-            _message = stopped ? "Voice processing is off." : message;
-            _error = !stopped && failed ? message : null;
         }
     }
 

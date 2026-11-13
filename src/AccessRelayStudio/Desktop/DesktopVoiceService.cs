@@ -92,7 +92,7 @@ internal sealed class DesktopVoiceService : IDesktopModule
         selectedProfileId = _selectedProfileId, selectedModelId = _selectedModelId,
         microphoneId = _microphoneId, outputId = _outputId, destination = _destination, settings = _settings,
         musicRemovalAvailable = VoiceMusicRemoval.IsAvailable, profileDirectory = _profiles.DirectoryPath,
-        virtualMicIssue = VirtualMicPipe.SetupIssue, referencePreviewSeconds = NeuralVoicePreview.CaptureSeconds,
+        virtualMicIssue = VirtualMicPipe.SetupIssue,
         clip = _source is null ? null : new
         {
             id = _clipId, name = _clipName, durationMs = _waveform?.Duration.TotalMilliseconds ?? 0,
@@ -370,7 +370,7 @@ internal sealed class DesktopVoiceService : IDesktopModule
                 throw new InvalidOperationException("Stop voice before switching between built-in effects and a reference model.");
             if (model.UsesReference)
             {
-                if (_destination == "headphones") throw new InvalidOperationException("Stop the recorded preview before changing its voice.");
+                if (_destination == "headphones") throw new InvalidOperationException("Stop the live preview before changing its voice.");
                 await RunAsync("switch", $"Loading {profile.Name}…", token => _session.SwitchVirtualProfileAsync(model, profile, token));
             }
         }

@@ -139,7 +139,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
           <div className="voice-destination-title"><span className="voice-step-number">3</span><h3>Where should it go?</h3></div>
           <div className="voice-destinations" role="group" aria-label="Voice destination">
             <button type="button" className={'voice-destination ' + (route.destination === 'headphones' ? 'selected' : '')} disabled={routeLocked}
-              onClick={() => setRoute({ ...route, destination: 'headphones' })}><Icon name="headphones" /><span><strong>Headphones</strong><small>Hear a preview first</small></span>{route.destination === 'headphones' && <Icon name="check" size={17} />}</button>
+              onClick={() => setRoute({ ...route, destination: 'headphones' })}><Icon name="headphones" /><span><strong>Headphones</strong><small>Hear a live preview</small></span>{route.destination === 'headphones' && <Icon name="check" size={17} />}</button>
             <button type="button" className={'voice-destination ' + (route.destination === 'virtual' ? 'selected' : '')} disabled={routeLocked}
               onClick={() => setRoute({ ...route, destination: 'virtual' })}><Icon name="mic" /><span><strong>Virtual microphone</strong><small>Use in other apps</small></span>{route.destination === 'virtual' && <Icon name="check" size={17} />}</button>
           </div>
@@ -147,7 +147,6 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
             <Field label="Playback device"><select aria-label="Voice preview playback device" value={route.outputId} disabled={routeLocked}
               onChange={event => setRoute({ ...route, outputId: event.target.value })}>{!outputs.length && <option value="">No playback device found</option>}
               {outputs.map(device => <option key={device.id} value={device.id}>{device.name}{device.isDefault ? ' · Default' : ''}</option>)}</select></Field>
-            {neural && <p className="field-hint">Reference preview records {state.referencePreviewSeconds || 3} seconds of speech, then plays the converted result. Built-in effects use live playback.</p>}
           </> : <p className="field-hint">After starting, select <strong>AccessRelay Virtual Microphone</strong> in Xbox, Discord or another Windows app.</p>}
           {route.destination === 'virtual' && state.virtualMicIssue && <Notice tone="warning">{state.virtualMicIssue} Check Settings for virtual-device setup.</Notice>}
           <div className="voice-start-row">

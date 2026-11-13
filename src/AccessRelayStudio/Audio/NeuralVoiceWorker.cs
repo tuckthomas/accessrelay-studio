@@ -151,34 +151,6 @@ internal sealed class NeuralVoiceWorker : IDisposable
         catch (Exception) when (stop.IsCancellationRequested) { }
     }
 
-    public async Task<float[]> ConvertPreviewAsync(float[] samples, CancellationToken stop)
-    {
-        var packets = new AudioPackets(_process);
-        var converted = new float[samples.Length];
-        int written = 0;
-        for (int offset = 0; offset < samples.Length; offset += BlockSamples)
-        {
-            int count = Math.Min(BlockSamples, samples.Length - offset);
-            await AppendAsync(samples.AsMemory(offset, count)).ConfigureAwait(false);
-        }
-
-        // Let streaming models emit their lookahead and queued output after the last speech block.
-        const int flushBlocks = 3;
-        for (int index = 0; index < flushBlocks && written < converted.Length; index++)
-            await AppendAsync(ReadOnlyMemory<float>.Empty).ConfigureAwait(false);
-        if (written != converted.Length)
-            throw new InvalidDataException("The AI model did not return a complete preview.");
-        return converted;
-
-        async Task AppendAsync(ReadOnlyMemory<float> block)
-        {
-            int count = await packets.ConvertAsync(block, stop).ConfigureAwait(false);
-            count = Math.Min(count, converted.Length - written);
-            packets.Samples.AsSpan(0, count).CopyTo(converted.AsSpan(written));
-            written += count;
-        }
-    }
-
     private sealed class AudioPackets(Process process)
     {
         private readonly Stream _input = process.StandardInput.BaseStream;

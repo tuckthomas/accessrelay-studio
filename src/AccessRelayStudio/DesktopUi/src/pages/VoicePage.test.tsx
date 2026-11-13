@@ -25,13 +25,24 @@ describe('voice workflows', () => {
     expect(screen.getByRole('button', { name: 'Try this voice' })).toBeTruthy();
   });
 
-  it('saves the explicit native route before requesting a preview', async () => {
+  it.each([false, true])('saves the native route before starting live preview (reference voice: %s)', async usesReference => {
     const command = vi.fn().mockResolvedValue(null);
-    render(<VoicePage state={fixture()} status={null} command={command} />);
+    render(<VoicePage state={fixture({ models: [{ id: 'builtin', name: 'Selected voice model', usesReference }] })} status={null} command={command} />);
     fireEvent.click(screen.getByRole('button', { name: 'Try this voice' }));
     await waitFor(() => expect(command).toHaveBeenCalledTimes(2));
     expect(command.mock.calls[0]).toEqual(['routeSave', { microphoneId: 'mic-one', outputId: 'phones-one', destination: 'headphones' }]);
     expect(command.mock.calls[1]).toEqual(['start']);
+  });
+
+  it('keeps a reference voice preview live until explicitly stopped', async () => {
+    const command = vi.fn().mockResolvedValue(null);
+    const state = fixture({ models: [{ id: 'builtin', name: 'Reference model', usesReference: true }] });
+    render(<VoicePage state={state} status={{ ...state.status, isRunning: true, message: 'Voice processing is live' }} command={command} />);
+    expect(screen.getByText('Voice is live')).toBeTruthy();
+    expect(screen.queryByText(/Reference preview records/)).toBeNull();
+    expect(command).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop voice' }));
+    await waitFor(() => expect(command).toHaveBeenCalledExactlyOnceWith('stop'));
   });
 
   it('shows route errors and never starts output after a failed route save', async () => {
