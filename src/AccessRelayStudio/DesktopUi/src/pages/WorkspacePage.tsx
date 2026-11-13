@@ -152,9 +152,8 @@ function ResourceUse({ metrics, enabled, busy, onToggle }: { metrics: SystemStat
       </div>
       <div className="resource-host"><div className="resource-status"><strong>Studio host process</strong></div>
         <dl className="resource-host-values"><div><dt>CPU · share of PC</dt><dd>{percent(metrics.appCpuPercent)}</dd></div>
-          <div><dt>RAM in use</dt><dd>{bytes(metrics.appMemoryBytes)}</dd></div><div><dt>Private memory</dt><dd>{bytes(metrics.appPrivateBytes)}</dd></div>
+          <div><dt>RAM in use</dt><dd>{bytes(metrics.appMemoryBytes)}</dd></div><div><dt>App memory allocated</dt><dd>{bytes(metrics.appPrivateBytes)}</dd></div>
           <div><dt>Threads</dt><dd>{metrics.appThreadCount ?? '—'}</dd></div></dl></div>
-      <p className="subtle resource-sampling-note">Sampling pauses away from Workspace and while the app is minimized. The on/off choice is saved.</p>
     </>}
   </Card>;
 }
