@@ -2,7 +2,7 @@ import { selectValue } from '../select-test-helper';
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { Nba2K27VisionWorkspace as VisionPage } from '../game-plugins/nba2k27/VisionWorkspace';
+import { VisionPage } from './VisionPage';
 import { hasUnsavedChanges } from '../ui';
 
 afterEach(cleanup);
@@ -11,7 +11,7 @@ const profile = { id: '4b904b4a-c48f-46e6-aa49-cd09637f2c9b', name: 'Stretch Big
   base: 'Current base', upperRelease1: 'Current upper one', upperRelease2: 'Current upper two', usesShotMeter: true,
   meterReleaseType: 'Reviewed cue', shotSpeed: 4, release1Percent: 50, cameraView: '2K' };
 function fixture(overrides: any = {}) {
-  return { profiles: [profile], selectedProfile: profile, selectedFingerprint: 'native-profile-fingerprint',
+  return { plugins: [{ id: 'nba2k27', name: 'NBA 2K27' }], selectedPluginId: 'nba2k27', profiles: [profile], selectedProfile: profile, selectedFingerprint: 'native-profile-fingerprint',
     sources: [{ id: 'window-one', title: 'Xbox Remote Play', processId: 100 }, { id: 'window-two', title: 'Another Remote Play window', processId: 200 }],
     selectedSourceId: 'window-one', models: [], modelScanComplete: true,
     settings: { executionProvider: 'cuda', shootButton: 'x', minimumConfidence: .9, crop: all, trainingCapture: {

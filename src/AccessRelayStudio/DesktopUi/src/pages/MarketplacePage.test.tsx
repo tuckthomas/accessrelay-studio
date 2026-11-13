@@ -24,7 +24,8 @@ it('opens an available NBA training workspace without downloading scripts or sta
     command={command} openTraining={openTraining} />);
   fireEvent.click(screen.getByRole('button', { name: 'Open training', exact: true }));
   await waitFor(() => expect(openTraining).toHaveBeenCalledWith('nba2k27'));
-  expect(screen.getByRole('button', { name: 'Installed' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Installed' })).toBeNull();
+  expect(screen.getByRole('button', { name: /View source/ })).toBeTruthy();
   expect(command).not.toHaveBeenCalled();
 });
 it('filters scripts/plugins using shared controls and keeps already-installed items disabled', () => {

@@ -45,11 +45,12 @@ export function MarketplacePage({ state, command, openTraining }: { state: any; 
     {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
     {busy === 'refresh' && !catalog?.loaded ? <Card><p>Loading marketplace…</p></Card> : entries.length ? <div className="marketplace-grid">{entries.map(entry => <Card key={entry.id + entry.version} className="marketplace-item">
       <div className="row"><Icon name={entry.kind === 'script' ? 'code' : entry.kind === 'training-plugin' ? 'camera' : 'gamepad'} size={24} /><span className="subtle">{kinds[entry.kind]}</span></div>
-      <h2>{entry.name}</h2><p>{entry.description}</p><p className="subtle">{entry.author} · {entry.version}</p><p className="subtle">{entry.license}</p>
+      <h2 title={entry.name}>{entry.name}</h2><p className="marketplace-item-description" title={entry.description}>{entry.description}</p>
+      <div className="marketplace-item-meta"><p className="subtle" title={`${entry.author} · ${entry.version}`}>{entry.author} · {entry.version}</p><p className="subtle" title={entry.license}>{entry.license}</p></div>
       <div className="marketplace-item-actions">
         {entry.installed && entry.trainingPluginId && openTraining && <Button variant="primary" disabled={!!busy} busy={busy === entry.id + ':training'} onClick={() => void train(entry)}><Icon name="camera" size={17} />Open training</Button>}
-        <Button variant={entry.trainingPluginId ? 'secondary' : 'primary'} disabled={!!busy || entry.installed} busy={busy === entry.id} onClick={() => void run('install', { id: entry.id, version: entry.version })}>
-          <Icon name={entry.installed ? 'check' : 'download'} size={17} />{entry.installed ? 'Installed' : 'Install'}</Button>
+        {!(entry.installed && entry.trainingPluginId && openTraining) && <Button variant="primary" disabled={!!busy || entry.installed} busy={busy === entry.id} onClick={() => void run('install', { id: entry.id, version: entry.version })}>
+          <Icon name={entry.installed ? 'check' : 'download'} size={17} />{entry.installed ? 'Installed' : 'Install'}</Button>}
         <Button variant="ghost" onClick={() => openSource(entry)}>View source<Icon name="arrowUpRight" size={16} /></Button></div>
     </Card>)}</div> : <EmptyState icon="store" title={query || kind !== 'all' || game !== 'all' ? 'No matching packages' : 'No packages available'}
       description={query || kind !== 'all' || game !== 'all' ? 'Change the search or filters.' : 'Use the community repository to contribute a package.'} />}
