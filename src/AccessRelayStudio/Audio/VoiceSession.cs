@@ -6,7 +6,13 @@ namespace EliteScriptStudio.Audio;
 
 public enum VoicePreset { Clean, Warm, Bright, Deep, Radio }
 
-public sealed record VoiceSettings(VoicePreset Preset, double PitchSemitones, double GainDb, bool Muted);
+public sealed record VoiceSettings(VoicePreset Preset, double PitchSemitones, double GainDb, bool Muted)
+{
+    public VoiceEffects Effects { get; init; } = new();
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsValid => Enum.IsDefined(Preset) && double.IsFinite(PitchSemitones) && PitchSemitones is >= -12 and <= 12
+        && double.IsFinite(GainDb) && GainDb is >= -18 and <= 12 && Effects is { IsValid: true };
+}
 public sealed record VoiceEndpoint(string Id, string Name, bool IsDefault);
 public sealed record VoiceDevices(VoiceEndpoint[] Microphones, VoiceEndpoint[] Outputs);
 public sealed record VoiceStatus(bool IsRunning, string Message, float InputPeak, float OutputPeak, int BufferedMilliseconds, string? Error = null);
@@ -319,7 +325,7 @@ public sealed class VoiceSession : IDisposable
         public void SetSettings(VoiceSettings settings)
         {
             lock (_workerGate)
-                _signal.SetSettings(_neural is null ? settings : settings with { Preset = VoicePreset.Clean, PitchSemitones = 0 });
+                _signal.SetSettings(settings);
         }
 
         public async Task<NeuralVoiceWorker?> ReplaceWorkerAsync(NeuralVoiceWorker replacement, CancellationToken cancellation)

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react';
 import { VoiceCommands } from '../VoiceCommands';
+import { VoiceEffectsPanel } from '../VoiceEffectsPanel';
+import { useLiveVoiceSettings } from '../useLiveVoiceSettings';
 import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, hasUnsavedChanges, useUnsavedChanges, type PageProps } from '../ui';
 
-type VoiceSettings = { preset: string; pitchSemitones: number; gainDb: number; muted: boolean };
-const defaultSettings: VoiceSettings = { preset: 'clean', pitchSemitones: 0, gainDb: 0, muted: false };
 const presets = [{ id: 'clean', label: 'Natural', detail: 'Uncolored and clear' }, { id: 'warm', label: 'Warm', detail: 'Soft and rounded' },
   { id: 'bright', label: 'Bright', detail: 'Crisp and present' }, { id: 'deep', label: 'Deep', detail: 'A fuller tone' }, { id: 'radio', label: 'Radio', detail: 'Focused and compact' }];
 const seconds = (ms: number) => (ms / 1000).toFixed(3);
@@ -16,7 +16,8 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [route, setRoute] = useState({ microphoneId: state.microphoneId || '', outputId: state.outputId || '', destination: state.destination || 'virtual' });
-  const [settings, setSettings] = useState<VoiceSettings>({ ...defaultSettings, ...state.settings });
+  const live = useLiveVoiceSettings(state.settings, command, setError);
+  const { settings } = live;
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorName, setEditorName] = useState('');
   const [effectsOpen, setEffectsOpen] = useState(false);
@@ -43,17 +44,13 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
   const clipCanSave = selectionMs >= 1000 && selectionMs <= 30_000 && !!editorName.trim();
   const microphones: any[] = state.devices?.microphones || [];
   const outputs: any[] = state.devices?.outputs || [];
-  const tone = (value: any) => JSON.stringify([value?.preset || 'clean', value?.pitchSemitones || 0, value?.gainDb || 0]);
-  const effectsDirty = tone(settings) !== tone(state.settings);
   const clipDirty = !!clip && !!clipBaseline && clipBaseline.id === clip.id && (trim.startMs !== clipBaseline.startMs || trim.endMs !== clipBaseline.endMs || editorName !== clipBaseline.name);
   const effectsNameDirty = effectsOpen && (effectsName !== effectsBaseline.name || replaceEffects !== effectsBaseline.replace);
   const profileNameDirty = !!nameAction && nameAction.name !== nameAction.originalName;
-  useUnsavedChanges(effectsDirty || clipDirty || effectsNameDirty || profileNameDirty);
+  useUnsavedChanges(clipDirty || effectsNameDirty || profileNameDirty);
 
   useEffect(() => { setRoute({ microphoneId: state.microphoneId || '', outputId: state.outputId || '', destination: state.destination || 'virtual' }); },
     [state.microphoneId, state.outputId, state.destination]);
-  useEffect(() => { setSettings({ ...defaultSettings, ...state.settings }); },
-    [state.settings?.preset, state.settings?.pitchSemitones, state.settings?.gainDb]);
   useEffect(() => {
     if (!clip) { setClipBaseline(null); setEditorName(''); setTrim({ startMs: 0, endMs: 0 }); return; }
     setTrim({ startMs: clip.startMs || 0, endMs: clip.endMs || 0 });
@@ -67,10 +64,9 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
 
   type DraftScope = 'effects' | 'clip' | 'effectsName' | 'profileName';
   function transition(action: () => void, scopes: DraftScope[]) {
-    const dirty = { effects: effectsDirty, clip: clipDirty, effectsName: effectsNameDirty, profileName: profileNameDirty };
+    const dirty = { effects: false, clip: clipDirty, effectsName: effectsNameDirty, profileName: profileNameDirty };
     if (!scopes.some(scope => dirty[scope])) { action(); return; }
     setNextAction(() => () => {
-      if (scopes.includes('effects')) setSettings({ ...defaultSettings, ...state.settings });
       if (scopes.includes('clip') && clipBaseline) {
         setTrim({ startMs: clipBaseline.startMs, endMs: clipBaseline.endMs }); setEditorName(clipBaseline.name); setPlayhead(clipBaseline.startMs);
       }
@@ -87,7 +83,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
 
   async function execute(key: string, action: () => Promise<any>) {
     setBusy(key); setError('');
-    try { return await action(); }
+    try { await live.flush(); return await action(); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); return undefined; }
     finally { setBusy(''); }
   }
@@ -154,26 +150,15 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
               : <Button variant="primary" busy={busy === 'start'} disabled={blocked || !route.microphoneId || (route.destination === 'headphones' && !route.outputId)} onClick={() => void execute('start', async () => {
                 await command('routeSave', route); await command('start');
               })}><Icon name={route.destination === 'headphones' ? 'play' : 'mic'} size={18} />{route.destination === 'headphones' ? 'Try this voice' : 'Start virtual microphone'}</Button>}
-            <Button variant={state.settings?.muted ? 'secondary' : 'ghost'} disabled={blocked} onClick={() => void run('muteSet', { muted: !state.settings?.muted })}>
-              <Icon name="volume" size={18} />{state.settings?.muted ? 'Unmute' : 'Mute'}</Button>
+            <Button variant={settings.muted ? 'secondary' : 'ghost'} disabled={blocked} onClick={() => live.update({ muted: !settings.muted })}>
+              <Icon name="volume" size={18} />{settings.muted ? 'Unmute' : 'Mute'}</Button>
           </div>
           <p className="voice-session-message" aria-live="polite">{status.message || 'Voice processing is off.'}{isRunning && status.bufferedMilliseconds > 0 ? ` · ${status.bufferedMilliseconds} ms audio queued` : ''}</p>
         </Card>
       </div>
-      <Card title="Make it your own" description={neural ? 'Reference models control the voice character. Adjust the output level here.' : 'Choose a starting tone, then make small adjustments.'}
-        actions={<Button onClick={() => openEffects(selected?.kind === 'effects')} disabled={blocked || neural}><Icon name="save" size={17} />Save voice settings</Button>}>
-        {!neural && <div className="voice-presets" role="group" aria-label="Built-in voice tone">{presets.map(preset => <button type="button" key={preset.id}
-          aria-pressed={settings.preset === preset.id} disabled={blocked} className={'voice-preset ' + (settings.preset === preset.id ? 'selected' : '')}
-          onClick={() => setSettings({ ...settings, preset: preset.id })}><strong>{preset.label}</strong><span>{preset.detail}</span></button>)}</div>}
-        <div className="voice-tuning">
-          {!neural && <Field label={<span>Pitch <strong>{settings.pitchSemitones > 0 ? '+' : ''}{settings.pitchSemitones.toFixed(1)} semitones</strong></span>}>
-            <input aria-label="Voice pitch in semitones" type="range" min="-8" max="8" step="0.1" value={settings.pitchSemitones} disabled={blocked}
-              onChange={event => setSettings({ ...settings, pitchSemitones: Number(event.target.value) })} /></Field>}
-          <Field label={<span>Output gain <strong>{settings.gainDb > 0 ? '+' : ''}{settings.gainDb.toFixed(1)} dB</strong></span>}>
-            <input aria-label="Voice output gain in decibels" type="range" min="-18" max="12" step="0.5" value={settings.gainDb} disabled={blocked}
-              onChange={event => setSettings({ ...settings, gainDb: Number(event.target.value) })} /></Field>
-          <div className="stack"><span className="saved-note">{effectsDirty ? 'Unapplied adjustments' : 'Adjustments applied'}</span><Button onClick={() => void run('settingsSave', { settings: { ...settings, muted: state.settings?.muted === true } })} disabled={blocked}>Apply adjustments</Button></div>
-        </div>
+      <Card title="Voice effects"
+        actions={<Button onClick={() => neural ? void run('profileSaveProcessing') : openEffects(selected?.kind === 'effects')} disabled={blocked || (neural && !selected)}><Icon name="save" size={17} />Save voice settings</Button>}>
+        <VoiceEffectsPanel settings={settings} disabled={blocked} update={live.update} />
       </Card>
     </> : tab === 'library' ? <>
       <Card className="voice-library-intro"><div><span className="eyebrow">VOICE LIBRARY</span><h2>A collection that sounds like you.</h2>
@@ -324,5 +309,6 @@ function VoiceWaveform({ bins, durationMs, startMs, endMs, positionMs, disabled,
 }
 
 const voiceCss = `
+.voice-effects-panel{display:grid;gap:18px}.voice-effects-toolbar{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.voice-effects-toolbar>.field{min-width:230px;flex:1}.voice-effects-toolbar>.toggle-row{min-width:180px}.voice-effect-group{border-top:1px solid var(--line);padding-top:18px}.voice-effect-group>summary{font-size:17px;font-weight:650;cursor:pointer;padding:4px 0}.voice-effect-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}.voice-effect{border:1px solid var(--line);border-radius:12px;padding:14px}.voice-effect>summary{font-weight:600;cursor:pointer}.voice-effect[data-active=true]>summary{color:var(--accent)}.voice-effect>.toggle-row{margin-top:16px}.voice-effect-controls{display:grid;gap:14px;min-width:0}.voice-effect-controls>.field{margin-top:12px}.voice-eq-heading{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:18px}.voice-equalizer{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px}.voice-equalizer .field{min-width:0}.voice-equalizer .field-label{font-size:14px}@media(max-width:850px){.voice-effect-grid{grid-template-columns:1fr}.voice-equalizer{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .voice-page .muted{color:var(--muted)}.voice-workbench{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(400px,1.2fr);gap:22px}.voice-route-card,.voice-output-card{display:flex;flex-direction:column;gap:20px}.voice-card-title{display:flex;align-items:center;gap:12px}.voice-card-title h2,.voice-card-title p{margin:0}.voice-card-title p{margin-top:5px}.voice-step-number{display:grid;place-items:center;width:30px;height:30px;border:1px solid var(--line);border-radius:50%;font-size:14px;font-weight:700;color:var(--accent);flex:none}.voice-path{display:flex;align-items:center;gap:12px;color:var(--muted);padding:0 10px}.voice-path span{height:1px;flex:1;background:var(--line)}.voice-output-card{background:var(--surface);}.voice-output-heading{display:flex;justify-content:space-between;align-items:center}.voice-large-icon{width:68px;height:68px;border-radius:22px;background:var(--icon-bg);display:grid;place-items:center;color:var(--accent)}.voice-output-card>h2{font-size:27px;letter-spacing:-.6px;margin:0}.voice-output-card>p{margin:0;line-height:1.6}.voice-meter-pair{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:8px 0}.voice-destination-title{display:flex;align-items:center;gap:12px}.voice-destination-title h3{margin:0;font-size:16px}.voice-destinations{display:grid;grid-template-columns:1fr 1fr;gap:12px}.voice-destination{border:1px solid var(--line);border-radius:14px;display:flex;align-items:center;gap:12px;padding:16px;text-align:left;background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}.voice-destination.selected{border-color:var(--accent);background:var(--selected);box-shadow:0 0 0 1px var(--accent)}.voice-destination span{flex:1;display:grid;gap:5px}.voice-destination strong{font-size:14px}.voice-destination small{font-size:14px;color:var(--muted)}.voice-start-row{display:flex;gap:10px;align-items:center}.voice-session-message{font-size:14px;color:var(--muted);min-height:22px}.voice-presets{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:22px}.voice-preset{padding:17px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font:inherit;color:var(--ink);text-align:left;cursor:pointer;display:grid;gap:7px}.voice-preset.selected{border-color:var(--accent);background:var(--selected)}.voice-preset span{font-size:14px;color:var(--muted)}.voice-tuning{display:flex;align-items:end;gap:25px}.voice-tuning .field{flex:1}.voice-tuning .field label span{display:flex;justify-content:space-between;gap:10px}.voice-tuning .field label strong{font-weight:500;color:var(--accent);white-space:nowrap}.voice-library-intro{display:flex;align-items:center;justify-content:space-between;gap:25px;padding:30px}.voice-library-intro h2{margin-top:12px;font-size:24px;letter-spacing:-.4px}.voice-library-intro p{line-height:1.6;max-width:530px}.voice-library-actions{display:flex;flex-direction:column;gap:10px;flex:none}.voice-library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.voice-library-card{display:flex;flex-direction:column;gap:17px}.voice-library-card h3,.voice-library-card p{margin:0}.voice-library-card-top{display:flex;align-items:center;justify-content:space-between}.voice-profile-avatar{display:grid;place-items:center;width:55px;height:55px;border-radius:18px;background:var(--icon-bg);color:var(--accent)}.voice-profile-avatar.reference{background:var(--icon-bg);color:var(--navy)}.voice-library-card-actions{display:flex;justify-content:space-between;align-items:center;margin-top:auto}.voice-page button:disabled{cursor:not-allowed}.voice-editor-content{display:grid;gap:22px}.voice-editor-file{display:flex;align-items:center;justify-content:space-between;gap:15px}.voice-editor-file>span{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.voice-trim-fields{display:grid;grid-template-columns:1fr 1fr auto;gap:20px;align-items:end}.voice-selection-length{display:grid;gap:7px;padding-bottom:9px;white-space:nowrap}.voice-selection-length strong{font-size:22px;color:var(--accent)}.voice-editor-transport{display:flex;align-items:center;gap:15px}.voice-cleanup{border:1px solid var(--line);border-radius:12px;padding:15px}.voice-cleanup summary{display:flex;align-items:center;gap:9px;font-weight:600;cursor:pointer}.voice-cleanup summary .muted{margin-left:auto;font-weight:400}.voice-cleanup[open]>p{margin:15px 0}.voice-wave-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:25px}.voice-wave-surface{position:relative;background:var(--surface-inset);border-radius:8px;border:1px solid var(--line);height:150px;margin:0 10px}.voice-wave-surface svg{width:100%;height:100%;display:block}.voice-wave-shade{position:absolute;top:0;bottom:0;background:var(--wave-shade);pointer-events:none}.voice-wave-selection{position:absolute;top:0;bottom:0;background:#98f9c31c;border-top:2px solid var(--accent);border-bottom:2px solid var(--accent);pointer-events:none}.voice-wave-handle{position:absolute;top:0;bottom:0;transform:translateX(-50%);border:0;width:15px;background:transparent;cursor:ew-resize;touch-action:none;z-index:2}.voice-wave-handle:before{content:'';position:absolute;inset:0 6px;background:var(--accent)}.voice-wave-handle span{position:absolute;top:-25px;font-size:14px;font-weight:600;color:var(--accent);white-space:nowrap}.voice-wave-start span{left:5px}.voice-wave-end span{right:5px}.voice-wave-playhead{position:absolute;top:0;bottom:0;border-left:1px solid var(--navy);pointer-events:none;z-index:1}.voice-wave-ruler{display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-top:9px}.voice-page input[type=range]{width:100%;accent-color:var(--accent)}@media(max-width:1200px){.voice-workbench{grid-template-columns:1fr}.voice-route-card{display:grid;grid-template-columns:1fr 1fr;align-items:center}.voice-route-card .voice-path{display:none}.voice-library-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.voice-presets{grid-template-columns:repeat(3,1fr)}}@media(max-width:850px){.voice-destinations,.voice-meter-pair,.voice-library-grid,.voice-route-card{grid-template-columns:1fr}.voice-library-intro,.voice-tuning{display:flex;align-items:stretch;flex-direction:column}.voice-presets{grid-template-columns:repeat(2,1fr)}.voice-trim-fields{grid-template-columns:1fr 1fr}.voice-selection-length{grid-column:1/-1}.voice-editor-file{align-items:flex-start;flex-direction:column}.voice-tuning .field{width:100%}}
 `;

@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args.Contains("--voice-effects-only", StringComparer.Ordinal))
+{
+    VoiceEffectsChecks.Run();
+    return;
+}
+
 if (args.Contains("--preview-source", StringComparer.Ordinal))
 {
     PreviewSessionChecks.RunSource();

@@ -74,7 +74,7 @@ internal sealed class DesktopVoiceService : IDesktopModule
             _selectedModelId = _models.FirstOrDefault(model => model.SelectionKey == selection?.ModelPackage)?.SelectionKey
                 ?? (selected?.Effects is null && selected is not null ? _models.FirstOrDefault(model => model.UsesReference)?.SelectionKey : null)
                 ?? "builtin";
-            if (selected?.Effects is { } settings) _settings = settings with { Muted = false };
+            if ((selected?.Effects ?? selected?.Processing) is { } settings) _settings = settings with { Muted = false };
         }
         catch (Exception error) { _message = "Voice setup could not be loaded. " + error.Message; }
     }
@@ -219,6 +219,12 @@ internal sealed class DesktopVoiceService : IDesktopModule
                 case "muteSet":
                     _settings = _settings with { Muted = args.Flag("muted") };
                     _session.SetSettings(EffectiveSettings()); return null;
+                case "profileSaveProcessing":
+                    RequireIdle();
+                    var referenceProfile = SelectedProfile ?? throw new InvalidOperationException("Choose a saved reference voice first.");
+                    if (referenceProfile.ReferencePath is null) throw new InvalidOperationException("Choose a reference voice.");
+                    UpdateMetadata(referenceProfile.Id, referenceProfile.Name, null, _settings with { Muted = false });
+                    ReloadProfiles(); _message = "Voice settings saved."; return null;
                 case "profileSaveEffects":
                     RequireIdle();
                     if (_session.Status.IsRunning && SelectedModel.UsesReference)
@@ -243,6 +249,7 @@ internal sealed class DesktopVoiceService : IDesktopModule
                     string copyName = ValidName(args.Text("name", original.Name + " copy"));
                     var copy = original.Effects is { } originalEffects ? _profiles.SaveEffects(copyName, originalEffects)
                         : await RunAsync("save", "Duplicating the voice profile…", token => _profiles.ImportAsync(copyName, original.ReferencePath!, token));
+                    if (original.Processing is { } processing) { ReloadProfiles(); UpdateMetadata(copy.Id, copyName, null, processing); }
                     ReloadProfiles(); _message = "Voice profile duplicated."; return new { copy.Id };
                 case "profileDelete":
                     RequireStopped(); var deleted = FindProfile(args.Id());
@@ -375,7 +382,8 @@ internal sealed class DesktopVoiceService : IDesktopModule
             }
         }
         _selectedModelId = ModelId(model); _selectedProfileId = id.ToString();
-        if (profile.Effects is { } effects) _settings = effects with { Muted = _settings.Muted };
+        var profileSettings = profile.Effects ?? profile.Processing ?? new VoiceSettings(VoicePreset.Clean, 0, 0, false);
+        _settings = profileSettings with { Muted = _settings.Muted };
         _session.SetSettings(EffectiveSettings()); SaveSelection();
         _message = "Voice profile selected.";
     }
@@ -438,7 +446,7 @@ internal sealed class DesktopVoiceService : IDesktopModule
     private static string ModelId(VoiceModelOption model) => model.SelectionKey ?? "builtin";
     private static VoiceEndpoint? Pick(VoiceEndpoint[] endpoints, string? id) => endpoints.FirstOrDefault(item => item.Id == id)
         ?? endpoints.FirstOrDefault(item => item.IsDefault) ?? endpoints.FirstOrDefault();
-    private VoiceSettings EffectiveSettings() => SelectedModel.UsesReference ? _settings with { Preset = VoicePreset.Clean, PitchSemitones = 0 } : _settings;
+    private VoiceSettings EffectiveSettings() => _settings;
     private void SaveSelection() => _profiles.SaveSelection(Guid.TryParse(_selectedProfileId, out Guid id) ? id : null,
         _selectedModelId == "builtin" ? null : _selectedModelId);
 
@@ -489,13 +497,11 @@ internal sealed class DesktopVoiceService : IDesktopModule
     private static VoiceSettings ReadSettings(JsonElement args)
     {
         var settings = args.Read<VoiceSettings>();
-        if (!Enum.IsDefined(settings.Preset) || !double.IsFinite(settings.PitchSemitones) || !double.IsFinite(settings.GainDb)
-            || settings.PitchSemitones is < -8 or > 8 || settings.GainDb is < -18 or > 12)
-            throw new InvalidDataException("Pitch must be −8 to +8 semitones and gain −18 to +12 dB.");
-        return settings;
+        if (!settings.IsValid) throw new InvalidDataException("Choose voice effect values within the supported ranges.");
+        return settings with { Effects = settings.Effects.Snapshot() };
     }
 
-    private void UpdateMetadata(Guid id, string name, VoiceSettings? effects)
+    private void UpdateMetadata(Guid id, string name, VoiceSettings? effects, VoiceSettings? processing = null)
     {
         _ = FindProfile(id);
         string directory = Path.Combine(_profiles.DirectoryPath, id.ToString("N"));
@@ -507,6 +513,7 @@ internal sealed class DesktopVoiceService : IDesktopModule
         var node = JsonNode.Parse(original) as JsonObject ?? throw new InvalidDataException("Voice metadata is invalid.");
         node["name"] = name;
         if (effects is not null) node["effects"] = JsonSerializer.SerializeToNode(effects, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        if (processing is not null) node["processing"] = JsonSerializer.SerializeToNode(processing, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         string temporary = Path.Combine(directory, ".edit-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {

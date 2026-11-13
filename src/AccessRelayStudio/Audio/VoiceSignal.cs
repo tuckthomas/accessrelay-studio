@@ -29,6 +29,7 @@ internal sealed class VoiceSignal(VoiceSettings settings, int bufferMilliseconds
     private SmbPitchShifter? _pitchShifter;
     private float[] _work = [];
     private float? _gain;
+    private readonly VoiceEffectsProcessor _effects = new();
 
     public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, 1);
     public float InputPeak => Volatile.Read(ref _inputPeak);
@@ -56,7 +57,6 @@ internal sealed class VoiceSignal(VoiceSettings settings, int bufferMilliseconds
             _head = _queued = 0;
             _primed = false;
             _primeSamples = SampleRate * primeMilliseconds / 1000;
-            SetSettings(Volatile.Read(ref _settings) with { Preset = VoicePreset.Clean, PitchSemitones = 0 });
             Enqueue(samples);
         }
     }
@@ -115,6 +115,9 @@ internal sealed class VoiceSignal(VoiceSettings settings, int bufferMilliseconds
         }
 
         VoiceSettings config = Volatile.Read(ref _settings);
+        bool bypass = config.Muted || config.Effects.Bypass || config.Effects.Mix == 0;
+        if (config.Muted) _work.AsSpan(0, count).Clear();
+        _effects.Prepare(_work, count, config.Effects, config.Muted);
         if (_preset != config.Preset)
         {
             _preset = config.Preset;
@@ -127,7 +130,7 @@ internal sealed class VoiceSignal(VoiceSettings settings, int bufferMilliseconds
             VoicePreset.Deep => -4,
             _ => 0
         };
-        double semitones = Math.Clamp(Finite(config.PitchSemitones) + presetPitch, -12, 12);
+        double semitones = bypass ? 0 : Math.Clamp(Finite(config.PitchSemitones) + presetPitch, -12, 12);
         if (semitones != 0)
         {
             _pitchShifter ??= new();
@@ -139,15 +142,19 @@ internal sealed class VoiceSignal(VoiceSettings settings, int bufferMilliseconds
             _pitchShifter = null;
         }
 
+        if (!bypass)
+        {
+            for (int index = 0; index < count; index++)
+                foreach (var filter in _filters) _work[index] = filter.Transform(_work[index]);
+            _effects.Process(_work, count, config.Effects, semitones);
+        }
+
         float targetGain = (float)Math.Pow(10, Math.Clamp(Finite(config.GainDb), -24, 12) / 20);
         float gain = _gain ?? targetGain;
         float outputPeak = 0;
         for (int index = 0; index < count; index++)
         {
             float sample = _work[index];
-            foreach (var filter in _filters)
-                sample = filter.Transform(sample);
-
             gain += (targetGain - gain) * .003f;
             float output = config.Muted ? 0 : SoftLimit(sample * gain);
             buffer[offset + index] = output;

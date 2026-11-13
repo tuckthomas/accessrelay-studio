@@ -54,25 +54,27 @@ describe('voice workflows', () => {
     expect(command.mock.calls[0][0]).toBe('routeSave');
   });
 
-  it('preserves unapplied tuning while native meter status refreshes', () => {
-    const command = vi.fn().mockResolvedValue(null);
+  it('preserves a live edit while its native acknowledgement is pending', async () => {
+    let finish!: () => void;
+    const command = vi.fn().mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
     const state = fixture();
     const { rerender } = render(<VoicePage state={state} status={state.status} command={command} />);
     fireEvent.change(screen.getByRole('slider', { name: 'Voice pitch in semitones' }), { target: { value: '3.2' } });
+    await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
     rerender(<VoicePage state={{ ...state, settings: { ...state.settings } }} status={{ ...state.status, inputPeak: .4 }} command={command} />);
     expect((screen.getByRole('slider', { name: 'Voice pitch in semitones' }) as HTMLInputElement).value).toBe('3.2');
-    expect(command).not.toHaveBeenCalled();
+    finish();
   });
 
-  it('keeps unapplied tuning when mute changes and applies the current mute state', async () => {
+  it('applies tuning and mute together without an Apply button', async () => {
     const command = vi.fn().mockResolvedValue(null);
     const state = fixture();
-    const { rerender } = render(<VoicePage state={state} status={state.status} command={command} />);
+    render(<VoicePage state={state} status={state.status} command={command} />);
     fireEvent.change(screen.getByRole('slider', { name: 'Voice pitch in semitones' }), { target: { value: '2.5' } });
-    rerender(<VoicePage state={{ ...state, settings: { ...state.settings, muted: true } }} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Mute' }));
     expect((screen.getByRole('slider', { name: 'Voice pitch in semitones' }) as HTMLInputElement).value).toBe('2.5');
-    fireEvent.click(screen.getByRole('button', { name: 'Apply adjustments' }));
-    await waitFor(() => expect(command).toHaveBeenCalledWith('settingsSave', { settings: { ...state.settings, pitchSemitones: 2.5, muted: true } }));
+    expect(screen.queryByRole('button', { name: 'Apply adjustments' })).toBeNull();
+    await waitFor(() => expect(command).toHaveBeenCalledWith('settingsSave', { settings: expect.objectContaining({ pitchSemitones: 2.5, muted: true }) }));
   });
 
   it('keeps cancellation available while the native model is loading', async () => {
@@ -103,34 +105,67 @@ describe('voice workflows', () => {
     expect(command.mock.calls[1]).toEqual(['clipSave', { name: 'My studio voice' }]);
   });
 
-  it('keeps unapplied effects through Keep editing and native status refreshes', async () => {
+  it('does not treat live effects as unsaved dialog edits when changing tabs', async () => {
     const command = vi.fn().mockResolvedValue(null);
     const state = fixture();
-    const { rerender } = render(<VoicePage state={state} status={state.status} command={command} />);
+    render(<VoicePage state={state} status={state.status} command={command} />);
     expect(hasUnsavedChanges()).toBe(false);
     fireEvent.change(screen.getByRole('slider', { name: 'Voice pitch in semitones' }), { target: { value: '4.1' } });
-    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('settingsSave', expect.anything()));
+    expect(hasUnsavedChanges()).toBe(false);
     fireEvent.click(screen.getByRole('tab', { name: /^Your voices/ }));
-    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    rerender(<VoicePage state={{ ...state }} status={{ ...state.status, inputPeak: .7 }} command={command} />);
-    expect((screen.getByRole('slider', { name: 'Voice pitch in semitones' }) as HTMLInputElement).value).toBe('4.1');
-    expect(screen.getByRole('tab', { name: 'Live voice' }).getAttribute('aria-selected')).toBe('true');
-    expect(command).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Discard unsaved changes?' })).toBeNull();
+    expect(screen.getByRole('tab', { name: /^Your voices/ }).getAttribute('aria-selected')).toBe('true');
   });
 
-  it('does not select another saved voice until effects changes are discarded', async () => {
-    const command = vi.fn().mockResolvedValue(null);
+  it('finishes the latest live edit before selecting another saved voice', async () => {
+    let finish!: () => void;
+    const command = vi.fn().mockImplementation((action: string) => action === 'settingsSave' ? new Promise<void>(resolve => { finish = resolve; }) : Promise.resolve(null));
     const state = fixture({ profiles: [{ id: 'saved-voice', name: 'Warm desk voice', kind: 'effects' }] });
     render(<VoicePage state={state} status={state.status} command={command} />);
     fireEvent.change(screen.getByRole('slider', { name: 'Voice output gain in decibels' }), { target: { value: '5' } });
+    await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
     fireEvent.change(screen.getByRole('combobox', { name: 'Saved voice profile' }), { target: { value: 'saved-voice' } });
-    expect(command).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    expect((screen.getByRole('slider', { name: 'Voice output gain in decibels' }) as HTMLInputElement).value).toBe('5');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Saved voice profile' }), { target: { value: 'saved-voice' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(command).not.toHaveBeenCalledWith('profileSelect', expect.anything());
+    finish();
     await waitFor(() => expect(command).toHaveBeenCalledWith('profileSelect', { id: 'saved-voice' }));
+  });
+
+  it('coalesces rapid slider changes while native audio is busy and sends the final value', async () => {
+    let finish!: () => void;
+    const command = vi.fn().mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; })).mockResolvedValue(null);
+    render(<VoicePage state={fixture()} status={null} command={command} />);
+    const pitch = screen.getByRole('slider', { name: 'Voice pitch in semitones' });
+    fireEvent.change(pitch, { target: { value: '1' } });
+    await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
+    for (const value of ['2', '3', '4', '5']) fireEvent.change(pitch, { target: { value } });
+    expect((pitch as HTMLInputElement).disabled).toBe(false);
+    expect(command).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(command).toHaveBeenCalledTimes(2));
+    expect(command.mock.calls[1][1].settings.pitchSemitones).toBe(5);
+  });
+
+  it('offers live timbre and effects for AI reference voices too', async () => {
+    const command = vi.fn().mockResolvedValue(null);
+    const state = fixture({ models: [{ id: 'builtin', name: 'AI model', usesReference: true }], profiles: [{ id: 'reference', name: 'My voice', kind: 'reference' }], selectedProfileId: 'reference' });
+    render(<VoicePage state={state} status={{ ...state.status, isRunning: true }} command={command} />);
+    fireEvent.change(screen.getByRole('slider', { name: 'Timbre' }), { target: { value: '3' } });
+    await waitFor(() => expect(command).toHaveBeenCalledWith('settingsSave', { settings: expect.objectContaining({ effects: expect.objectContaining({ formantSemitones: 3 }) }) }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save voice settings' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('profileSaveProcessing', undefined));
+    expect(command).not.toHaveBeenCalledWith('stop');
+  });
+
+  it('reports a failed live edit and retries on the next change without locking sliders', async () => {
+    const command = vi.fn().mockRejectedValueOnce(new Error('Audio settings unavailable.')).mockResolvedValue(null);
+    render(<VoicePage state={fixture()} status={null} command={command} />);
+    const pitch = screen.getByRole('slider', { name: 'Voice pitch in semitones' });
+    fireEvent.change(pitch, { target: { value: '1' } });
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Audio settings unavailable'));
+    fireEvent.change(pitch, { target: { value: '2' } });
+    await waitFor(() => expect(command).toHaveBeenCalledTimes(2));
+    expect(command.mock.calls[1][1].settings.pitchSemitones).toBe(2);
   });
 
   it('keeps a reference name and trim when clearing is cancelled', async () => {

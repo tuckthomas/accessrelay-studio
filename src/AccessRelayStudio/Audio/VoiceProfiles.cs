@@ -8,6 +8,7 @@ namespace EliteScriptStudio.Audio;
 public sealed record VoiceProfile(Guid Id, string Name, string? ReferencePath, TimeSpan Duration)
 {
     internal VoiceSettings? Effects { get; init; }
+    internal VoiceSettings? Processing { get; init; }
 }
 internal sealed record VoiceProfileSelection(Guid? ProfileId, string? ModelPackage);
 public readonly record struct VoiceWaveformBin(float Minimum, float Maximum);
@@ -433,7 +434,7 @@ public sealed partial class VoiceProfiles
         if (metadata.Length > 4096)
             return null;
         var document = JsonSerializer.Deserialize<ProfileDocument>(metadata, Json);
-        if (document is null || !ValidName(document.Name))
+        if (document is null || !ValidName(document.Name) || document.Processing is { IsValid: false })
             return null;
         if (document is { Version: 2, Samples: 0, Effects: { } effects })
             return ValidEffects(effects) ? ToProfile(id, directory, document) : null;
@@ -453,14 +454,13 @@ public sealed partial class VoiceProfiles
     private static bool ValidName(string? name) => name is { Length: > 0 and <= 80 } &&
         !string.IsNullOrWhiteSpace(name) && !name.Any(char.IsControl);
 
-    private static bool ValidEffects(VoiceSettings settings) => Enum.IsDefined(settings.Preset) &&
-        settings.PitchSemitones is >= -8 and <= 8 && settings.GainDb is >= -18 and <= 12;
+    private static bool ValidEffects(VoiceSettings settings) => settings.IsValid;
 
     private static bool IsLink(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
 
     private static VoiceProfile ToProfile(Guid id, string directory, ProfileDocument document) => document.Effects is { } effects
         ? new(id, document.Name, null, TimeSpan.Zero) { Effects = effects }
-        : new(id, document.Name, Path.Combine(directory, ReferenceFile), TimeSpan.FromSeconds((double)document.Samples / ReferenceSampleRate));
+        : new(id, document.Name, Path.Combine(directory, ReferenceFile), TimeSpan.FromSeconds((double)document.Samples / ReferenceSampleRate)) { Processing = document.Processing };
 
     private string Folder(Guid id) => Path.Combine(DirectoryPath, id.ToString("N"));
 
@@ -494,5 +494,5 @@ public sealed partial class VoiceProfiles
         }
     }
 
-    private sealed record ProfileDocument(int Version, string Name, int Samples, VoiceSettings? Effects = null);
+    private sealed record ProfileDocument(int Version, string Name, int Samples, VoiceSettings? Effects = null, VoiceSettings? Processing = null);
 }
