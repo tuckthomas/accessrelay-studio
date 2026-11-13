@@ -29,7 +29,7 @@ providers are outside this plan. Do not promise an unmeasured latency reduction.
 
 ## 3. Native GPU preparation and capture ownership
 
-- [ ] Implement the actual v2 RGB transform as a D3D11 compute shader, using exact
+- [x] Implement the actual v2 RGB transform as a D3D11 compute shader, using exact
       CPU-prepared source-index tables and explicit floating-point parity tolerance.
 - [ ] Publish bounded owned GPU frame leases instead of downloading every frame;
       protect native context use, source resize/change, replacement and shutdown.
@@ -83,8 +83,14 @@ Shared sampling/temporal-input implementation:
 `5fd615ad61fac685ba91d7caa0f142bff798a52f`. All 11 managed vision/model/performance
 suites passed. New checks compare 144 source/target/crop combinations bit-for-bit
 with the untouched canonical v2 reference, plus chronological history shift,
-outside-ROI changes, content reset and frozen-region reacquisition. Actual Windows
-GPU shader execution and hardware measurements are separate checks below.
+outside-ROI changes, content reset and frozen-region reacquisition.
+
+Native shader implementation: `410bddc65698fb3ec6b9e41ea3d761ad53d4d25d` with SM5 arithmetic/capability follow-up
+`df0fbd8cd9fa79cfca658eca6261f925ddde6fa3`. Actual Windows D3D11 WARP shader
+execution passed all 18 gradient/crop/shape/normalization cases, source fingerprints
+and player freeze/reset checks:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43442189645.
+This validates actual shader arithmetic, not NVIDIA interop or GPU performance.
 
 Software checks and hardware measurements are recorded separately;
 cloud/WARP/synthetic checks do not establish console latency or GPU benefit.

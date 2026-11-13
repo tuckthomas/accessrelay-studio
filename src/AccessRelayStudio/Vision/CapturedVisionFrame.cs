@@ -1,10 +1,18 @@
 namespace EliteScriptStudio.Vision;
 
-/// <summary>An exclusive lease over packed BGRA8 pixels. Dispose before retaining another frame.
+internal interface ICapturedFrameSurface
+{
+    byte[] ReadPixels();
+    long CpuReadbackBytes { get; }
+    double CpuReadbackMs { get; }
+}
+
+/// <summary>An exclusive lease over CPU or GPU BGRA8 pixels. GPU CPU-access is lazy and measured.
 /// CaptureTicks uses the PC QPC clock; it is not the Xbox's original render timestamp.</summary>
 internal sealed class CapturedVisionFrame : IDisposable
 {
-    private readonly byte[] _buffer;
+    private readonly byte[]? _buffer;
+    private readonly ICapturedFrameSurface? _surface;
     private Action? _release;
 
     internal CapturedVisionFrame(byte[] buffer, int width, int height, long captureTicks,
@@ -22,6 +30,13 @@ internal sealed class CapturedVisionFrame : IDisposable
         CaptureReadbackMs = captureReadbackMs;
     }
 
+    internal CapturedVisionFrame(ICapturedFrameSurface surface, int width, int height, long captureTicks,
+        long sequence, long sourceGeneration, Action release)
+    {
+        _surface = surface; Width = width; Height = height; CaptureTicks = captureTicks;
+        Sequence = sequence; SourceGeneration = sourceGeneration; _release = release;
+    }
+
     public int Width { get; }
     public int Height { get; }
     public int Stride => checked(Width * 4);
@@ -29,7 +44,12 @@ internal sealed class CapturedVisionFrame : IDisposable
     public long Sequence { get; }
     public long SourceGeneration { get; }
     public double? CaptureReadbackMs { get; }
-    public byte[] Buffer => Volatile.Read(ref _release) is not null ? _buffer
+    internal ICapturedFrameSurface? Surface => Volatile.Read(ref _release) is not null ? _surface
+        : throw new ObjectDisposedException(nameof(CapturedVisionFrame));
+    internal long OptionalReadbackBytes => _surface?.CpuReadbackBytes ?? 0;
+    internal double OptionalReadbackMs => _surface?.CpuReadbackMs ?? 0;
+    internal int FreshnessReadbackBytes { get; set; }
+    public byte[] Buffer => Volatile.Read(ref _release) is not null ? _buffer ?? _surface!.ReadPixels()
         : throw new ObjectDisposedException(nameof(CapturedVisionFrame));
     public ReadOnlyMemory<byte> Pixels => Buffer.AsMemory(0, checked(Stride * Height));
 

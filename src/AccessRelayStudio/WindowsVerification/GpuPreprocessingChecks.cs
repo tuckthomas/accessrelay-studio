@@ -40,6 +40,75 @@ internal static class GpuPreprocessingChecks
             finally { Release(ref view); Release(ref texture); }
         }
         Console.WriteLine($"SUCCESS actual D3D11 WARP RGB shader: {cases} gradient/crop/shape/normalization cases; maximum absolute error {maximumError:G9}; exact source fingerprints and player freeze/reset. WARP is not hardware/performance evidence.");
+        LeaseChecks();
+        OutsidePlayerFreeze(graphics);
+    }
+
+    private static void OutsidePlayerFreeze(CaptureD3D11 graphics)
+    {
+        const int width = 64, height = 32;
+        var bytes = Image(width, height); nint texture = 0, view = 0;
+        try
+        {
+            texture = Texture(graphics, width, height, bytes);
+            Marshal.ThrowExceptionForHR(Method<CreateView>(graphics.NativeDevice, 7)(graphics.NativeDevice, texture, 0, out view));
+            using var shader = new D3D11RgbPreprocessor(graphics, new(width, height, new(0, 0, .5, 1), 32, 32, [0, 0, 0], [1, 1, 1]));
+            var first = shader.Process(view);
+            for (int y = 0; y < height; y++) for (int x = width / 2; x < width; x++) bytes[(y * width + x) * 4] ^= 255;
+            UpdateTexture(graphics, texture, bytes, width * 4);
+            var outside = shader.Process(view);
+            Require(!outside.PlayerChanged && outside.SourceFingerprint != first.SourceFingerprint, "Animated outside pixels concealed the GPU player's freeze.");
+            for (int y = 0; y < height; y++) for (int x = 0; x < width / 2; x++) bytes[(y * width + x) * 4 + 2] ^= 255;
+            UpdateTexture(graphics, texture, bytes, width * 4);
+            Require(shader.Process(view).PlayerChanged, "GPU player reacquisition did not detect changed player pixels.");
+        }
+        finally { Release(ref view); Release(ref texture); }
+        Console.WriteLine("SUCCESS actual GPU selected-player freeze remains independent of changing outside overlays.");
+    }
+
+    private static void LeaseChecks()
+    {
+        using var graphics = new CaptureD3D11(software: true);
+        using var pool = new GpuCaptureBuffer(graphics);
+        nint source = 0, resized = 0;
+        CapturedVisionFrame? first = null, second = null, third = null, last = null;
+        try
+        {
+            var a = Image(4, 3); var b = a.Select(value => (byte)(value ^ 127)).ToArray(); var c = a.Select(value => (byte)(value ^ 255)).ToArray();
+            source = Texture(graphics, 4, 3, a);
+            Require(pool.Publish(source, 4, 3, 101, 1, 7) && pool.TryAcquireLatest(out first), "GPU lease A failed.");
+            UpdateTexture(graphics, source, b, 16);
+            Require(pool.Publish(source, 4, 3, 102, 2, 7) && pool.TryAcquireLatest(out second), "GPU lease B failed.");
+            UpdateTexture(graphics, source, c, 16);
+            Require(pool.Publish(source, 4, 3, 103, 3, 7) && pool.TryAcquireLatest(out third), "GPU lease C failed.");
+            Require(first!.OptionalReadbackBytes == 0 && second!.OptionalReadbackBytes == 0 && third!.OptionalReadbackBytes == 0, "GPU publication downloaded an image.");
+            Require(!pool.Publish(source, 4, 3, 104, 4, 7), "GPU publisher overwrote an outstanding consumer.");
+            pool.Clear();
+            ((GpuFrameSurface)first.Surface!).ReportFingerprint?.Invoke(123);
+            Require(pool.ContentChangedTicks == 0, "An old GPU lease published freshness after a source clear.");
+            Require(first.Pixels.Span.SequenceEqual(a) && second!.Pixels.Span.SequenceEqual(b) && third!.Pixels.Span.SequenceEqual(c), "GPU in-flight textures were overwritten.");
+            Require(first.OptionalReadbackBytes == a.Length, "Explicit lazy readback was not accounted.");
+            first.Dispose(); first.Dispose(); first = null;
+            var small = Image(2, 2); resized = Texture(graphics, 2, 2, small);
+            Require(pool.Publish(resized, 2, 2, 105, 5, 8) && pool.Publish(resized, 2, 2, 106, 6, 8), "GPU resize/pending replacement failed.");
+            Require(pool.TryAcquireLatest(out last) && last!.Sequence == 6 && last.Width == 2 && last.SourceGeneration == 8, "GPU newest-frame metadata differs.");
+            pool.Dispose(); graphics.Dispose();
+            Require(last!.Pixels.Span.SequenceEqual(small) && second!.Pixels.Span.SequenceEqual(b), "Capture shutdown invalidated a GPU frame lease.");
+            Require(!pool.TryAcquireLatest(out _) && !pool.Publish(source, 4, 3, 107, 7, 8), "Disposed GPU publication remained active.");
+            second!.Dispose(); second = null; third!.Dispose(); third = null; last.Dispose();
+            try { _ = last.Pixels; throw new Exception("Disposed GPU frame remained readable."); } catch (ObjectDisposedException) { }
+            last = null;
+            Require(graphics.NativeDevice == 0 && graphics.NativeContext == 0, "GPU owner references leaked after the last consumer.");
+        }
+        finally { first?.Dispose(); second?.Dispose(); third?.Dispose(); last?.Dispose(); Release(ref resized); Release(ref source); }
+        Console.WriteLine("SUCCESS actual WARP GPU leases: bounded slots, no automatic image download, replacement, resize, lazy readback, source generations, shutdown retention and release.");
+    }
+
+    internal static void UpdateTexture(CaptureD3D11 graphics, nint texture, byte[] bytes, int stride)
+    {
+        var pinned = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+        try { lock (graphics.Sync) Method<Update>(graphics.NativeContext, 48)(graphics.NativeContext, texture, 0, 0, pinned.AddrOfPinnedObject(), (uint)stride, 0); }
+        finally { pinned.Free(); }
     }
     internal static byte[] Image(int width, int height)
     {

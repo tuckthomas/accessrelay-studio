@@ -30,6 +30,7 @@ internal sealed class RemotePlayCapture : IDisposable
     private int _width, _height;
 
     public WaitHandle FrameReady => _frameReady;
+    internal CaptureD3D11 GraphicsDevice { get { lock (_gate) return _resources?.Graphics ?? throw new InvalidOperationException("Capture is not running."); } }
     public CaptureStatus Status
     {
         get
@@ -41,8 +42,8 @@ internal sealed class RemotePlayCapture : IDisposable
             string message = resource is not null && !present ? "The captured window closed."
                 : present && !running ? "Capture paused: restore the source window." : Volatile.Read(ref _message);
             return new(running, message, Interlocked.Read(ref _generation), Interlocked.Read(ref _latestTicks),
-                Interlocked.Read(ref _sequence), Interlocked.Read(ref _contentChangedTicks),
-                Volatile.Read(ref _width), Volatile.Read(ref _height), _frames.DroppedFrames);
+                Interlocked.Read(ref _sequence), resource?.GpuFrames?.ContentChangedTicks ?? Interlocked.Read(ref _contentChangedTicks),
+                Volatile.Read(ref _width), Volatile.Read(ref _height), resource?.GpuFrames?.DroppedFrames ?? _frames.DroppedFrames);
         }
     }
 
@@ -70,7 +71,7 @@ internal sealed class RemotePlayCapture : IDisposable
         return sources.OrderBy(source => source.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    public void Start(nint hwnd)
+    public void Start(nint hwnd, bool gpuFrames = false, nint adapter = 0)
     {
         Stop();
         lock (_gate)
@@ -83,8 +84,9 @@ internal sealed class RemotePlayCapture : IDisposable
             Resources? resource = null;
             try
             {
-                var graphics = new CaptureD3D11();
+                var graphics = new CaptureD3D11(adapter: adapter);
                 resource = new(hwnd, graphics);
+                if (gpuFrames) resource.GpuFrames = new GpuCaptureBuffer(graphics);
                 resource.Item = CaptureD3D11.CreateItem(hwnd);
                 resource.Size = resource.Item.Size;
                 ValidateSize(resource.Size);
@@ -122,10 +124,11 @@ internal sealed class RemotePlayCapture : IDisposable
                 if (_resources is { } paused)
                     PauseResource(paused, IsWindow(paused.Hwnd) ? "Capture paused: restore the source window." : "The captured window closed.");
                 _frames.Clear();
+                _resources?.GpuFrames?.Clear();
                 frame = null;
                 return false;
             }
-            return _frames.TryAcquireLatest(out frame);
+            return _resources.GpuFrames is { } gpu ? gpu.TryAcquireLatest(out frame) : _frames.TryAcquireLatest(out frame);
         }
     }
 
@@ -141,6 +144,7 @@ internal sealed class RemotePlayCapture : IDisposable
             resource = _resources;
             _resources = null;
             _frames.Clear();
+            resource?.GpuFrames?.Clear();
             _generation++;
             _latestTicks = _contentChangedTicks = 0;
             _message = message;
@@ -164,6 +168,7 @@ internal sealed class RemotePlayCapture : IDisposable
             _generation++;
             _latestTicks = _contentChangedTicks = 0;
             _frames.Clear();
+            resource.GpuFrames?.Clear();
             _frameReady.Set();
         }
         _message = reason;
@@ -196,6 +201,7 @@ internal sealed class RemotePlayCapture : IDisposable
                         ValidateSize(size);
                         resize = size;
                         _frames.Clear();
+                        resource.GpuFrames?.Clear();
                         _generation++;
                         _latestTicks = _contentChangedTicks = 0;
                         _width = size.Width;
@@ -207,14 +213,18 @@ internal sealed class RemotePlayCapture : IDisposable
                         // WGC SystemRelativeTime is QPC represented in 100 ns TimeSpan units.
                         long captureTicks = checked((long)(frame.SystemRelativeTime.Ticks *
                             ((double)Stopwatch.Frequency / TimeSpan.TicksPerSecond)));
-                        published = resource.Graphics.CopyFrame(frame, _frames, captureTicks, ++_sequence, _generation);
+                        published = resource.GpuFrames is { } gpu
+                            ? resource.Graphics.CopyGpuFrame(frame, gpu, captureTicks, ++_sequence, _generation)
+                            : resource.Graphics.CopyFrame(frame, _frames, captureTicks, ++_sequence, _generation);
                         if (published)
                         {
                             _latestTicks = captureTicks;
-                            ulong fingerprint = _frames.LatestFingerprint;
-                            if (_contentChangedTicks == 0 || fingerprint != _lastContentHash)
-                                _contentChangedTicks = captureTicks;
-                            _lastContentHash = fingerprint;
+                            if (resource.GpuFrames is null)
+                            {
+                                ulong fingerprint = _frames.LatestFingerprint;
+                                if (_contentChangedTicks == 0 || fingerprint != _lastContentHash) _contentChangedTicks = captureTicks;
+                                _lastContentHash = fingerprint;
+                            }
                             _message = "Capturing application frames. Console video age is not measured.";
                         }
                     }
@@ -296,6 +306,7 @@ internal sealed class RemotePlayCapture : IDisposable
         internal CaptureD3D11 Graphics { get; } = graphics;
         internal GraphicsCaptureItem? Item;
         internal Direct3D11CaptureFramePool? Pool;
+        internal GpuCaptureBuffer? GpuFrames;
         internal GraphicsCaptureSession? Session;
         internal SizeInt32 Size;
         internal bool Paused;
@@ -305,6 +316,8 @@ internal sealed class RemotePlayCapture : IDisposable
             Session = null;
             Pool?.Dispose();
             Pool = null;
+            GpuFrames?.Dispose();
+            GpuFrames = null;
             Graphics.Dispose();
             Item = null;
         }
