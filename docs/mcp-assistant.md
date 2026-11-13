@@ -7,6 +7,16 @@ actual-engine Lua rehearsal, dataset audits and bounded CPU experiment jobs.
 
 ## Connect
 
+For local Codex and ChatGPT desktop, run `scripts/Install-CodexPlugin.ps1` from
+the source checkout after publishing. It installs the AccessRelay Studio plugin
+and wires it to the actual installed bridge. The generated marketplace stays
+under the project's ignored `artifacts/CodexPluginMarketplace/`; no app binaries
+or model weights are duplicated into the plugin cache. If the desktop app was
+already open, restart it to load the new plugin. See the
+[plugin package](../plugins/accessrelay-studio/README.md) for relocation and scope.
+
+The following client-neutral stdio setup also remains supported:
+
 1. Publish the complete Windows app using the normal `dotnet publish` command.
    Its publish target builds a self-contained console bridge in `Mcp/`.
 2. Open Studio → Settings → Assistant access. Select draft/offline permissions as

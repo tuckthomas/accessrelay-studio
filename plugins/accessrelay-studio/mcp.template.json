@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "accessrelay": {
+      "type": "stdio",
+      "command": "__MCP_EXECUTABLE__",
+      "args": [],
+      "cwd": "__MCP_DIRECTORY__"
+    }
+  }
+}

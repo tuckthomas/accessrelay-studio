@@ -1,0 +1,29 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "accessrelay-studio",
+  "version": "1.0.0",
+  "description": "Connect to the local AccessRelay Studio app for status, controller drafts, Lua rehearsal and registered training jobs.",
+  "author": { "name": "AccessRelay Studio" },
+  "repository": "https://github.com/tuckthomas/accessrelay-studio",
+  "license": "0BSD",
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "AccessRelay Studio",
+        "shortDescription": "Connect to your local AccessRelay Studio app.",
+        "longDescription": "Read app status, draft controller accommodations, rehearse Lua and work with explicitly registered training data. Studio owns processing, permissions and reviewed changes.",
+        "developerName": "AccessRelay Studio",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "brandColor": "#173B54",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png",
+        "defaultPrompt": [
+          "Read AccessRelay Studio status and explain any active blockers.",
+          "Help me draft an accessible controller setup in AccessRelay Studio."
+        ]
+      }
+    }
+  }
+}
