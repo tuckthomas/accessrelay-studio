@@ -15,7 +15,7 @@ NBA model or physical validation complete.
 - [x] Keep the host responsible for capture, storage, scheduling, device ownership,
       model execution and generic plugin selection. Downloaded manifests cannot
       execute arbitrary DLLs, Python or browser code.
-- [ ] Validate installation and selection in the installed desktop app.
+- [x] Validate installation and selection in the installed desktop app (beta.17).
 
 ## Acquisition correction
 
@@ -60,3 +60,27 @@ NBA model or physical validation complete.
 The installed training plugin initially collects the data needed for this tracker.
 It does not contain a trained tracker or release model. Scene-first acquisition
 must not be described as working automatic tracking or successful shot timing.
+
+## 2026-11-13 delivery evidence
+
+Implementation: `70c367b`. Marketplace: `4b13eef` (training package and separate
+rhythm script; committed LF manifest/resource bytes checked against catalog hashes).
+Beta.17 was published from the feature working tree and installed in the existing
+project-local `AccessRelayStudio-Beta` directory. Its embedded base SHA is `1bbccb3`;
+the build preceded the implementation commit. Existing local page-label edits
+were retained in the installed UI and left uncommitted.
+
+Affected UI checks passed across focused runs (33 cases), as did the native
+installation-gating/scene-writer check, bounded desktop reader including 1280×720
+scene-first data, explicit scene-to-crop conversion rejection, TypeScript/Vite
+build and Windows publication. Native evidence is retained in
+`artifacts/PluginTrainingSeparation/bf01fb1e0e334dd7bbe37df2491fb3ab`.
+
+Observed in the user's installed beta: no NBA training UI before installation;
+separate training/script cards in the live Marketplace; training package installed
+through its Install button; Open training selected the installed NBA adapter and
+loaded the saved Stretch Big meter-on profile. New setup exposes Gameplay and Shot
+feedback only. A fresh preview captured actual gameplay at 2560×1439; no take was
+started. The user had changed Remote Play to fullscreen; fresh region confirmation
+and a stable source size remain required before recording. No tracker, shot-model
+accuracy, real recording throughput or Xbox end-to-end latency is claimed.
