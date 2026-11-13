@@ -6,8 +6,12 @@ namespace EliteScriptStudio.Vision;
 
 /// <summary>Small D3D11 ABI adapter. Slots are from the Windows SDK's d3d11.h interfaces.
 /// All immediate-context calls are serialized by RemotePlayCapture.</summary>
-internal sealed class CaptureD3D11 : IDisposable
+internal sealed partial class CaptureD3D11 : IDisposable
 {
+    internal object Sync { get; } = new();
+    internal nint NativeDevice => _device;
+    internal nint NativeContext => _context;
+    private int _references = 1, _ownerReleased;
     private nint _device, _context, _staging;
     private TextureDescription _stagingDescription;
     private CreateTexture2D? _createTexture;
@@ -17,13 +21,14 @@ internal sealed class CaptureD3D11 : IDisposable
     private GetTextureDescription? _getDescription;
     private IDirect3DDevice? _winrtDevice;
 
-    internal CaptureD3D11()
+    internal CaptureD3D11(bool software = false, nint adapter = 0)
     {
         try
         {
             // D3D_DRIVER_TYPE_HARDWARE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, SDK version 7.
-            Marshal.ThrowExceptionForHR(D3D11CreateDevice(0, 1, 0, 0x20, 0, 0, 7,
-                out _device, out _, out _context));
+            Marshal.ThrowExceptionForHR(D3D11CreateDevice(adapter, adapter != 0 ? 0u : software ? 5u : 1u, 0, 0x20, 0, 0, 7,
+                out _device, out uint featureLevel, out _context));
+            if (featureLevel < 0xb000) throw new NotSupportedException("GPU RGB preprocessing requires D3D11 feature level 11 or later.");
             Guid dxgiDeviceId = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
             Marshal.ThrowExceptionForHR(Marshal.QueryInterface(_device, in dxgiDeviceId, out var dxgi));
             try
@@ -98,11 +103,36 @@ internal sealed class CaptureD3D11 : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _ownerReleased, 1) == 0) ReleaseReference();
+    }
+
+    internal IDisposable Retain()
+    {
+        lock (Sync)
+        {
+            ObjectDisposedException.ThrowIf(_references == 0, this);
+            _references++;
+            return new DeviceReference(this);
+        }
+    }
+
+    private sealed class DeviceReference(CaptureD3D11 owner) : IDisposable
+    {
+        private CaptureD3D11? _owner = owner;
+        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.ReleaseReference();
+    }
+
+    private void ReleaseReference()
+    {
+        lock (Sync)
+        {
+            if (--_references != 0) return;
         Release(ref _staging);
         _winrtDevice?.Dispose();
         _winrtDevice = null;
         Release(ref _context);
         Release(ref _device);
+        }
     }
 
     internal static GraphicsCaptureItem CreateItem(nint hwnd)

@@ -10,7 +10,8 @@ providers are outside this plan. Do not promise an unmeasured latency reduction.
 
 ## 1. Delivery and compatibility
 
-- [ ] Push this checklist to GitHub main before implementation.
+- [x] Push this checklist to GitHub main before implementation.
+      Plan commit: `f3a26aa916441e1edfbe1a8021ba4e6c40a89499`.
 - [ ] Deliver independently reviewable implementation commits; record full commit
       IDs and software evidence here in subsequent checklist updates.
 - [ ] Preserve legacy settings/models, explicit CPU/CUDA provider selection,
@@ -19,11 +20,11 @@ providers are outside this plan. Do not promise an unmeasured latency reduction.
 
 ## 2. Shared preprocessing and temporal input boundary
 
-- [ ] Extract reusable, bounded sampling coordinates and validation without
+- [x] Extract reusable, bounded sampling coordinates and validation without
       changing source-index rounding, interpolation order, normalization or layout.
-- [ ] Separate temporal tensor preparation from tracking decisions so CPU and GPU
+- [x] Separate temporal tensor preparation from tracking decisions so CPU and GPU
       implement the same history shift/reset, sampling and selected-player freeze policy.
-- [ ] Verify gradients, channel order, fractional/boundary crops, normalization,
+- [x] Verify gradients, channel order, fractional/boundary crops, normalization,
       non-square dimensions, temporal order and frozen/reacquired player regions.
 
 ## 3. Native GPU preparation and capture ownership
@@ -78,5 +79,12 @@ providers are outside this plan. Do not promise an unmeasured latency reduction.
 
 ## Evidence receipts
 
-Pending implementation. Software checks and hardware measurements will be recorded
-separately; cloud/WARP/synthetic checks do not establish console latency or GPU benefit.
+Shared sampling/temporal-input implementation:
+`5fd615ad61fac685ba91d7caa0f142bff798a52f`. All 11 managed vision/model/performance
+suites passed. New checks compare 144 source/target/crop combinations bit-for-bit
+with the untouched canonical v2 reference, plus chronological history shift,
+outside-ROI changes, content reset and frozen-region reacquisition. Actual Windows
+GPU shader execution and hardware measurements are separate checks below.
+
+Software checks and hardware measurements are recorded separately;
+cloud/WARP/synthetic checks do not establish console latency or GPU benefit.

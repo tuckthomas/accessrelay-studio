@@ -15,6 +15,7 @@
     <Compile Include="RuntimeTestDevices.cs" />
     <Compile Include="PreviewSessionChecks.cs" />
     <Compile Include="VoiceEffectsChecks.cs" />
+    <Compile Include="GpuPreprocessingChecks.cs" />
     <ProjectReference Include="../../AccessRelayStudio.Runtime/AccessRelayStudio.Runtime.csproj" />
   </ItemGroup>
 </Project>

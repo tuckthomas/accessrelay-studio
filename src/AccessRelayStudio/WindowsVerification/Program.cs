@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args.Contains("--gpu-preprocessing-only", StringComparer.Ordinal))
+{
+    GpuPreprocessingChecks.Run();
+    return;
+}
+
 if (args.Contains("--voice-effects-only", StringComparer.Ordinal))
 {
     VoiceEffectsChecks.Run();
