@@ -18,8 +18,12 @@ and voice/model assets stay in their existing installation; they are not copied
 into the plugin cache. Rerun the installer if the app moves. Existing unrelated
 plugins, MCP servers and personal marketplace entries are preserved.
 
-Restart the ChatGPT desktop app if it has not loaded the new local plugin. In
-Studio, enable Settings → Assistant access for the requested access window. That
+Verify the client actually exposes the MCP tools; enabled local configuration
+alone is not proof, and a restart is not a verified fix for a dot's missing tool.
+For a dot that can run commands on its connected Windows computer, use the
+project's `scripts/Invoke-AccessRelayMcp.ps1 -ToolName read_studio_status`. This
+calls the existing stdio server locally rather than injecting a cloud tool.
+In Studio, enable Settings → Assistant access for the requested access window. That
 app-owned session setting starts off at launch. Tool discovery and the Lua/capability
 resources work while access is off; live status, drafts and jobs require access.
 The plugin cannot grant itself permissions, activate hardware, apply drafts or

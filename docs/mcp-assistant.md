@@ -11,8 +11,8 @@ For local Codex and ChatGPT desktop, run `scripts/Install-CodexPlugin.ps1` from
 the source checkout after publishing. It installs the AccessRelay Studio plugin
 and wires it to the actual installed bridge. The generated marketplace stays
 under the project's ignored `artifacts/CodexPluginMarketplace/`; no app binaries
-or model weights are duplicated into the plugin cache. If the desktop app was
-already open, restart it to load the new plugin. See the
+or model weights are duplicated into the plugin cache. An installed/enabled plugin does not prove its tools were loaded into the
+assistant session; verify discovery and a live call separately. See the
 [plugin package](../plugins/accessrelay-studio/README.md) for relocation and scope.
 
 The following client-neutral stdio setup also remains supported:
@@ -25,6 +25,32 @@ The following client-neutral stdio setup also remains supported:
    into an MCP-compatible client. The command names the actual installation's
    `Mcp/AccessRelayStudio.Mcp.exe`; no arguments are required for ordinary use.
 4. Ask the assistant to read Studio status or use the `diagnose_studio` prompt.
+
+### Sunny / dots and connected computers
+
+Connecting a computer does not establish that the dot's current tool catalog
+includes this local plugin. Do not prescribe a restart as a proven fix for an
+absent tool or claim successful connection from the executable's version.
+
+When the assistant can run local commands on the connected Windows computer, use
+the included stdio MCP client from the project folder:
+
+```powershell
+./scripts/Invoke-AccessRelayMcp.ps1 -ListTools
+./scripts/Invoke-AccessRelayMcp.ps1 -ToolName read_studio_status
+```
+
+This initializes the installed MCP server, reads its actual catalog, and calls
+the requested tool using the MCP protocol. It does not inject tools into the
+dot's cloud session or publish a remote service. `-ArgumentsJson` supplies a JSON
+object for another tool; the server's normal access and review gates still apply.
+Inspect `isError` and `structuredContent`: discovering a tool or successfully
+starting the bridge is not a successful live status check. `studioUnavailable`
+means no authorized app endpoint was reached; check the running app's Assistant
+access setting. Record the response as blocked until a live status call succeeds.
+
+This route was tested locally. A call originating from Sunny itself remains a
+separate client-acceptance check and must not be inferred from this local test.
 
 The bridge uses official C# SDK 2.4.0. Verification covers the SDK's default protocol
 and a client explicitly selecting `2025-11-25`. Other clients must support stdio and
