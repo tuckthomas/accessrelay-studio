@@ -113,7 +113,7 @@ internal sealed class VisionSession : IDisposable
             _metricCount = _metricIndex = 0;
             _lockMeasurementToken = _runtime.BeginLockMeasurements();
             _performance.Reset(new("Capture only", null, settings.AnimationProfile, settings.CameraView,
-                settings.Crop, 0, 0, VisionPerformanceBuffer.Fingerprint(settings), _lockMeasurementToken));
+                settings.Crop, 0, 0, VisionPerformanceBuffer.Fingerprint(settings), _lockMeasurementToken, settings.PreprocessingBackendName));
             _performanceReplacedFrames = _performanceDropBaseline = 0;
             _performanceReleaseBaseline = _runtime.VisionStatus.AutomatedReleases;
             _performanceMissBaseline = _runtime.VisionStatus.MissedDeadlines;
@@ -216,7 +216,7 @@ internal sealed class VisionSession : IDisposable
                                 _lockMeasurementToken = _runtime.BeginLockMeasurements();
                                 _performance.Reset(new(model?.ExecutionProvider ?? "Capture only", model?.ManifestHash,
                                     settings.AnimationProfile, settings.CameraView, settings.Crop, frame.Width, frame.Height,
-                                    VisionPerformanceBuffer.Fingerprint(settings), _lockMeasurementToken));
+                                    VisionPerformanceBuffer.Fingerprint(settings), _lockMeasurementToken, settings.PreprocessingBackendName));
                                 _performanceDropBaseline = source.DroppedFrames; _performanceReplacedFrames = 0;
                                 _performanceReleaseBaseline = contextOutput.AutomatedReleases;
                                 _performanceMissBaseline = contextOutput.MissedDeadlines;
@@ -247,6 +247,25 @@ internal sealed class VisionSession : IDisposable
                         double? preprocessingMs = null, inferenceMs = null;
                         model?.Diagnostics.FrameTimings(frame.Sequence, out preprocessingMs, out inferenceMs);
                         frames++;
+                        bool buildPreview;
+                        lock (_gate) buildPreview = _previewEnabled && !cancellation.IsCancellationRequested &&
+                            Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200;
+                        if (buildPreview)
+                        {
+                            // GPU readback can wait on the driver. Never hold the
+                            // UI/Stop state lock while materializing CPU pixels.
+                            var copy = ArrayPool<byte>.Shared.Rent(checked(frame.Stride * frame.Height));
+                            VisionPreview? nextPreview = null;
+                            try { frame.Pixels.Span.CopyTo(copy); nextPreview = new(copy, frame.Width, frame.Height, frame.Stride, frame.Sequence); }
+                            catch { ArrayPool<byte>.Shared.Return(copy); throw; }
+                            lock (_gate)
+                            {
+                                if (_previewEnabled && !cancellation.IsCancellationRequested)
+                                { _preview?.Dispose(); _preview = nextPreview; }
+                                else nextPreview.Dispose();
+                            }
+                            previewAt = completed;
+                        }
                         lock (_gate)
                         {
                             _metrics[_metricIndex] = new(frame.Sequence, frame.CaptureTicks, completed, processingMs,
@@ -258,17 +277,8 @@ internal sealed class VisionSession : IDisposable
                             if (!_performance.Record(new(frame.Sequence, frame.CaptureTicks, started, completed, hasDecision && inferenceMs.HasValue,
                                 preprocessingMs, inferenceMs, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
                                 Math.Max(0, GC.CollectionCount(0) - gen0), Math.Max(0, GC.CollectionCount(1) - gen1),
-                                Math.Max(0, GC.CollectionCount(2) - gen2), _trainingInhibited, frame.CaptureReadbackMs))) excludedTimingFrames++;
-                            // A low-rate preview copy does not retain a leased capture resource.
-                            if (_previewEnabled && !cancellation.IsCancellationRequested &&
-                                Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200)
-                            {
-                                var copy = ArrayPool<byte>.Shared.Rent(checked(frame.Stride * frame.Height));
-                                frame.Pixels.Span.CopyTo(copy);
-                                _preview?.Dispose();
-                                _preview = new(copy, frame.Width, frame.Height, frame.Stride, frame.Sequence);
-                                previewAt = completed;
-                            }
+                                Math.Max(0, GC.CollectionCount(2) - gen2), _trainingInhibited, frame.CaptureReadbackMs,
+                                frame.OptionalReadbackBytes, frame.OptionalReadbackMs, frame.FreshnessReadbackBytes))) excludedTimingFrames++;
                             _status = new(true, model is not null, !cancellation.IsCancellationRequested && !_trainingInhibited && fresh && model?.CanArm == true && sourceReady,
                                 fresh ? modelMessage : "Source is stale or unchanged. " + modelMessage,
                                 frames, predictions, source.DroppedFrames, processingMs, frame.CaptureTicks, frame.Width, frame.Height,

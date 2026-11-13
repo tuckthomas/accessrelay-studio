@@ -17,6 +17,31 @@ internal static class PerformanceVerification
         SavedRunsAndImports();
         ReadbackAndMeasurementGenerations();
         ReadbackLeaseMetadata();
+        GpuReadbackScopes();
+    }
+
+    private static void GpuReadbackScopes()
+    {
+        var buffer = new VisionPerformanceBuffer(1000, () => 1000);
+        buffer.Reset(Context() with { PreprocessingBackend = "d3d11-cuda-rgb-v2-experimental" });
+        Require(!buffer.Record(Frame(1) with { FreshnessReadbackBytes = 15 }), "Unbounded freshness metadata was accepted.");
+        Require(!buffer.Record(Frame(1) with { OptionalReadbackBytes = -1 }), "Negative optional image readback was accepted.");
+        Require(!buffer.Record(Frame(1) with { OptionalReadbackMs = 2 }), "Image readback time without image data was invented.");
+        buffer.Record(Frame(1) with { FreshnessReadbackBytes = 16 });
+        buffer.Record(Frame(2) with { FreshnessReadbackBytes = 16, OptionalReadbackBytes = 8192, OptionalReadbackMs = 2.5 });
+        var value = buffer.Snapshot();
+        Require(value.PreprocessingBackend == "d3d11-cuda-rgb-v2-experimental" && value.CaptureReadback.Samples == 0 &&
+            value.OptionalImageReadback.Samples == 1 && value.OptionalImageReadback.P95Ms == 2.5 &&
+            value.WindowOptionalImageReadbackBytes == 8192 && value.WindowFreshnessReadbackBytes == 32,
+            "GPU metadata, optional image copies and automatic capture readback were conflated.");
+        for (int i = 3; i <= VisionPerformanceBuffer.Capacity + 2; i++) buffer.Record(Frame(i));
+        value = buffer.Snapshot();
+        Require(value.OptionalImageReadback.Samples == 0 && value.WindowOptionalImageReadbackBytes == 0 && value.WindowFreshnessReadbackBytes == 0,
+            "Expired readbacks remained in the bounded measurement window.");
+        var baseline = DecisionRun(); var gpu = baseline with { Snapshot = baseline.Snapshot with { PreprocessingBackend = "d3d11-cuda-rgb-v2-experimental" } };
+        Require(VisionPerformanceRuns.Compare(baseline, gpu).Comparable, "Matching CPU/GPU preparation runs could not be compared.");
+        Require(VisionPerformanceBuffer.Fingerprint(VisionSettings.Default) == VisionPerformanceBuffer.Fingerprint(
+            VisionSettings.Default with { PreprocessingBackend = VisionPreprocessingBackend.D3D11Cuda }), "Backend choice polluted otherwise identical comparison settings.");
     }
 
     private static void ReadbackLeaseMetadata()
@@ -236,6 +261,14 @@ internal static class PerformanceVerification
             Require(old.Version == 1 && old.Snapshot.CaptureReadback.Samples == 0 && old.Snapshot.RuntimeLocks is null,
                 "Legacy runs must load with unavailable stages, not manufactured zeros.");
             Require(!VisionPerformanceRuns.Compare(old, run).Comparable, "Different instrumentation revisions were directly compared.");
+            var version2 = JsonNode.Parse(json)!.AsObject(); version2["version"] = 2;
+            foreach (string field in new[] { "preprocessingBackend", "optionalImageReadback", "windowOptionalImageReadbackBytes", "windowFreshnessReadbackBytes" })
+                version2["snapshot"]!.AsObject().Remove(field);
+            File.WriteAllText(path, version2.ToJsonString());
+            var previous = VisionPerformanceRuns.Read(path);
+            Require(previous.Version == 2 && previous.Snapshot.PreprocessingBackend == "cpu-rgb-v2" && previous.Snapshot.OptionalImageReadback.Samples == 0,
+                "Format 2 did not retain CPU preparation with unavailable new readback stages.");
+            Require(!VisionPerformanceRuns.Compare(previous, run).Comparable, "Format 2 was compared against changed instrumentation.");
             void Reject(Action<JsonObject> change)
             {
                 var modified = JsonNode.Parse(json)!.AsObject(); change(modified);
@@ -243,7 +276,10 @@ internal static class PerformanceVerification
                 Throws(() => VisionPerformanceRuns.Read(path));
             }
             Reject(node => node["unexpected"] = true);
-            Reject(node => node["version"] = 3);
+            Reject(node => node["version"] = 4);
+            Reject(node => node["snapshot"]!["preprocessingBackend"] = "unrecognized");
+            Reject(node => node["snapshot"]!["windowFreshnessReadbackBytes"] = 15);
+            Reject(node => { node["version"] = 2; node["snapshot"]!["preprocessingBackend"] = "d3d11-cuda-rgb-v2-experimental"; });
             Reject(node => node["snapshot"]!["totalDecisions"] = 0);
             Reject(node => node["snapshot"]!["totalInferences"] = 0);
             Reject(node =>
