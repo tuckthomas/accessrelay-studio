@@ -132,7 +132,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
 
         <Card className="voice-output-card">
           <div className="voice-output-heading"><span className="voice-large-icon"><Icon name={isRunning ? 'audio' : 'waves'} size={34} /></span>
-            <Badge tone={isRunning ? 'success' : 'neutral'}>{isRunning ? 'Voice is live' : 'Ready when you are'}</Badge></div>
+            {isRunning && <Badge tone="success">Voice is live</Badge>}</div>
           <h2>{selected?.name || 'Your natural voice, refined.'}</h2>
           <p className="muted">{neural ? 'A local reference model shapes your speech using the voice you saved.' : 'Use a little warmth, clarity or character. You decide how much.'}</p>
           <div className="voice-meter-pair"><Meter label="Microphone input" value={level(status.inputPeak)} /><Meter label="Processed output" value={level(status.outputPeak)} /></div>

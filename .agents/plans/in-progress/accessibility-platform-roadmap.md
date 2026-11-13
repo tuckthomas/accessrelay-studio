@@ -250,6 +250,36 @@ https://github.com/tuckthomas/accessrelay-studio/actions/runs/43286208711.
 Real Windows UI/model/device acceptance remains open.
 Marketplace split: deferred until the contract is proven.
 
+Remote Play platform boundary correction (2026-11-12): source extraction alone
+had left NBA profile requirements in the general desktop workspace. The following
+follow-up corrects that UI/service boundary; it does not complete the real-device
+acceptance item above or introduce a marketplace.
+
+- [x] Default Remote Play to no game plugin; allow any capturable game window to be
+      previewed without an NBA player/shot profile, inference or controller output.
+- [x] Put NBA setup, camera choices, training policy, meter/feedback capture and shot
+      review behind its selected, registered plugin workspace. Preserve stored profiles,
+      fingerprints, selection and full profile metadata in recorded evidence.
+- [x] Use typed game-owned profile/adaptor contracts in the shared desktop service,
+      capture session and recorder; retain host scheduling, freshness and output ownership.
+- [x] Scope NBA controller feedback UI/actions to controller setups linked to its pack.
+      Keep the generic sequence editor independent of NBA-specific presentation/types.
+- [x] Remove the idle "Ready when you are" tags from Remote Play and Voice.
+- [x] Validate changed React workflows, plugin CRUD/export/stale-save compatibility,
+      TypeScript/Vite and Windows publishing. No screen access or physical actuation
+      was used for these software checks.
+- [ ] Perform native capture with another game and plugin selection/training with NBA
+      on the intended Windows setup. Physical/model accuracy acceptance remains open.
+
+Implementation commit: `5b4d8bb1d65fe419a70aeb13e0e7dd6941bd42c7`.
+Validation: 16 focused Remote Play/NBA workflow checks and 14 controller workflow
+checks passed; the bounded `Verification --game-plugin` entry point passed saved-profile,
+full metadata export, persistence, stale-save and unrelated-setup rejection checks.
+The Windows publish produced `1.9.0-beta.9`. The same idle tag on Voice was removed
+in the following documentation/UI cleanup commit. No broad suite or physical capture
+acceptance is claimed. Registration is reviewed/bundled code, not arbitrary DLL/JS loading;
+new game-specific inference tasks still require a compatible typed adapter.
+
 ## 10. Dataset provenance and training interoperability
 
 - [x] Add direct regression coverage for existing train/validation/held-out session
