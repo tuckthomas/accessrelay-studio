@@ -11,6 +11,7 @@ internal sealed partial class CaptureD3D11 : IDisposable
     internal object Sync { get; } = new();
     internal nint NativeDevice => _device;
     internal nint NativeContext => _context;
+    internal uint FeatureLevel { get; }
     private int _references = 1, _ownerReleased;
     private nint _device, _context, _staging;
     private TextureDescription _stagingDescription;
@@ -28,7 +29,7 @@ internal sealed partial class CaptureD3D11 : IDisposable
             // D3D_DRIVER_TYPE_HARDWARE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, SDK version 7.
             Marshal.ThrowExceptionForHR(D3D11CreateDevice(adapter, adapter != 0 ? 0u : software ? 5u : 1u, 0, 0x20, 0, 0, 7,
                 out _device, out uint featureLevel, out _context));
-            if (featureLevel < 0xb000) throw new NotSupportedException("GPU RGB preprocessing requires D3D11 feature level 11 or later.");
+            FeatureLevel = featureLevel;
             Guid dxgiDeviceId = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
             Marshal.ThrowExceptionForHR(Marshal.QueryInterface(_device, in dxgiDeviceId, out var dxgi));
             try

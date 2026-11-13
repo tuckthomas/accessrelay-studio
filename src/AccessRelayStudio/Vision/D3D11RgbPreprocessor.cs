@@ -29,6 +29,7 @@ internal sealed class D3D11RgbPreprocessor : IDisposable
         _graphics = graphics; _plan = plan; _deviceLease = graphics.Retain();
         try
         {
+            if (graphics.FeatureLevel < 0xb000) throw new NotSupportedException("GPU RGB preprocessing requires D3D11 feature level 11 or later. Select CPU preprocessing.");
             lock (graphics.Sync)
             {
                 nint device = graphics.NativeDevice;
@@ -139,8 +140,11 @@ cbuffer Settings : register(b0) {
 float3 Bytes(uint x, uint y) { return round(Source.Load(int3(x, y, 0)).rgb * 255.0f); }
 uint2 HashByte(uint2 hash, uint value) {
     hash.x ^= value;
-    uint low, high;
-    umulExtended(hash.x, 435u, low, high);
+    // Split the small multiplier into 16-bit limbs: FXC/SM5 has no GLSL
+    // umulExtended intrinsic, and each intermediate fits in a uint.
+    uint lowWord = (hash.x & 65535u) * 435u;
+    uint highWord = (hash.x >> 16u) * 435u + (lowWord >> 16u);
+    uint low = (highWord << 16u) | (lowWord & 65535u), high = highWord >> 16u;
     hash.y = hash.y * 435u + hash.x * 256u + high;
     hash.x = low;
     return hash;
