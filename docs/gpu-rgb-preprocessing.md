@@ -63,7 +63,7 @@ request one every 200 ms; recording requests images according to its capture pol
 Hide/minimize the main and detached preview windows, or leave capture pages, to
 measure the inference-only case. This does not stop observation.
 
-Performance format 3 identifies inference and preparation backends and records:
+Performance format 4 identifies inference and preparation backends and records:
 
 - Preparation wall time, including dispatch, small metadata readback/synchronization
   and CUDA history transfers; this is not isolated GPU kernel time.
@@ -75,9 +75,19 @@ Preview download happens after the model decision and can delay processing of th
 next frame. Recording download happens before the decision. These scopes overlap
 other stages; do not add percentile values together. Formats 1/2 remain readable
 with unavailable new stages. Cross-format comparisons require fresh baselines.
-Matching format-3 runs may compare preparation/provider choices while retaining
+Matching format-4 runs may compare preparation/provider choices while retaining
 model, camera, crop, source dimensions, timing settings, assistance and recording
 compatibility. Gameplay can differ between runs; differences are descriptive.
+
+From beta.16, `CaptureTicks` marks local WGC frame receipt before image copies,
+using `Stopwatch.GetTimestamp()`. This measures receipt-to-decision latency and
+includes CPU capture readback, rather than claiming compositor or Xbox frame age.
+WGC `SystemRelativeTime` is preserved independently as `CompositorTicks` in raw
+diagnostics and training indexes. On this PC's live Remote Play source it frequently
+led processing completion by 2–7 ms; using it as receipt time rejected almost every
+frame. Neither timestamp is clamped or offset. Diagnostics format 3 and new training
+takes identify the receipt basis explicitly. Older performance formats cannot be
+compared with format 4; older training takes retain their original timing basis.
 
 ## Run the NVIDIA integration probe
 

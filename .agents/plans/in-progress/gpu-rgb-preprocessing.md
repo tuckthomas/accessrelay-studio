@@ -167,7 +167,8 @@ Paired CUDA inference passed five decisions with maximum output difference zero.
 The model was exported by the existing `--diagnostic-fixture` path (160×160,
 four frames, global-pool/residual, seed 20261111); its SHA-256 is
 `a3d4e7f167cdaad318ed964a2dd513edb8acc6cdf2405f68e00270e5fa4efed2`.
-It remains untrained, outside the installed model library, with `validation=null`.
+It remains untrained with `validation=null`. A separately named copy was temporarily
+imported for live benchmarking; it cannot authorize controller release.
 
 Raw reports and environment/binary identities are retained locally under
 `artifacts/GpuHardwareEvidence/` in the original project folder. The complete
@@ -175,3 +176,24 @@ hardware items above remain open: this probe uses CPU-uploaded synthetic images;
 live WGC source/Stop/restart behavior and matched gameplay latency/resource runs
 still require observation on the intended source. No release gate or default is
 changed by this result. Beta.15 packages the current GPU controls for that work.
+
+### Live capture clock correction — 2026-11-13
+
+The first 2560×1440 Chrome Remote Play CPU-preparation run was unusable: 5,287
+timing samples excluded, 206 retained frames and 12 inferences. Its last 2,048 raw
+frames included 2,003 compositor timestamps later than processing completion
+(median apparent completion age −2.4644 ms). Original evidence is retained at
+`artifacts/GpuHardwareEvidence/cpu-live-invalid-diagnostics.json`; no speed claim
+is derived from that run.
+
+Beta.16 timestamps local receipt before image copies for both capture paths,
+preserving the original WGC compositor timestamp separately through leases,
+diagnostics and training indexes. No timestamp clamping, fixed offset or artificial
+wait is used. Performance format 4 prevents comparison with the older timing basis;
+new training takes explicitly identify their capture-time basis. The measurements
+are local receipt-to-decision latency, not compositor, stream or console latency.
+
+Focused native verification passed: WGC capture/resize/minimize/restore/close and
+receipt/compositor separation; GPU leases including metadata reuse, shader parity,
+freeze handling and release. Live matched runs and live GPU lifecycle acceptance
+remain pending until measured with this correction.

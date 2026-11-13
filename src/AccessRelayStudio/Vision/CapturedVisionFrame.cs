@@ -8,7 +8,8 @@ internal interface ICapturedFrameSurface
 }
 
 /// <summary>An exclusive lease over CPU or GPU BGRA8 pixels. GPU CPU-access is lazy and measured.
-/// CaptureTicks uses the PC QPC clock; it is not the Xbox's original render timestamp.</summary>
+/// CaptureTicks marks local WGC frame receipt before image copies, on the PC QPC clock.
+/// CompositorTicks preserves WGC's separate presentation metadata; neither is Xbox render time.</summary>
 internal sealed class CapturedVisionFrame : IDisposable
 {
     private readonly byte[]? _buffer;
@@ -16,7 +17,7 @@ internal sealed class CapturedVisionFrame : IDisposable
     private Action? _release;
 
     internal CapturedVisionFrame(byte[] buffer, int width, int height, long captureTicks,
-        long sequence, long sourceGeneration, Action release, double? captureReadbackMs = null)
+        long sequence, long sourceGeneration, Action release, double? captureReadbackMs = null, long? compositorTicks = null)
     {
         if (captureReadbackMs is { } duration && (!double.IsFinite(duration) || duration < 0))
             throw new ArgumentOutOfRangeException(nameof(captureReadbackMs));
@@ -28,19 +29,22 @@ internal sealed class CapturedVisionFrame : IDisposable
         SourceGeneration = sourceGeneration;
         _release = release;
         CaptureReadbackMs = captureReadbackMs;
+        CompositorTicks = compositorTicks;
     }
 
     internal CapturedVisionFrame(ICapturedFrameSurface surface, int width, int height, long captureTicks,
-        long sequence, long sourceGeneration, Action release)
+        long sequence, long sourceGeneration, Action release, long? compositorTicks = null)
     {
         _surface = surface; Width = width; Height = height; CaptureTicks = captureTicks;
         Sequence = sequence; SourceGeneration = sourceGeneration; _release = release;
+        CompositorTicks = compositorTicks;
     }
 
     public int Width { get; }
     public int Height { get; }
     public int Stride => checked(Width * 4);
     public long CaptureTicks { get; }
+    public long? CompositorTicks { get; }
     public long Sequence { get; }
     public long SourceGeneration { get; }
     public double? CaptureReadbackMs { get; }

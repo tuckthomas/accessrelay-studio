@@ -189,6 +189,10 @@ internal sealed class RemotePlayCapture : IDisposable
                 {
                     if (frame is null)
                         return;
+                    // Timestamp actual local receipt, before CPU/GPU copies. WGC's compositor
+                    // timestamp can lead receipt on live sources; retain it without clamping it
+                    // or using it as the processing/deadline clock.
+                    long captureTicks = Stopwatch.GetTimestamp();
                     if (!IsWindow(resource.Hwnd) || IsIconic(resource.Hwnd))
                     {
                         PauseResource(resource, "Capture paused: restore the source window.");
@@ -210,12 +214,11 @@ internal sealed class RemotePlayCapture : IDisposable
                     }
                     else
                     {
-                        // WGC SystemRelativeTime is QPC represented in 100 ns TimeSpan units.
-                        long captureTicks = checked((long)(frame.SystemRelativeTime.Ticks *
+                        long compositorTicks = checked((long)(frame.SystemRelativeTime.Ticks *
                             ((double)Stopwatch.Frequency / TimeSpan.TicksPerSecond)));
                         published = resource.GpuFrames is { } gpu
-                            ? resource.Graphics.CopyGpuFrame(frame, gpu, captureTicks, ++_sequence, _generation)
-                            : resource.Graphics.CopyFrame(frame, _frames, captureTicks, ++_sequence, _generation);
+                            ? resource.Graphics.CopyGpuFrame(frame, gpu, captureTicks, ++_sequence, _generation, compositorTicks)
+                            : resource.Graphics.CopyFrame(frame, _frames, captureTicks, ++_sequence, _generation, compositorTicks);
                         if (published)
                         {
                             _latestTicks = captureTicks;

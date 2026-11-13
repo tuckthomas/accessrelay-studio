@@ -76,7 +76,9 @@ internal sealed class ShotTracker
         }
         if (frame.CaptureTicks <= 0 || frame.CaptureTicks > now || frame.Sequence <= _lastSequence ||
             (_lastCapture != 0 && frame.CaptureTicks <= _lastCapture) ||
-            Stopwatch.GetElapsedTime(frame.CaptureTicks, now).TotalMilliseconds > _settings.MaximumFrameAgeMs)
+            Stopwatch.GetElapsedTime(frame.CaptureTicks, now).TotalMilliseconds > _settings.MaximumFrameAgeMs ||
+            (frame.CompositorTicks is { } compositor &&
+                Stopwatch.GetElapsedTime(compositor, now).TotalMilliseconds > _settings.MaximumFrameAgeMs))
         {
             return Reject(frame, snapshot, now, "The player observation has an invalid, repeated or stale capture timestamp");
         }

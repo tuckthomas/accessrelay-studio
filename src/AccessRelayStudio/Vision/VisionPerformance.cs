@@ -201,7 +201,7 @@ internal sealed class VisionPerformanceBuffer
 
 internal sealed record VisionPerformanceRun
 {
-    public int Version { get; init; } = 3;
+    public int Version { get; init; } = 4;
     public Guid RunId { get; init; } = Guid.NewGuid();
     public string Label { get; init; } = "Performance run";
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
@@ -258,7 +258,7 @@ internal static class VisionPerformanceRuns
 
     private static void Validate(VisionPerformanceRun run)
     {
-        if (run.Version is not (1 or 2 or 3) || run.RunId == Guid.Empty || string.IsNullOrWhiteSpace(run.Label) || run.Label.Length > 80 ||
+        if (run.Version is not (1 or 2 or 3 or 4) || run.RunId == Guid.Empty || string.IsNullOrWhiteSpace(run.Label) || run.Label.Length > 80 ||
             run.Label.Any(char.IsControl) || run.Snapshot is not { } data)
             throw new InvalidDataException("The performance run version, label or snapshot is invalid.");
         if (data.ExecutionProvider is not ("Capture only" or "CPUExecutionProvider" or "CUDAExecutionProvider") ||

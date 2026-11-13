@@ -6,7 +6,7 @@ namespace EliteScriptStudio.Vision;
 
 internal sealed partial class CaptureD3D11
 {
-    internal bool CopyGpuFrame(Direct3D11CaptureFrame frame, GpuCaptureBuffer destination, long ticks, long sequence, long generation)
+    internal bool CopyGpuFrame(Direct3D11CaptureFrame frame, GpuCaptureBuffer destination, long ticks, long sequence, long generation, long? compositorTicks = null)
     {
         nint surface = WinRT.MarshalInterface<IDirect3DSurface>.FromManaged(frame.Surface), access = 0, texture = 0;
         try
@@ -18,7 +18,7 @@ internal sealed partial class CaptureD3D11
             int width = frame.ContentSize.Width, height = frame.ContentSize.Height;
             if (width != description.Width || height != description.Height) return false;
             if (description.Format != 87 || description.SampleCount != 1) throw new InvalidDataException("GPU capture requires a BGRA8 single-sample source.");
-            return destination.Publish(texture, width, height, ticks, sequence, generation);
+            return destination.Publish(texture, width, height, ticks, sequence, generation, compositorTicks);
         }
         finally { Release(ref texture); Release(ref access); Release(ref surface); }
     }

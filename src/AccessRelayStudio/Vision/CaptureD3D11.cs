@@ -57,7 +57,7 @@ internal sealed partial class CaptureD3D11 : IDisposable
     internal IDirect3DDevice Device => _winrtDevice ?? throw new ObjectDisposedException(nameof(CaptureD3D11));
 
     internal bool CopyFrame(Direct3D11CaptureFrame frame, LatestFrameBuffer destination,
-        long ticks, long sequence, long generation)
+        long ticks, long sequence, long generation, long? compositorTicks = null)
     {
         nint surface = WinRT.MarshalInterface<IDirect3DSurface>.FromManaged(frame.Surface);
         nint access = 0, texture = 0;
@@ -91,7 +91,7 @@ internal sealed partial class CaptureD3D11 : IDisposable
             }
             _copy!(_context, _staging, texture);
             Marshal.ThrowExceptionForHR(_map!(_context, _staging, 0, 1, 0, out var mapped));
-            try { return destination.PublishMapped(mapped.Data, mapped.RowPitch, width, height, ticks, sequence, generation, readbackStarted); }
+            try { return destination.PublishMapped(mapped.Data, mapped.RowPitch, width, height, ticks, sequence, generation, readbackStarted, compositorTicks); }
             finally { _unmap!(_context, _staging, 0); }
         }
         finally

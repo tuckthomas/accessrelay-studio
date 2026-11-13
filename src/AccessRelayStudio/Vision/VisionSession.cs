@@ -46,7 +46,7 @@ internal sealed class VisionSession : IDisposable
     private bool _disposed;
     private readonly record struct FrameMetric(long Sequence, long CaptureTicks, long CompletedTicks,
         double ProcessingMs, bool PredictionAccepted, VisionStatusSnapshot Output,
-        long AllocatedBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections);
+        long AllocatedBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections, long? CompositorTicks);
 
     internal VisionSession(StudioRuntime runtime) => _runtime = runtime;
     internal VisionSessionStatus Status { get { lock (_gate) return _status; } }
@@ -195,6 +195,14 @@ internal sealed class VisionSession : IDisposable
                 {
                     using (frame)
                     {
+                        if (frame.CompositorTicks is { } compositor &&
+                            Stopwatch.GetElapsedTime(compositor).TotalMilliseconds > settings.MaximumFrameAgeMs)
+                        {
+                            fresh = false;
+                            if (sourceReady) _runtime.InvalidateVisionSession("The compositor frame is stale. Resume observation and rearm.");
+                            sourceReady = false;
+                            model?.ResetTracking();
+                        }
                         var observedStatus = _runtime.VisionStatus;
                         if (sourceReady && !observedStatus.SourceReady)
                         { sourceReady = false; model?.ResetTracking(); }
@@ -270,7 +278,7 @@ internal sealed class VisionSession : IDisposable
                         {
                             _metrics[_metricIndex] = new(frame.Sequence, frame.CaptureTicks, completed, processingMs,
                                 accepted, _runtime.VisionStatus, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
-                                GC.CollectionCount(0) - gen0, GC.CollectionCount(1) - gen1, GC.CollectionCount(2) - gen2);
+                                GC.CollectionCount(0) - gen0, GC.CollectionCount(1) - gen1, GC.CollectionCount(2) - gen2, frame.CompositorTicks);
                             _metricIndex = (_metricIndex + 1) % _metrics.Length;
                             _metricCount = Math.Min(_metricCount + 1, _metrics.Length);
                             _performanceReplacedFrames = Math.Max(0, source.DroppedFrames - _performanceDropBaseline);
@@ -353,8 +361,8 @@ internal sealed class VisionSession : IDisposable
         double Percentile(double quantile) => samples.Length == 0 ? 0 : samples[Math.Max(0, (int)Math.Ceiling(samples.Length * quantile) - 1)];
         var report = new
         {
-            version = 2, exportedAtUtc = DateTimeOffset.UtcNow, stopwatchFrequency = Stopwatch.Frequency,
-            timingScope = "PC capture, processing and local controller handoff. Xbox render and applied input times are not measured.",
+            version = 3, exportedAtUtc = DateTimeOffset.UtcNow, stopwatchFrequency = Stopwatch.Frequency,
+            timingScope = "CaptureTicks marks local WGC frame receipt before image copies. CompositorTicks retains unmodified WGC metadata and may lead receipt. Processing and local controller handoff are measured; Xbox render and applied input times are not.",
             gcScope = "Collection counts during a frame correlate with GC activity; they are not measured pause durations. Allocation bytes cover the vision worker thread only.",
             sampleCount = samples.Length, p50Ms = Percentile(.5), p95Ms = Percentile(.95), p99Ms = Percentile(.99),
             maximumMs = samples.LastOrDefault(), status, output = _runtime.VisionStatus, frames = metrics,

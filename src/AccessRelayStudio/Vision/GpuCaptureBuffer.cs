@@ -18,7 +18,7 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
     internal void NoteDroppedFrame() => Interlocked.Increment(ref _dropped);
     internal long ContentChangedTicks => Interlocked.Read(ref _contentTicks);
 
-    internal bool Publish(nint source, int width, int height, long ticks, long sequence, long generation)
+    internal bool Publish(nint source, int width, int height, long ticks, long sequence, long generation, long? compositorTicks = null)
     {
         GpuFrameSurface? slot;
         lock (_gate)
@@ -32,6 +32,7 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
         try
         {
             slot.Copy(source, width, height); slot.Ticks = ticks; slot.Sequence = sequence; slot.Generation = generation;
+            slot.CompositorTicks = compositorTicks;
             lock (_gate)
             {
                 if (_disposed) { slot.State = 0; slot.Dispose(); return false; }
@@ -49,7 +50,7 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
             if (_disposed || _pending is not { } slot) { frame = null; return false; }
             _pending = null; slot.State = 3;
             slot.ReportFingerprint = hash => Report(slot.Sequence, slot.Ticks, slot.Generation, hash);
-            frame = new(slot, slot.Width, slot.Height, slot.Ticks, slot.Sequence, slot.Generation, () => Release(slot));
+            frame = new(slot, slot.Width, slot.Height, slot.Ticks, slot.Sequence, slot.Generation, () => Release(slot), slot.CompositorTicks);
             return true;
         }
     }
@@ -84,6 +85,7 @@ internal sealed class GpuFrameSurface(CaptureD3D11 graphics) : ICapturedFrameSur
     private int _disposed;
     internal int State, Width, Height;
     internal long Ticks, Sequence, Generation;
+    internal long? CompositorTicks;
     internal Action<ulong>? ReportFingerprint;
     internal CaptureD3D11 Graphics => graphics;
     internal nint View => _view;

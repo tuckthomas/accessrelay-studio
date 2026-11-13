@@ -19,9 +19,9 @@ internal sealed class VisionTrainingRecorder : IDisposable
     { internal int ByteLength => checked(Width * Height * 4); }
     private sealed record RegionFrameEntry(string Name, string File, long OffsetBytes, int ByteLength);
     private sealed record Pending(byte[] Pixels, long Sequence, long CaptureTicks, long ObservedTicks,
-        long ShotToken, bool PhysicalShootHeld, long SourceGeneration);
+        long ShotToken, bool PhysicalShootHeld, long SourceGeneration, long? CompositorTicks);
     private sealed record FrameEntry(long Sequence, long CaptureTicks, string File, long OffsetBytes, int ByteLength,
-        long ShotToken, bool PhysicalShootHeld, long ObservedTicks, long SourceGeneration, RegionFrameEntry[]? Evidence);
+        long ShotToken, bool PhysicalShootHeld, long ObservedTicks, long SourceGeneration, RegionFrameEntry[]? Evidence, long? CompositorTicks);
     private readonly Channel<Pending> _frames = Channel.CreateBounded<Pending>(new BoundedChannelOptions(8)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly List<FrameEntry> _index = [];
@@ -132,7 +132,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
                 offset += region.ByteLength;
             }
             if (_frames.Writer.TryWrite(new(buffer, frame.Sequence, frame.CaptureTicks, observedTicks,
-                    output.ShotToken, output.ShootHeld, frame.SourceGeneration)))
+                    output.ShotToken, output.ShootHeld, frame.SourceGeneration, frame.CompositorTicks)))
                 buffer = null!;
             else lock (_gate)
             {
@@ -189,7 +189,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
                     }
                     totalBytes += _bytesPerFrame;
                     _index.Add(new(frame.Sequence, frame.CaptureTicks, "frames.bgra", offset, FrameBytes,
-                        frame.ShotToken, frame.PhysicalShootHeld, frame.ObservedTicks, frame.SourceGeneration, evidence));
+                        frame.ShotToken, frame.PhysicalShootHeld, frame.ObservedTicks, frame.SourceGeneration, evidence, frame.CompositorTicks));
                     Interlocked.Increment(ref _storedFrames);
                 }
                 finally { ArrayPool<byte>.Shared.Return(frame.Pixels); }
@@ -248,7 +248,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
             sourceTitle = _sourceTitle, shotProfile = _profile.ExportProfile(), stopwatchFrequency = Stopwatch.Frequency,
             frames = _index, droppedFrames = Interlocked.Read(ref _dropped), complete,
             labelsRequired = "Target release labels require reviewed practice experiments; physical release and ball departure are not automatically ground truth.",
-            timingScope = "PC capture timestamps; original Xbox render time is not measured.",
+            captureTimeBasis = "wgc-local-receipt-qpc-v1",
+            timingScope = "captureTicks marks local WGC frame receipt before image copies. compositorTicks preserves WGC metadata separately and can lead receipt. Original Xbox render time is not measured.",
             captureEvidence = _settings.TrainingCapture.Configured ? new
             {
                 version = 1, purpose = _settings.TrainingCapture.Purpose, layout = _settings.TrainingCapture,

@@ -37,6 +37,11 @@ if (args.Contains("--preview-only", StringComparer.Ordinal))
 }
 
 BufferCheck();
+if (args.Contains("--capture-only", StringComparer.Ordinal))
+{
+    CaptureCheck();
+    return;
+}
 if (!args.Contains("--buffer-only", StringComparer.Ordinal))
 {
     DatasetChecks.Run();
@@ -63,8 +68,9 @@ static void BufferCheck()
         var data = new byte[72];
         Array.Fill(data, (byte)17);
         Marshal.Copy(data, 0, mapped, data.Length);
-        Check(buffer.PublishMapped(mapped, 24, 4, 3, 101, 1, 1), "Publish A failed.");
+        Check(buffer.PublishMapped(mapped, 24, 4, 3, 101, 1, 1, compositorTicks: 201), "Publish A failed.");
         Check(buffer.TryAcquireLatest(out var first), "Acquire A failed.");
+        Check(first!.CaptureTicks == 101 && first.CompositorTicks == 201, "Receipt and leading compositor timestamps were conflated.");
         Check(first!.Buffer.Length == 48 && first.Stride == 16 && first.Pixels.Span[^1] == 17, "Row pitch was not removed.");
         Check(buffer.PublishMapped(mapped, 24, 4, 3, 102, 2, 1), "Publish B failed.");
         Check(buffer.TryAcquireLatest(out var second), "Acquire B failed.");
@@ -78,6 +84,7 @@ static void BufferCheck()
         Check(buffer.PublishMapped(mapped, 24, 4, 3, 104, 4, 1), "Released slot was not reused.");
         Check(buffer.PublishMapped(mapped, 24, 4, 3, 105, 5, 1), "Pending newest frame was not replaced.");
         Check(buffer.TryAcquireLatest(out var latest) && latest!.Sequence == 5, "Consumer did not receive newest frame.");
+        Check(latest!.CompositorTicks is null, "A reused slot retained stale compositor metadata.");
         buffer.Dispose();
         Check(latest!.Pixels.Span[0] == 42 && second!.Pixels.Span[0] == 17, "Dispose invalidated outstanding leases.");
         second!.Dispose(); third!.Dispose(); latest.Dispose();
@@ -125,6 +132,7 @@ static void CaptureCheck()
         using var first = WaitFrame(capture);
         long age = Stopwatch.GetTimestamp() - first.CaptureTicks;
         Check(age >= 0 && age < 5 * Stopwatch.Frequency, "Capture timestamp is not on the QPC timeline.");
+        Check(first.CompositorTicks > 0 && first.CaptureReadbackMs >= 0, "Capture lost original compositor metadata or readback timing.");
         Check(first.Width > 100 && first.Height > 100 && first.Pixels.Span.AnyNonzero(), "Captured pixels were empty.");
         int initialWidth = first.Width;
         long initialGeneration = first.SourceGeneration;

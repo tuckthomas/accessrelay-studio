@@ -25,7 +25,7 @@ internal sealed class LatestFrameBuffer : IDisposable
     internal void NoteDroppedFrame() => Interlocked.Increment(ref _dropped);
 
     internal bool PublishMapped(nint pixels, uint rowPitch, int width, int height,
-        long captureTicks, long sequence, long sourceGeneration, long? readbackStartedTicks = null)
+        long captureTicks, long sequence, long sourceGeneration, long? readbackStartedTicks = null, long? compositorTicks = null)
     {
         int stride = checked(width * 4), bytes = checked(stride * height);
         if (width <= 0 || height <= 0 || bytes > MaximumFrameBytes || rowPitch < stride || pixels == 0)
@@ -88,6 +88,7 @@ internal sealed class LatestFrameBuffer : IDisposable
                 slot.Width = width;
                 slot.Height = height;
                 slot.CaptureTicks = captureTicks;
+                slot.CompositorTicks = compositorTicks;
                 slot.Sequence = sequence;
                 slot.Generation = sourceGeneration;
                 slot.ReadbackMs = readbackStartedTicks is { } start ? Stopwatch.GetElapsedTime(start).TotalMilliseconds : null;
@@ -116,7 +117,7 @@ internal sealed class LatestFrameBuffer : IDisposable
             _pending = null;
             slot.State = SlotState.Leased;
             frame = new(slot.Buffer, slot.Width, slot.Height, slot.CaptureTicks,
-                slot.Sequence, slot.Generation, slot.Release, slot.ReadbackMs);
+                slot.Sequence, slot.Generation, slot.Release, slot.ReadbackMs, slot.CompositorTicks);
             return true;
         }
     }
@@ -166,6 +167,7 @@ internal sealed class LatestFrameBuffer : IDisposable
         internal SlotState State;
         internal int Width, Height;
         internal long CaptureTicks, Sequence, Generation;
+        internal long? CompositorTicks;
         internal double? ReadbackMs;
         internal Action Release { get; }
     }

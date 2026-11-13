@@ -92,7 +92,8 @@ internal static class GpuPreprocessingChecks
         {
             var a = Image(4, 3); var b = a.Select(value => (byte)(value ^ 127)).ToArray(); var c = a.Select(value => (byte)(value ^ 255)).ToArray();
             source = Texture(graphics, 4, 3, a);
-            Require(pool.Publish(source, 4, 3, 101, 1, 7) && pool.TryAcquireLatest(out first), "GPU lease A failed.");
+            Require(pool.Publish(source, 4, 3, 101, 1, 7, compositorTicks: 201) && pool.TryAcquireLatest(out first), "GPU lease A failed.");
+            Require(first!.CaptureTicks == 101 && first.CompositorTicks == 201, "GPU lease conflated receipt and compositor timestamps.");
             UpdateTexture(graphics, source, b, 16);
             Require(pool.Publish(source, 4, 3, 102, 2, 7) && pool.TryAcquireLatest(out second), "GPU lease B failed.");
             UpdateTexture(graphics, source, c, 16);
@@ -108,6 +109,7 @@ internal static class GpuPreprocessingChecks
             var small = Image(2, 2); resized = Texture(graphics, 2, 2, small);
             Require(pool.Publish(resized, 2, 2, 105, 5, 8) && pool.Publish(resized, 2, 2, 106, 6, 8), "GPU resize/pending replacement failed.");
             Require(pool.TryAcquireLatest(out last) && last!.Sequence == 6 && last.Width == 2 && last.SourceGeneration == 8, "GPU newest-frame metadata differs.");
+            Require(last!.CompositorTicks is null, "GPU slot reuse retained stale compositor metadata.");
             pool.Dispose(); graphics.Dispose();
             Require(last!.Pixels.Span.SequenceEqual(small) && second!.Pixels.Span.SequenceEqual(b), "Capture shutdown invalidated a GPU frame lease.");
             Require(!pool.TryAcquireLatest(out _) && !pool.Publish(source, 4, 3, 107, 7, 8), "Disposed GPU publication remained active.");
