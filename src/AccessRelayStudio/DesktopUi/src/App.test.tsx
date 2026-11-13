@@ -25,6 +25,27 @@ async function openMappingDraft() {
   selectValue(screen.getByLabelText('What should it do?'), 'moving');
 }
 describe('workspace draft and capture visibility', () => {
+  it('separates live gameplay and training, moves offline jobs out of Settings, and guards drafts between pages', async () => {
+    state.vision.selectedPluginId = 'nba2k27';
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Live Gameplay', exact: true }));
+    expect(screen.queryByRole('button', { name: 'Record training clip' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Detach', exact: true })).toBeTruthy();
+    fireEvent.click(screen.getByText('Analysis settings & measured calibration'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }), { target: { value: '137' } });
+    fireEvent.click(screen.getByRole('button', { name: 'AI Model Training', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect((screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }) as HTMLInputElement).value).toBe('137');
+    fireEvent.click(screen.getByRole('button', { name: 'AI Model Training', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(await screen.findByRole('button', { name: 'Record training clip' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Live analysis' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Offline training jobs' })).toBeTruthy();
+    await waitFor(() => expect(harness.command).toHaveBeenCalledWith('app.page', { page: 'training', visible: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings', exact: true }));
+    expect(screen.queryByRole('button', { name: 'Register dataset folder' })).toBeNull();
+    expect(harness.command.mock.calls.some(([method]) => ['vision.start', 'vision.stop', 'vision.recordStart'].includes(method))).toBe(false);
+  });
   it('keeps an unsaved mapping through status updates and a cancelled navigation', async () => {
     await openMappingDraft();
     emit({ type: 'status', status: { controller: { ...state.controller.status, meanPollMs: 4.2 } } });

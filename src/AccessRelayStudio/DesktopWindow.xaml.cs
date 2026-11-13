@@ -15,7 +15,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using Windows.Graphics;
-using Windows.Storage.Streams;
 using WinRT.Interop;
 
 namespace EliteScriptStudio;
@@ -32,6 +31,7 @@ public sealed partial class DesktopWindow : Window
     private DesktopVoiceService? _voice;
     private DesktopAssistantService? _assistant;
     private DesktopMarketplaceService? _marketplace;
+    private DesktopGameplayWindow? _gameplayWindow;
     private readonly SystemPerformanceMonitor _performance = new();
     private readonly DesktopPreferenceStore _preferences = new(DesktopEnvironment.DataDirectory("Preferences"));
     private bool _resourceMonitoringEnabled;
@@ -42,7 +42,7 @@ public sealed partial class DesktopWindow : Window
     private bool _replaceBrowser;
     private bool _started, _initializing, _ready, _closing, _allowClose, _clientVisible = true;
     private bool _hasUnsavedChanges, _discardClose;
-    private string _page = "workspace", _startupError = "";
+    private string _page = "workspace", _startupError = "", _theme = "light";
     private long _snapshotAt;
 
     public DesktopWindow()
@@ -68,7 +68,7 @@ public sealed partial class DesktopWindow : Window
         DesktopEmergencyStop.Click += async (_, _) => { try { await StopAllAsync(); DesktopLoadingText.Text = "All processing stopped."; } catch (Exception error) { DesktopLoadingText.Text = error.Message; } };
         AppWindow.Changed += (_, _) => UpdatePresentation();
         AppWindow.Closing += ClosingAsync;
-        Closed += (_, _) => { _statusTimer.Stop(); _browser.Close(); };
+        Closed += (_, _) => { _statusTimer.Stop(); _gameplayWindow?.Close(); _browser.Close(); };
     }
 
     private async Task InitializeAsync()
@@ -236,8 +236,10 @@ public sealed partial class DesktopWindow : Window
                 _ready = true; DesktopLoading.Visibility = Visibility.Collapsed; UpdatePresentation(); return Snapshot();
             case "app.page":
                 string page = args.Text("page", "workspace");
-                if (page is not ("workspace" or "controller" or "vision" or "voice" or "marketplace" or "settings")) throw new InvalidDataException("Choose an available workspace.");
+                if (page is not ("workspace" or "controller" or "vision" or "training" or "voice" or "marketplace" or "settings")) throw new InvalidDataException("Choose an available workspace.");
                 _page = page; _clientVisible = args.Flag("visible", true); UpdatePresentation(); return null;
+            case "app.gameplayDetach": await DetachGameplayAsync(); return null;
+            case "app.gameplayAttach": DispatcherQueue.TryEnqueue(AttachGameplay); return null;
             case "app.draftState": _hasUnsavedChanges = args.Flag("dirty"); return null;
             case "app.themeSet":
                 string theme = args.Text("theme");
@@ -249,7 +251,8 @@ public sealed partial class DesktopWindow : Window
                 _resourceMonitoringEnabled = monitorEnabled; UpdatePresentation(); return null;
             case "app.close":
                 if (!args.Flag("discard")) throw new InvalidOperationException("Confirm whether to keep editing before closing.");
-                _discardClose = true; DispatcherQueue.TryEnqueue(Close); return null;
+                // Explicit close requests must run the same cleanup as the native close gesture.
+                _discardClose = true; DispatcherQueue.TryEnqueue(async () => await CloseAsync()); return null;
             case "app.stopAll": await StopAllAsync(); return new { message = "Capture, voice, scripts and controller output stopped." };
             case "app.installDriver":
                 await VirtualMicDriver.InstallAsync(); return new { message = "The virtual device driver is ready." };
@@ -268,6 +271,7 @@ public sealed partial class DesktopWindow : Window
 
     private void ApplyTheme(string theme)
     {
+        _theme = theme; _gameplayWindow?.SetTheme(theme);
         bool dark = theme == "dark";
         DesktopRoot.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
         var background = dark ? ColorHelper.FromArgb(255, 17, 23, 29) : Colors.White;
@@ -292,7 +296,7 @@ public sealed partial class DesktopWindow : Window
             engine = "C# / .NET", interfaceTechnology = "React / WebView2 · local bundled files", platform = "Windows x64",
             startupError = _startupError, isVerification = DesktopEnvironment.IsVerification, assistant = _assistant?.UiState(),
             resourceMonitoringEnabled = _resourceMonitoringEnabled },
-        system = _performance.Latest
+        system = _performance.Latest, gameplayWindow = new { detached = _gameplayWindow is not null }
     };
 
     private void PublishSnapshot()
@@ -308,7 +312,7 @@ public sealed partial class DesktopWindow : Window
         try
         {
             Post(new { type = "status", status = new { controller = _controller!.GetStatus(), vision = _vision!.GetStatus(),
-                voice = _voice!.GetStatus(), system = _performance.Latest } });
+                voice = _voice!.GetStatus(), system = _performance.Latest, gameplayWindow = new { detached = _gameplayWindow is not null } } });
             if (_snapshotAt == 0 || Stopwatch.GetElapsedTime(_snapshotAt).TotalSeconds >= 5) PublishSnapshot();
         }
         catch (Exception error) { Trace.TraceError("Desktop status: {0}", error.Message); }
@@ -320,7 +324,39 @@ public sealed partial class DesktopWindow : Window
     {
         bool visible = !_closing && _ready && IsPresenting();
         _performance.Enabled = _resourceMonitoringEnabled && visible && _page == "workspace";
-        _vision?.SetVisible(visible && _page == "vision"); _voice?.SetVisible(visible && _page == "voice");
+        _vision?.SetVisible((_gameplayWindow is null && visible && _page is "vision" or "training") || _gameplayWindow?.IsPresenting == true);
+        _voice?.SetVisible(visible && _page == "voice");
+    }
+
+    private async Task DetachGameplayAsync()
+    {
+        if (_gameplayWindow is not null) { _gameplayWindow.Activate(); return; }
+        if (_web is null || _vision is null) throw new InvalidOperationException("The gameplay session is unavailable.");
+        var window = new DesktopGameplayWindow(() => _vision.GetStatus(), async () =>
+        {
+            _assistant?.ForegroundCommand();
+            await _vision.InvokeAsync("stop", JsonSerializer.SerializeToElement(new { })); PublishSnapshot();
+        }, AttachGameplay, _vision.ReadMedia);
+        _gameplayWindow = window;
+        window.PresentationChanged += UpdatePresentation;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_gameplayWindow, window)) _gameplayWindow = null;
+            UpdatePresentation(); PublishSnapshot();
+        };
+        UpdatePresentation();
+        try { await window.OpenAsync(_web.Environment, _theme); }
+        catch { if (ReferenceEquals(_gameplayWindow, window)) window.Close(); throw; }
+    }
+
+    private void AttachGameplay()
+    {
+        _gameplayWindow?.Close();
+        if (!_closing)
+        {
+            if (AppWindow.Presenter is OverlappedPresenter presenter && presenter.State == OverlappedPresenterState.Minimized) presenter.Restore();
+            Activate();
+        }
     }
 
     private void Post(object value)
@@ -332,27 +368,13 @@ public sealed partial class DesktopWindow : Window
 
     private async void MediaRequestedAsync(CoreWebView2 sender, CoreWebView2WebResourceRequestedEventArgs args)
     {
-        using var deferral = args.GetDeferral();
-        try
+        await DesktopMediaResponse.SendAsync(sender, args, uri =>
         {
-            var uri = new Uri(args.Request.Uri);
-            DesktopMedia? media = null;
-            if (!_closing && args.Request.Method == "GET" && uri.Scheme == "https" && uri.Host == "media.accessrelay.test" && uri.IsDefaultPort)
-            {
-                if (uri.AbsolutePath.StartsWith("/vision/", StringComparison.Ordinal)) media = _vision?.ReadMedia(uri.AbsolutePath[8..]);
-                else if (uri.AbsolutePath.StartsWith("/voice/", StringComparison.Ordinal)) media = _voice?.ReadMedia(uri.AbsolutePath[7..]);
-            }
-            if (media is null)
-            { args.Response = sender.Environment.CreateWebResourceResponse(null, 404, "Not found", "Cache-Control: no-store\r\n"); return; }
-            var stream = new InMemoryRandomAccessStream();
-            using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
-            { writer.WriteBytes(media.Bytes); await writer.StoreAsync(); writer.DetachStream(); }
-            stream.Seek(0);
-            args.Response = sender.Environment.CreateWebResourceResponse(stream, 200, "OK", "Content-Type: " + media.ContentType
-                + "\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: " + AppOrigin + "\r\nX-Content-Type-Options: nosniff\r\n");
-        }
-        catch { args.Response = sender.Environment.CreateWebResourceResponse(null, 404, "Not found", "Cache-Control: no-store\r\n"); }
-        finally { deferral.Complete(); }
+            if (_closing) return null;
+            if (uri.AbsolutePath.StartsWith("/vision/", StringComparison.Ordinal)) return _vision?.ReadMedia(uri.AbsolutePath[8..]);
+            if (uri.AbsolutePath.StartsWith("/voice/", StringComparison.Ordinal)) return _voice?.ReadMedia(uri.AbsolutePath[7..]);
+            return null;
+        });
     }
 
     private async Task StopAllAsync()
@@ -376,11 +398,16 @@ public sealed partial class DesktopWindow : Window
     {
         if (_allowClose) return;
         args.Cancel = true;
+        await CloseAsync();
+    }
+
+    private async Task CloseAsync()
+    {
         if (_closing) return;
         bool unfinishedRecording = _runtime?.Recording is { } recording && (recording.IsRecording || recording.Pending is not null);
         if (_ready && (_hasUnsavedChanges || unfinishedRecording || _vision?.HasActiveTrainingRecording == true) && !_discardClose)
         { Post(new { type = "closeRequested" }); return; }
-        _closing = true; _statusTimer.Stop();
+        _closing = true; _statusTimer.Stop(); _gameplayWindow?.Close();
         _assistant?.BeginClosing();
         try
         {

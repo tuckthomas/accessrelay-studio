@@ -16,5 +16,6 @@
   activity lights, navigation switches, slogans or emergency action buttons there.
 - Marketplace catalog/packages belong in the separate `accessrelay-marketplace`
   repository. The app consumes that catalog and validates the existing pack API.
-- Game Vision captures existing game windows for training and live assistance; it
-  does not implement Xbox Remote Play streaming. Keep game-specific UI in plugins.
+- Live Gameplay hosts capture and live assistance; AI Model Training hosts recording,
+  clip review and offline jobs. Keep game-specific UI in plugins. Detachment reuses
+  the native session; do not start another capture or inference worker for a preview.

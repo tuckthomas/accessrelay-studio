@@ -23,21 +23,20 @@ function fixture(overrides: any = {}) {
 describe('vision workflows', () => {
   it('opens and changes workspaces without starting capture or controller output', () => {
     const command = vi.fn().mockResolvedValue(null);
-    render(<VisionPage state={fixture()} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Live assistance' }));
+    render(<VisionPage mode="training" state={fixture()} status={null} command={command} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Clips & review' }));
     expect(command).not.toHaveBeenCalled();
   });
 
   it('keeps recording and its state in the main preview toolbar before any sidebar scrolling', () => {
     const command = vi.fn().mockResolvedValue(null), state = fixture();
-    const view = render(<VisionPage state={state} status={null} command={command} />);
+    const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
     const record = screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement;
     expect(record.closest('.vision-preview-head')).toBeTruthy();
     expect(record.disabled).toBe(true);
     expect(record.getAttribute('title')).toBe('Mark capture areas before recording.');
     expect(document.getElementById(record.getAttribute('aria-describedby')!)?.textContent).toBe('Mark capture areas before recording.');
-    view.rerender(<VisionPage state={state} status={{ session: { running: true }, busy: true,
+    view.rerender(<VisionPage mode="training" state={state} status={{ session: { running: true }, busy: true,
       training: { hasTake: true, isRecording: true, isFinalized: false, storedFrames: 42 } }} command={command} />);
     const stop = screen.getByRole('button', { name: 'Stop training clip recording' }) as HTMLButtonElement;
     expect(stop.closest('.vision-preview-head')).toBeTruthy();
@@ -47,10 +46,10 @@ describe('vision workflows', () => {
 
   it('retains a native-validated source selection and requires fresh layout confirmation before recording', async () => {
     const command = vi.fn().mockResolvedValue(null), state = fixture();
-    const view = render(<VisionPage state={state} status={null} command={command} />);
+    const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
     selectValue(screen.getByRole('combobox', { name: 'Gameplay window' }), 'window-two');
     await waitFor(() => expect(command).toHaveBeenCalledWith('sourceSelect', { id: 'window-two' }));
-    view.rerender(<VisionPage state={{ ...state, selectedSourceId: 'window-two', settings: { ...state.settings,
+    view.rerender(<VisionPage mode="training" state={{ ...state, selectedSourceId: 'window-two', settings: { ...state.settings,
       trainingCapture: { ...state.settings.trainingCapture, configured: false } } }} status={state.status} command={command} />);
     expect((screen.getByRole('button', { name: 'Record a clip' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Mark capture areas' }) as HTMLButtonElement).disabled).toBe(false);
@@ -59,7 +58,7 @@ describe('vision workflows', () => {
 
   it('keeps the source picker usable while refreshing its window list on focus', () => {
     const command = vi.fn(() => new Promise(() => {}));
-    render(<VisionPage state={fixture()} status={null} command={command} />);
+    render(<VisionPage mode="training" state={fixture()} status={null} command={command} />);
     const picker = screen.getByRole('combobox', { name: 'Gameplay window' }) as HTMLSelectElement;
     fireEvent.focus(picker);
     expect(command).toHaveBeenCalledWith('sourceRefresh');
@@ -69,9 +68,9 @@ describe('vision workflows', () => {
   it('immediately reflects a closed source and invalidated layout from status without waiting for a full snapshot', () => {
     const state = fixture(); state.settings.trainingCapture.configured = true;
     const command = vi.fn().mockResolvedValue(null);
-    const view = render(<VisionPage state={state} status={null} command={command} />);
+    const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
     expect((screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement).disabled).toBe(false);
-    view.rerender(<VisionPage state={state} status={{ selectedSourceId: '', sources: [state.sources[1]], captureLayoutConfirmed: false,
+    view.rerender(<VisionPage mode="training" state={state} status={{ selectedSourceId: '', sources: [state.sources[1]], captureLayoutConfirmed: false,
       notice: 'The selected window closed.' }} command={command} />);
     expect((screen.getByRole('combobox', { name: 'Gameplay window' }) as HTMLSelectElement).value).toBe('');
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Gameplay window' }), { key: 'ArrowDown' });
@@ -84,7 +83,7 @@ describe('vision workflows', () => {
 
   it('lets height be cleared and reentered and keeps release blending complementary in saved profile data', async () => {
     const command = vi.fn().mockResolvedValue(profile);
-    render(<VisionPage state={fixture()} status={null} command={command} />);
+    render(<VisionPage mode="training" state={fixture()} status={null} command={command} />);
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const dialog = screen.getByRole('dialog', { name: 'Edit shot profile' });
     fireEvent.change(within(dialog).getByRole('spinbutton', { name: 'Height feet' }), { target: { value: '' } });
@@ -103,7 +102,7 @@ describe('vision workflows', () => {
     const frozen = { token: 'frozen-frame', url: 'https://media.accessrelay.test/vision/frozen/frozen-frame', sourceWidth: 2560,
       sourceHeight: 1440, player: all, layout: state.settings.trainingCapture };
     const command = vi.fn(async (action: string) => action === 'freeze' ? frozen : null);
-    render(<VisionPage state={state} status={null} command={command} />);
+    render(<VisionPage mode="training" state={state} status={null} command={command} />);
     fireEvent.click(screen.getByRole('button', { name: 'Mark capture areas' }));
     const dialog = await screen.findByRole('dialog', { name: 'Choose what your clip keeps' });
     const save = within(dialog).getByRole('button', { name: 'Save capture areas' }) as HTMLButtonElement;
@@ -129,7 +128,7 @@ describe('vision workflows', () => {
     const state = fixture(), frozen = { token: 'draft-layout', url: 'https://media.accessrelay.test/vision/frozen/draft-layout',
       sourceWidth: 2560, sourceHeight: 1440, player: all, layout: state.settings.trainingCapture };
     const command = vi.fn(async (action: string) => action === 'freeze' ? frozen : null);
-    const view = render(<VisionPage state={state} status={null} command={command} />);
+    const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
     fireEvent.click(screen.getByRole('button', { name: 'Mark capture areas' }));
     const editor = await screen.findByRole('dialog', { name: 'Choose what your clip keeps' });
     fireEvent.change(within(editor).getByRole('textbox', { name: 'HUD layout name' }), { target: { value: '  My unfinished HUD  ' } });
@@ -139,7 +138,7 @@ describe('vision workflows', () => {
     fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
     expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    view.rerender(<VisionPage state={{ ...state, settings: { ...state.settings } }} status={{ session: null, busy: false }} command={command} />);
+    view.rerender(<VisionPage mode="training" state={{ ...state, settings: { ...state.settings } }} status={{ session: null, busy: false }} command={command} />);
     expect((within(editor).getByRole('textbox', { name: 'HUD layout name' }) as HTMLInputElement).value).toBe('  My unfinished HUD  ');
     expect(within(editor).getByText('1 of 4 areas marked')).toBeTruthy();
     expect(hasUnsavedChanges()).toBe(true);
@@ -148,11 +147,10 @@ describe('vision workflows', () => {
 
   it('keeps unapplied analysis changes through native status refreshes and disallows unvalidated arming', () => {
     const command = vi.fn().mockResolvedValue(null), state = fixture();
-    const view = render(<VisionPage state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Live assistance' }));
+    const view = render(<VisionPage mode="live" state={state} status={null} command={command} />);
     fireEvent.click(screen.getByText('Analysis settings & measured calibration'));
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }), { target: { value: '120' } });
-    view.rerender(<VisionPage state={{ ...state, settings: { ...state.settings } }} status={{ session: { running: true, canArm: false }, output: { armed: false }, performance: { totalDecisions: 23 } }} command={command} />);
+    view.rerender(<VisionPage mode="live" state={{ ...state, settings: { ...state.settings } }} status={{ session: { running: true, canArm: false }, output: { armed: false }, performance: { totalDecisions: 23 } }} command={command} />);
     expect((screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }) as HTMLInputElement).value).toBe('120');
     expect((screen.getByRole('checkbox', { name: /Automatic release/ }) as HTMLInputElement).disabled).toBe(true);
     expect(command).not.toHaveBeenCalled();
@@ -160,7 +158,7 @@ describe('vision workflows', () => {
 
   it('keeps the exact unsaved shot profile text when closing is declined and native status refreshes', async () => {
     const state = fixture(), command = vi.fn().mockResolvedValue(null);
-    const view = render(<VisionPage state={state} status={null} command={command} />);
+    const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const editor = screen.getByRole('dialog', { name: 'Edit shot profile' });
     const name = within(editor).getByRole('textbox', { name: 'Shot profile name' }) as HTMLInputElement;
@@ -170,29 +168,9 @@ describe('vision workflows', () => {
     fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
     expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    view.rerender(<VisionPage state={{ ...state, selectedProfile: { ...state.selectedProfile } }} status={{ session: null, busy: false, notice: 'Device status refreshed.' }} command={command} />);
+    view.rerender(<VisionPage mode="training" state={{ ...state, selectedProfile: { ...state.selectedProfile } }} status={{ session: null, busy: false, notice: 'Device status refreshed.' }} command={command} />);
     expect((within(editor).getByRole('textbox', { name: 'Shot profile name' }) as HTMLInputElement).value).toBe(exact);
     expect(hasUnsavedChanges()).toBe(true);
-    expect(command).not.toHaveBeenCalled();
-  });
-
-  it('guards internal navigation and preserves analysis edits even when the source closes in a status update', async () => {
-    const state = fixture(), command = vi.fn().mockResolvedValue(null);
-    const view = render(<VisionPage state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Live assistance' }));
-    fireEvent.click(screen.getByText('Analysis settings & measured calibration'));
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }), { target: { value: '137' } });
-    fireEvent.click(screen.getByRole('tab', { name: 'Capture & training' }));
-    expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    view.rerender(<VisionPage state={{ ...state, settings: { ...state.settings } }} status={{ selectedSourceId: '', sources: [], captureLayoutConfirmed: false, notice: 'The selected window closed.' }} command={command} />);
-    expect((screen.getByRole('tab', { name: 'Live assistance' })).getAttribute('aria-selected')).toBe('true');
-    expect((screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }) as HTMLInputElement).value).toBe('137');
-    expect(hasUnsavedChanges()).toBe(true);
-    fireEvent.click(screen.getByRole('tab', { name: 'Capture & training' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
-    expect(screen.getByRole('tab', { name: 'Capture & training' }).getAttribute('aria-selected')).toBe('true');
-    expect(hasUnsavedChanges()).toBe(false);
     expect(command).not.toHaveBeenCalled();
   });
 
@@ -201,14 +179,14 @@ describe('vision workflows', () => {
       regions: [{ name: 'player', label: 'Player' }], frames: [{ ticks: 1000, timeMs: 0 }, { ticks: 1100, timeMs: 10 }, { ticks: 1200, timeMs: 20 }],
       labels: { schemaVersion: 1, sessionId: 'draft-session', split: 'train', shots: [] } };
     const state = fixture({ review }), command = vi.fn().mockResolvedValue(null);
-    const view = render(<VisionPage state={state} status={null} command={command} />);
+    const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Clips & review' }));
     const name = screen.getByRole('textbox', { name: 'Shot name' }) as HTMLInputElement;
     fireEvent.change(name, { target: { value: '  Needs another look  ' } });
     fireEvent.click(screen.getByRole('button', { name: 'New interval' }));
     expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    view.rerender(<VisionPage state={{ ...state, review: { ...review, labels: { ...review.labels } } }} status={{ session: null, notice: 'Clip status refreshed.' }} command={command} />);
+    view.rerender(<VisionPage mode="training" state={{ ...state, review: { ...review, labels: { ...review.labels } } }} status={{ session: null, notice: 'Clip status refreshed.' }} command={command} />);
     expect((screen.getByRole('textbox', { name: 'Shot name' }) as HTMLInputElement).value).toBe('  Needs another look  ');
     expect(hasUnsavedChanges()).toBe(true);
     expect(command).not.toHaveBeenCalled();
@@ -220,7 +198,7 @@ describe('vision workflows', () => {
       frames: Array.from({ length: 6 }, (_, index) => ({ ticks: 1000 + index * 100, sequence: index + 1, timeMs: index * 10 })),
       labels: { schemaVersion: 1, sessionId: 'captured-session', split: 'train', shots: [] }, physicalReleaseTicks: 8888 };
     const command = vi.fn().mockResolvedValue(review);
-    render(<VisionPage state={fixture({ review })} status={null} command={command} />);
+    render(<VisionPage mode="training" state={fixture({ review })} status={null} command={command} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Clips & review' }));
     const target = screen.getByRole('button', { name: 'Mark target game phase at current frame' }) as HTMLButtonElement;
     expect(target.disabled).toBe(true);

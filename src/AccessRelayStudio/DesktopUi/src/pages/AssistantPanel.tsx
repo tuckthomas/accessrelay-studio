@@ -30,7 +30,7 @@ export function AssistantPanel({ initial, command }: { initial: any; command: (a
       <p className="subtle">Access starts off each time Studio opens. Your assistant client can share returned information with its own AI provider. This connection exposes no raw audio or screenshots and cannot activate controllers, capture, speech or models.</p>
       {!panel?.bridgeAvailable && <Notice tone="warning">Open the complete published app to include the assistant bridge and rehearsal worker.</Notice>}
       <Toggle label="Allow configuration drafts" description="Drafts can be rehearsed and proposed. You review and apply them here; the assistant cannot apply them." checked={drafts} onChange={setDrafts} />
-      <Toggle label="Allow offline training workflows" description="Use only datasets and tools you explicitly register below. Jobs use CPU and keep new models observation-only." checked={offline} onChange={setOffline} />
+      <Toggle label="Allow offline training workflows" description="Use only datasets and tools you register in AI Model Training. Jobs use CPU and keep new models observation-only." checked={offline} onChange={setOffline} />
       <Field label="Access duration"><Select value={minutes} onValueChange={selectionValue => setMinutes(Number(selectionValue))}>
         {[15, 30, 60].map(value => <SelectOption key={value} value={value}>{value} minutes</SelectOption>)}</Select></Field>
       <div className="row"><Button variant="primary" disabled={!panel?.bridgeAvailable} busy={busy === 'assistantConfigure'}
@@ -47,18 +47,6 @@ export function AssistantPanel({ initial, command }: { initial: any; command: (a
           <Button onClick={() => void run('assistantDiscard', { id: draft.id })}>Discard draft</Button></div></div>)}
         <Button disabled={!panel?.canUndo} busy={busy === 'assistantUndo'} onClick={() => void run('assistantUndo')}>Undo last assistant change</Button>
       </div>
-      <details><summary>Offline datasets and experiment jobs</summary><div className="stack">
-        <p>Choose reviewed train/validation sessions, a threshold file, a trusted Python executable with your offline dependencies, and a new-results workspace. Input registrations last until Studio closes. Clients receive opaque IDs rather than filesystem paths. Logs and results stay in your chosen workspace.</p>
-        <div className="row">{[['dataset', 'Register dataset folder'], ['thresholds', 'Register thresholds'], ['python', 'Choose Python interpreter'], ['workspace', 'Choose output workspace']].map(([kind, label]) =>
-          <Button key={kind} busy={busy === 'assistantRegister'} onClick={() => void run('assistantRegister', { kind })}>{label}</Button>)}</div>
-        <p>Interpreter: {panel?.registration?.interpreterRegistered ? 'registered' : 'not chosen'} · Workspace: {panel?.registration?.workspaceRegistered ? 'registered' : 'not chosen'}</p>
-        {panel?.registration?.workspacePath && <p className="subtle">Local output folder: <code>{panel.registration.workspacePath}</code></p>}
-        {panel?.registration?.inputs?.map((item: any) => <div className="detail-line" key={item.id}><span>{item.label}{item.path ? ' · ' + item.path : ''}</span><code>{item.id}</code></div>)}
-        {panel?.jobs?.map((job: any) => <div className="stack" key={job.id}><div className="detail-line"><span role="status">{job.kind} · {job.state}{job.errorCode ? ' · ' + (({ workerRejectedInputs: 'Check reviewed inputs and installed offline dependencies.', offlineWorkerFailed: 'Inspect the local job logs.', jobResourceLimit: 'The resource budget was reached.', cancelledOrExpired: 'Cancelled or access expired.', reportBounds: 'The bounded report could not be read.' } as Record<string, string>)[job.errorCode] || 'Inspect the local job logs.') : ''}</span>
-          {['queued', 'running'].includes(job.state) && <Button onClick={() => void run('assistantCancelJob', { id: job.id })}>Cancel job</Button>}</div>
-          {job.report && <pre className="subtle">{JSON.stringify(job.report, null, 2)}</pre>}</div>)}
-        <Notice>Jobs use bounded CPU/time/storage budgets. Starting another foreground controller, capture or voice action cancels the offline job. Reviewed labels, held-out data and actual hardware evidence remain separate requirements.</Notice>
-      </div></details>
       {message && <Notice>{message}</Notice>}
       {error && <Notice tone="danger">{error}</Notice>}
     </div>

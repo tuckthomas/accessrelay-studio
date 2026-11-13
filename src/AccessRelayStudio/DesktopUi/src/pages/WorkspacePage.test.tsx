@@ -16,7 +16,7 @@ describe('dashboard controls and resource use', () => {
   it('opens without starting features and removes the requested filler', () => {
     const props = fixture(); render(<WorkspacePage {...props} />);
     expect(props.command).not.toHaveBeenCalled();
-    for (const name of ['Controller output', 'Game Vision capture', 'Voice processing']) expect(screen.getByRole('button', { name, exact: true }).getAttribute('aria-pressed')).toBe('false');
+    for (const name of ['Controller output', 'Live Gameplay capture', 'Voice processing']) expect(screen.getByRole('button', { name, exact: true }).getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByText('Everything has its own space.')).toBeNull();
     expect(screen.queryByText('Your PC is the workspace.')).toBeNull();
   });
@@ -24,7 +24,7 @@ describe('dashboard controls and resource use', () => {
     const props = fixture(); render(<WorkspacePage {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Controller output', exact: true }));
     await waitFor(() => expect(props.command).toHaveBeenCalledWith('controller.outputStart', undefined));
-    fireEvent.click(screen.getByRole('button', { name: 'Game Vision capture', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Live Gameplay capture', exact: true }));
     await waitFor(() => expect(props.command).toHaveBeenCalledWith('vision.start', { loadModel: false }));
     fireEvent.click(screen.getByRole('button', { name: 'Voice processing', exact: true }));
     await waitFor(() => expect(props.command).toHaveBeenCalledWith('voice.start', undefined));
@@ -35,7 +35,7 @@ describe('dashboard controls and resource use', () => {
     props.state.vision.selectedSourceId = ''; props.status.vision = { session: { running: true }, training: { isRecording: true } };
     props.state.voice.devices.microphones = []; props.status.voice = { ...props.status.voice, isRunning: true };
     render(<WorkspacePage {...props} />);
-    for (const name of ['Controller output', 'Game Vision capture', 'Voice processing']) fireEvent.click(screen.getByRole('button', { name, exact: true }));
+    for (const name of ['Controller output', 'Live Gameplay capture', 'Voice processing']) fireEvent.click(screen.getByRole('button', { name, exact: true }));
     await waitFor(() => expect(props.command.mock.calls.map(([method]) => method).sort()).toEqual(['controller.outputStop', 'vision.stop', 'voice.stop']));
   });
   it('keeps cancellation available while voice startup is pending', async () => {
@@ -52,9 +52,9 @@ describe('dashboard controls and resource use', () => {
   it('explains incomplete setup and keeps closed sources from starting capture', () => {
     const props = fixture(); props.status.controller.connected = false; props.status.vision.selectedSourceId = ''; props.state.voice.devices.microphones = [];
     render(<WorkspacePage {...props} />);
-    for (const name of ['Controller output', 'Game Vision capture', 'Voice processing']) expect((screen.getByRole('button', { name, exact: true }) as HTMLButtonElement).disabled).toBe(true);
+    for (const name of ['Controller output', 'Live Gameplay capture', 'Voice processing']) expect((screen.getByRole('button', { name, exact: true }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('Connect a gamepad in Controller.')).toBeTruthy();
-    expect(screen.getByText('Choose a gameplay window in Game Vision.')).toBeTruthy();
+    expect(screen.getByText('Choose a gameplay window in Live Gameplay.')).toBeTruthy();
     expect(screen.getByText('Choose a microphone in Voice.')).toBeTruthy();
   });
   it('turns off native sampling, waits for confirmed state, and hides the readings', async () => {

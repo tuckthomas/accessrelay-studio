@@ -7,15 +7,17 @@ import { ControllerPage } from './pages/ControllerPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VoicePage } from './pages/VoicePage';
 import { VisionPage } from './pages/VisionPage';
+import { TrainingJobsPanel } from './pages/TrainingJobsPanel';
 import { MarketplacePage } from './pages/MarketplacePage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
 import { currentTheme, saveTheme, type Theme } from './theme';
 
-type Page = 'workspace' | 'controller' | 'vision' | 'voice' | 'marketplace' | 'settings';
+type Page = 'workspace' | 'controller' | 'vision' | 'training' | 'voice' | 'marketplace' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
   { id: 'workspace', label: 'Workspace', icon: 'dashboard' },
   { id: 'controller', label: 'Controller', icon: 'gamepad' },
-  { id: 'vision', label: 'Game Vision', icon: 'camera' },
+  { id: 'vision', label: 'Live Gameplay', icon: 'camera' },
+  { id: 'training', label: 'AI Model Training', icon: 'book' },
   { id: 'voice', label: 'Voice', icon: 'audio' },
   { id: 'marketplace', label: 'Marketplace', icon: 'store' }
 ];
@@ -67,6 +69,8 @@ export function App() {
   const controllerStatus = status.controller || state?.controller?.status || {};
   const voiceStatus = status.voice || state?.voice?.status || {};
   const visionStatus = status.vision || state?.vision?.status || {};
+  const captureWindow = { detached: (status.gameplayWindow || state?.gameplayWindow)?.detached ?? false,
+    detach: () => appCommand('gameplayDetach'), attach: () => appCommand('gameplayAttach') };
   const announcement = useStatusAnnouncements(!!state, controllerStatus, voiceStatus, visionStatus, error);
   const currentLabel = page === 'settings' ? 'Settings' : navigation.find(item => item.id === page)?.label || 'Workspace';
   if (!state) return <main className="loading-shell"><div className="loading-content">
@@ -104,7 +108,9 @@ export function App() {
         {page === 'workspace' && <WorkspacePage state={state} status={{ controller: controllerStatus, voice: voiceStatus, vision: visionStatus, system: status.system || state.system }}
           command={invoke} navigate={navigate} />}
         {page === 'controller' && <ControllerPage state={state.controller || {}} status={controllerStatus} command={controllerCommand} />}
-        {page === 'vision' && <VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} />}
+        {page === 'vision' && <VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="live" captureWindow={captureWindow} />}
+        {page === 'training' && <div className="page-stack"><VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="training" captureWindow={captureWindow} />
+          <TrainingJobsPanel initial={state.settings?.assistant} command={appCommand} /></div>}
         {page === 'voice' && <VoicePage state={state.voice || {}} status={voiceStatus} command={voiceCommand} />}
         {page === 'marketplace' && <MarketplacePage state={state.marketplace || {}} command={marketplaceCommand} />}
         {page === 'settings' && <SettingsPage state={{ ...state.settings, version: state.version, controller: state.controller }}

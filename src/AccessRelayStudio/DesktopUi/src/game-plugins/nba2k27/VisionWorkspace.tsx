@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { ProfilePicker } from '../../ui';
+import { GameplayPreview } from '../../components/GameplayPreview';
+import type { VisionWorkspaceProps } from '../../pages/VisionPage';
 import type { PointerEvent as Pointer } from 'react';
-import { Select, SelectOption, Input, Slider, Checkbox, Badge, Button, Card, DiscardDialog, EmptyState, Field, Icon, Modal, Notice, Tabs, Toggle, hasUnsavedChanges, useUnsavedChanges, type PageProps } from '../../ui';
+import { Select, SelectOption, Input, Slider, Checkbox, Badge, Button, Card, DiscardDialog, EmptyState, Field, Icon, Modal, Notice, Tabs, Toggle, hasUnsavedChanges, useUnsavedChanges } from '../../ui';
 
 type Box = { left: number; top: number; width: number; height: number };
 type Run = (action: string, args?: any, done?: (result: any) => void) => Promise<any>;
@@ -16,7 +18,7 @@ const categories = ['Mixed / unclassified', 'Stationary', 'Catch-and-shoot', 'Of
 const num = (value: any, digits = 1) => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—';
 const fresh = () => ({ id: crypto.randomUUID(), name: '', heightInches: 78, threePointRating: 80, base: '', upperRelease1: '', upperRelease2: '', usesShotMeter: true, meterReleaseType: '', shotSpeed: 4, release1Percent: 50, cameraView: '2K' });
 
-export function Nba2K27VisionWorkspace({ state = {}, status, command }: PageProps) {
+export function Nba2K27VisionWorkspace({ state = {}, status, command, mode, captureWindow }: VisionWorkspaceProps) {
   const [tab, setTab] = useState('capture'), [busy, setBusy] = useState(''), [error, setError] = useState('');
   const [editor, setEditor] = useState<any>(null), [frozen, setFrozen] = useState<any>(null), [review, setReview] = useState<any>(state?.review);
   const [settings, setSettings] = useState<any>(state?.settings ?? {}), [dirty, setDirty] = useState(false);
@@ -39,9 +41,9 @@ export function Nba2K27VisionWorkspace({ state = {}, status, command }: PageProp
   };
   const change = (key: string, value: any) => { setSettings((old: any) => ({ ...old, [key]: value })); setDirty(true); };
   return <div className="page-stack vision-page"><style>{styles}</style>
-    <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Vision workspace" items={[{ id: 'capture', label: 'Capture & training' }, { id: 'clips', label: 'Clips & review' }, { id: 'assistance', label: 'Live assistance' }]} />
+    {mode === 'training' && <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Training workspace" items={[{ id: 'capture', label: 'Record clips' }, { id: 'clips', label: 'Clips & review' }]} />}
     {error && <Notice tone="danger">{error}</Notice>}
-    {tab === 'capture' && <>
+    {(mode === 'live' || tab === 'capture') && <>
       <Card><div className="vision-context-heading"><span className="vision-step">1</span><div><h2>Your player and game</h2><p className="subtle">One setup keeps your jump shot and camera together.</p></div></div>
         <div className="vision-context-grid"><ProfilePicker label="Shot profile" value={profile?.id ?? ''} disabled={locked || working}
           options={[{ id: '', name: 'Choose a shot profile', disabled: true }, ...(state?.profiles ?? [])]}
@@ -51,11 +53,13 @@ export function Nba2K27VisionWorkspace({ state = {}, status, command }: PageProp
           <div className="vision-context-actions"><Button variant="ghost" disabled={!profile || locked || working} onClick={() => setEditor({ ...profile })}><Icon name="pencil" size={16} />Edit</Button><Button variant="ghost" aria-label="Refresh capture windows" disabled={locked || working} onClick={() => run('sourceRefresh')}><Icon name="refresh" size={17} /></Button></div></div>
         {profile && <div className="vision-summary"><span>{Math.floor(profile.heightInches / 12)}′ {profile.heightInches % 12}″ · {profile.threePointRating} three-point</span><span>{profile.base}</span><span>{profile.cameraView} camera</span><Badge tone="mint">{profile.usesShotMeter ? 'Meter on' : 'Meter off'}</Badge></div>}
       </Card>
+    </>}
+    {mode === 'training' && tab === 'capture' && <>
       <div className="vision-capture-grid"><section className="vision-preview"><div className="vision-preview-head"><div><p className="eyebrow">GAMEPLAY PREVIEW</p><h2>{session.running ? 'Your live view' : 'Check the picture first'}</h2></div>
         <div className="vision-preview-actions">{locked ? <Button onClick={() => run('stop')}><Icon name="stop" size={16} />Stop preview</Button> : <Button variant={ready ? 'secondary' : 'primary'} disabled={!context || working} busy={busy === 'start'} onClick={() => run('start', { loadModel: false })}><Icon name="play" size={17} />Start preview</Button>}
           {recording ? <Button variant="danger" aria-label="Stop training clip recording" onClick={() => run('recordStop')}><Icon name="stop" size={16} />Stop recording</Button> : <Button variant="primary" disabled={!context || !ready || working || saving} busy={busy === 'recordStart'} title={recordHint} aria-describedby="vision-recording-hint" onClick={() => run('recordStart')}><Icon name="circle" size={16} />Record training clip</Button>}</div></div>
         <div className="vision-recording-state" id="vision-recording-hint" role="status"><Icon name={recording ? 'circle' : training.isComplete ? 'check' : 'info'} size={16} /><span>{recording ? `Recording · ${(training.storedFrames ?? 0).toLocaleString()} frames written` : saving ? 'Saving your training clip…' : training.isComplete ? `Clip saved · ${(training.storedFrames ?? 0).toLocaleString()} frames` : ready ? 'Viewing only · Use Record training clip to save footage.' : recordHint}</span></div>
-        <div className="vision-stage">{s.preview?.url ? <><img src={s.preview.url} alt={session.running ? 'Live gameplay capture' : 'Last captured gameplay preview'} /><span className="vision-stage-badge"><Badge tone={session.running ? 'success' : 'neutral'}>{session.running ? 'Preview · not saved' : 'Last preview'}</Badge></span></>
+        <div className="vision-stage">{captureWindow?.detached ? <div className="vision-stage-empty"><p>Capture is open in a separate window.</p><Button onClick={() => { void captureWindow.attach?.().catch(e => setError(String(e.message))); }}>Bring back</Button></div> : s.preview?.url ? <><img src={s.preview.url} alt={session.running ? 'Live gameplay capture' : 'Last captured gameplay preview'} /><span className="vision-stage-badge"><Badge tone={session.running ? 'success' : 'neutral'}>{session.running ? 'Preview · not saved' : 'Last preview'}</Badge></span></>
           : <div className="vision-stage-empty"><span><Icon name="camera" size={42} /></span><h3>Your gameplay belongs here</h3><p>{context ? 'Start a preview to check the picture before recording.' : 'Choose a shot profile and the window showing Remote Play.'}</p>{!profile && <Button onClick={() => setEditor(fresh())}>Create a shot profile</Button>}</div>}</div>
         <div className="vision-preview-foot"><span>{s.preview?.sourceWidth ? `${s.preview.sourceWidth} × ${s.preview.sourceHeight}` : 'Source resolution appears here'}</span><span>{session.frames ? `${session.frames.toLocaleString()} frames viewed` : 'Viewing alone does not save footage'}</span></div></section>
         <div className="vision-aside"><Card title="Capture areas" description="Choose the parts of the picture worth keeping." actions={<span className="vision-step">2</span>}><div className="vision-areas">{areas.map(([label, color]) => <div key={label}><i style={{ background: color }} />{label}<Icon name={ready ? 'check' : 'circle'} size={15} /></div>)}</div>
@@ -70,9 +74,12 @@ export function Nba2K27VisionWorkspace({ state = {}, status, command }: PageProp
       {s.notice && <p className="vision-status-line" role="status"><Icon name="info" size={17} />{s.notice}</p>}
       <details className="vision-details"><summary>How clips become training evidence</summary><div className="stack"><p>Meter-on footage records progression, tempo and later shot feedback. Meter-off validation uses a separate purpose and the actual meter-off setup.</p><p>The recorder keeps raw evidence. Automatic meter labels, dynamic player tracking and the reviewed training conversion are still being developed. The current capture areas stay fixed on screen.</p></div></details>
     </>}
-    {tab === 'clips' && <><Card title="Find a useful moment" description="Review the player, meter and shot feedback on one timeline." actions={<div className="button-group"><Button disabled={!training.isComplete || working} onClick={() => transition(() => run('reviewOpen', { latest: true }, result => result && setReview(result)))}>Open last clip</Button><Button variant="primary" disabled={working} onClick={() => transition(() => run('reviewOpen', {}, result => result && setReview(result)))}><Icon name="folder" size={17} />Open a clip</Button></div>}>
+    {mode === 'training' && tab === 'clips' && <><Card title="Find a useful moment" description="Review the player, meter and shot feedback on one timeline." actions={<div className="button-group"><Button disabled={!training.isComplete || working} onClick={() => transition(() => run('reviewOpen', { latest: true }, result => result && setReview(result)))}>Open last clip</Button><Button variant="primary" disabled={working} onClick={() => transition(() => run('reviewOpen', {}, result => result && setReview(result)))}><Icon name="folder" size={17} />Open a clip</Button></div>}>
       {!review && <EmptyState icon="camera" title="Give every shot some context" description="Open a completed clip to inspect its regions, mark shot intervals and save reviewed labels." />}</Card>{review && <ClipReview key={review.token + ':' + draftEpoch} review={review} busy={working} save={labels => run('reviewSave', { token: review.token, labels })} />}</>}
-    {tab === 'assistance' && <>
+    {mode === 'live' && <>
+      <GameplayPreview status={s} window={captureWindow} onError={setError} actions={locked
+        ? <Button disabled={!!s.stopping} onClick={() => run('stop')}><Icon name="stop" size={17} />Stop capture</Button>
+        : <Button variant="primary" disabled={!context || working} busy={busy === 'start'} onClick={() => run('start', { loadModel: false })}><Icon name="play" size={17} />Start capture</Button>} />
       <Card title="A model for this shot" description="Capture and clip review work without a model. Import a compatible package when it is ready." actions={<div className="button-group"><Button disabled={locked || working} onClick={() => run('modelRefresh')}><Icon name="refresh" size={16} />Refresh</Button><Button variant="primary" disabled={locked || working} busy={busy === 'modelImport'} onClick={() => run('modelImport')}><Icon name="upload" size={17} />Import model package</Button></div>}>
         {state?.models?.length ? <div className="stack"><Field label="Installed model"><Select value={state.selectedModelId ?? ''} disabled={locked || working} onValueChange={selectionValue => run('modelSelect', { id: selectionValue })}><SelectOption value="">No model · capture only</SelectOption>{state.models.map((model: any) => <SelectOption key={model.id} value={model.id} disabled={!model.compatible}>{model.name} · {model.version}{!model.compatible ? ' · another setup' : ''}</SelectOption>)}</Select></Field>{state.models.filter((model: any) => model.id === state.selectedModelId).map((model: any) => <Notice key={model.id} tone={model.evidenceAccepted ? 'success' : 'info'}>{model.status}</Notice>)}</div>
           : <EmptyState icon="folder" title={state?.modelScanComplete === false ? 'Checking your model library' : 'No gameplay model installed'} description="Community detectors are possible building blocks. A validated no-meter release model is not bundled with this beta." />}
