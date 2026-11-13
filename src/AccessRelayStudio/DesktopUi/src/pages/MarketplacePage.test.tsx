@@ -15,8 +15,17 @@ it('loads the catalog on opening and requests only the chosen package for instal
   expect(command).toHaveBeenCalledWith('refresh', undefined);
   fireEvent.click(screen.getByRole('button', { name: 'Install', exact: true }));
   await waitFor(() => expect(command).toHaveBeenCalledWith('install', { id: 'pulse', version: '1.0.0' }));
-  await screen.findByText(/Installed. Open Controller/);
+  await screen.findByText(/Controller scripts installed. Open Controller/);
   expect(command.mock.calls.some(([action]) => ['outputStart', 'scriptsSet', 'profileCreate'].includes(action))).toBe(false);
+});
+it('opens an available NBA training workspace without downloading scripts or starting capture', async () => {
+  const command = vi.fn(), openTraining = vi.fn().mockResolvedValue(null);
+  render(<MarketplacePage state={{ loaded: true, entries: [{ ...entries[1], id: 'nba2k27', name: 'NBA 2K27', installed: false, trainingPluginId: 'nba2k27' }] }}
+    command={command} openTraining={openTraining} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open training', exact: true }));
+  await waitFor(() => expect(openTraining).toHaveBeenCalledWith('nba2k27'));
+  expect(screen.getByRole('button', { name: 'Install controller scripts' })).toBeTruthy();
+  expect(command).not.toHaveBeenCalled();
 });
 it('filters scripts/plugins using shared controls and keeps already-installed items disabled', () => {
   const command = vi.fn();

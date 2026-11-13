@@ -17,7 +17,7 @@ const navigation: { id: Page; label: string; icon: string }[] = [
   { id: 'workspace', label: 'Workspace', icon: 'dashboard' },
   { id: 'controller', label: 'Controller', icon: 'gamepad' },
   { id: 'vision', label: 'Live Gameplay', icon: 'camera' },
-  { id: 'training', label: 'AI Model Training', icon: 'book' },
+  { id: 'training', label: 'Model Training', icon: 'book' },
   { id: 'voice', label: 'Voice', icon: 'audio' },
   { id: 'marketplace', label: 'Marketplace', icon: 'store' }
 ];
@@ -112,7 +112,10 @@ export function App() {
         {page === 'training' && <div className="page-stack"><VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="training" captureWindow={captureWindow} />
           <TrainingJobsPanel initial={state.settings?.assistant} command={appCommand} /></div>}
         {page === 'voice' && <VoicePage state={state.voice || {}} status={voiceStatus} command={voiceCommand} />}
-        {page === 'marketplace' && <MarketplacePage state={state.marketplace || {}} command={marketplaceCommand} />}
+        {page === 'marketplace' && <MarketplacePage state={state.marketplace || {}} command={marketplaceCommand} openTraining={async pluginId => {
+          if (state.vision?.selectedPluginId !== pluginId) await visionCommand('pluginSelect', { id: pluginId });
+          navigate('training');
+        }} />}
         {page === 'settings' && <SettingsPage state={{ ...state.settings, version: state.version, controller: state.controller }}
           status={controllerStatus} command={appCommand} />}
       </div></main>

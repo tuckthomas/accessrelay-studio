@@ -25,6 +25,25 @@ async function openMappingDraft() {
   selectValue(screen.getByLabelText('What should it do?'), 'moving');
 }
 describe('workspace draft and capture visibility', () => {
+  it('opens NBA training from marketplace with the actual plugin selected', async () => {
+    state.marketplace = { loaded: true, entries: [{ id: 'nba2k27', name: 'NBA 2K27', description: 'Training capture', author: 'AccessRelay',
+      version: '1.0.0', kind: 'plugin', license: '0BSD', tags: ['training'], installed: false, trainingPluginId: 'nba2k27' }] };
+    harness.command.mockImplementation(async (method: string, args: any) => {
+      if (method === 'app.bootstrap') return structuredClone(state);
+      if (method === 'vision.pluginSelect') {
+        state.vision.selectedPluginId = args.id;
+        harness.listeners.forEach(listener => listener({ type: 'snapshot', state: structuredClone(state) }));
+      }
+      return null;
+    });
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Marketplace', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open training', exact: true }));
+    await screen.findByRole('heading', { name: 'Model Training', exact: true });
+    expect(harness.command).toHaveBeenCalledWith('vision.pluginSelect', { id: 'nba2k27' });
+    expect(screen.getByRole('button', { name: 'Record training clip' })).toBeTruthy();
+    expect(harness.command.mock.calls.some(([method]) => ['vision.start', 'vision.recordStart', 'controller.outputStart'].includes(method))).toBe(false);
+  });
   it('separates live gameplay and training, moves offline jobs out of Settings, and guards drafts between pages', async () => {
     state.vision.selectedPluginId = 'nba2k27';
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
@@ -33,10 +52,10 @@ describe('workspace draft and capture visibility', () => {
     expect(screen.getByRole('button', { name: 'Detach', exact: true })).toBeTruthy();
     fireEvent.click(screen.getByText('Analysis settings & measured calibration'));
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }), { target: { value: '137' } });
-    fireEvent.click(screen.getByRole('button', { name: 'AI Model Training', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Model Training', exact: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect((screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }) as HTMLInputElement).value).toBe('137');
-    fireEvent.click(screen.getByRole('button', { name: 'AI Model Training', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Model Training', exact: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(await screen.findByRole('button', { name: 'Record training clip' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Live analysis' })).toBeNull();

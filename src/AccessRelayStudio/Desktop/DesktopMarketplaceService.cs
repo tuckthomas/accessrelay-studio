@@ -4,7 +4,7 @@ using EliteScriptStudio.Core;
 
 namespace EliteScriptStudio.Desktop;
 
-internal sealed class DesktopMarketplaceService(DesktopControllerService controller) : IDisposable
+internal sealed class DesktopMarketplaceService(DesktopControllerService controller, IReadOnlyList<IVisionGamePlugin> visionPlugins) : IDisposable
 {
     private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
     private readonly CancellationTokenSource _stop = new();
@@ -12,7 +12,8 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
     private bool _busy;
     internal object GetState() => new { repositoryUrl = MarketplaceClient.RepositoryUrl, loaded = _catalog is not null,
         entries = (_catalog?.Entries ?? []).Select(entry => new { entry.Id, entry.Name, entry.Description, entry.Author, entry.Version,
-            entry.Kind, entry.License, entry.Tags, installed = controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256) }) };
+            entry.Kind, entry.License, entry.Tags, installed = controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256),
+            trainingPluginId = visionPlugins.FirstOrDefault(plugin => plugin.Id == entry.Id)?.Id }) };
     internal async Task<object?> InvokeAsync(string action, JsonElement args)
     {
         if (action == "sourceOpen")

@@ -103,7 +103,7 @@ public sealed partial class DesktopWindow : Window
                 }
                 catch (Exception error) { _startupError = "Controller monitoring is unavailable: " + error.Message; }
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
-                _marketplace ??= new DesktopMarketplaceService(_controller);
+                _marketplace ??= new DesktopMarketplaceService(_controller, gamePlugins);
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync(),
                     gamePlugins);
                 _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
