@@ -57,12 +57,12 @@ describe('workspace draft and capture visibility', () => {
     expect((screen.getByRole('button', { name: 'Keep editing' }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: 'Close and discard' }) as HTMLButtonElement).disabled).toBe(true);
   });
-  it('keeps microphone capture visible after leaving the Voice workspace', async () => {
+  it('keeps runtime badges out of the navbar while voice is running', async () => {
     state.voice.status = { ...state.voice.status, isRunning: true, destination: 'headphones' };
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
-    expect(screen.getByText('Mic live')).toBeTruthy();
+    expect(screen.queryByText('Mic live')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Settings', exact: true }));
-    expect(screen.getByText('Mic live')).toBeTruthy();
+    expect(screen.queryByText('Mic live')).toBeNull();
     expect(harness.command.mock.calls.some(([method]) => method === 'voice.start')).toBe(false);
   });
   it('uses live system readings only in the Workspace resource section', async () => {
@@ -79,13 +79,13 @@ describe('workspace draft and capture visibility', () => {
 describe('semantic hardware and model announcements', () => {
   const updates = () => screen.getByRole('status', { name: 'Studio status updates' });
   const errors = () => screen.getByRole('alert', { name: 'Studio errors' });
-  it('keeps command microphone visibility and announces command lifecycle/faults across pages', async () => {
+  it('announces command lifecycle/faults without adding a navbar badge', async () => {
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
     emit({ type: 'status', status: { voice: { commands: { recognition: { running: true, ready: true }, output: { enabled: true } } } } });
     await waitFor(() => expect(updates().textContent).toBe('Local voice commands are listening.'));
-    expect(screen.getByText('Mic live')).toBeTruthy();
+    expect(screen.queryByText('Mic live')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Settings', exact: true }));
-    expect(screen.getByText('Mic live')).toBeTruthy();
+    expect(screen.queryByText('Mic live')).toBeNull();
     emit({ type: 'status', status: { voice: { commands: { recognition: { running: false, error: 'Local recognizer fell behind.' }, output: { enabled: false } } } } });
     await waitFor(() => expect(errors().textContent).toBe('Local recognizer fell behind.'));
     expect(screen.queryByText('Mic live')).toBeNull();

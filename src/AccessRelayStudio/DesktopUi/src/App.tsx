@@ -90,7 +90,6 @@ export function App() {
       <header className="app-topbar">
         <div className="topbar-breadcrumb"><span>Studio</span><Icon name="chevronRight" size={15} /><strong>{currentLabel}</strong></div>
         <div className="topbar-actions">
-          {(voiceStatus.isRunning || voiceStatus.commands?.recognition?.running) && <Badge tone="success"><Icon name="mic" size={15} />Mic live</Badge>}
           <Badge>Beta</Badge>
           <Button className="theme-toggle" onClick={() => { const next = theme === 'light' ? 'dark' : 'light'; saveTheme(next); setTheme(next); }}
             aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}>
