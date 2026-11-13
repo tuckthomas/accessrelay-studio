@@ -153,3 +153,25 @@ experimental/observation-only and CPU preparation remains the default.
 
 Software checks and hardware measurements are recorded separately;
 cloud/WARP/synthetic checks do not establish console latency or GPU benefit.
+
+### Local RTX 2070 check — 2026-11-13
+
+The actual Windows NVIDIA probe passed on an RTX 2070 (8 GB), driver 610.88,
+using source `330c65b` and the installed ONNX Runtime 1.31.1 CUDA binaries.
+Sixteen synthetic frames passed D3D11/CUDA registration, chronological history,
+resize/reacquisition and cleanup; maximum tensor error was
+`2.384185791015625e-7`. Preparation downloaded 16 bytes of freshness metadata per
+sample and no CPU image.
+
+Paired CUDA inference passed five decisions with maximum output difference zero.
+The model was exported by the existing `--diagnostic-fixture` path (160×160,
+four frames, global-pool/residual, seed 20261111); its SHA-256 is
+`a3d4e7f167cdaad318ed964a2dd513edb8acc6cdf2405f68e00270e5fa4efed2`.
+It remains untrained, outside the installed model library, with `validation=null`.
+
+Raw reports and environment/binary identities are retained locally under
+`artifacts/GpuHardwareEvidence/` in the original project folder. The complete
+hardware items above remain open: this probe uses CPU-uploaded synthetic images;
+live WGC source/Stop/restart behavior and matched gameplay latency/resource runs
+still require observation on the intended source. No release gate or default is
+changed by this result. Beta.15 packages the current GPU controls for that work.
