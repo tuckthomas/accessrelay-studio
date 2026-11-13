@@ -39,7 +39,7 @@ describe('workspace draft and capture visibility', () => {
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
     fireEvent.click(screen.getByRole('button', { name: 'Marketplace', exact: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Open training', exact: true }));
-    await screen.findByRole('heading', { name: 'Model Training', exact: true });
+    await screen.findByRole('heading', { name: 'AI Model Training', exact: true });
     expect(harness.command).toHaveBeenCalledWith('vision.pluginSelect', { id: 'nba2k27' });
     expect(screen.getByRole('button', { name: 'Record training clip' })).toBeTruthy();
     expect(harness.command.mock.calls.some(([method]) => ['vision.start', 'vision.recordStart', 'controller.outputStart'].includes(method))).toBe(false);
