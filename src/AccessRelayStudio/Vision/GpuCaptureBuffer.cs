@@ -15,6 +15,7 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
     private long _dropped, _contentTicks, _lastHashedSequence, _generation = -1;
     private ulong _fingerprint;
     internal long DroppedFrames => Interlocked.Read(ref _dropped);
+    internal void NoteDroppedFrame() => Interlocked.Increment(ref _dropped);
     internal long ContentChangedTicks => Interlocked.Read(ref _contentTicks);
 
     internal bool Publish(nint source, int width, int height, long ticks, long sequence, long generation)
@@ -24,8 +25,8 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
         {
             if (_disposed) return false;
             slot = _slots.FirstOrDefault(item => item.State == 0);
-            if (slot is null && _pending is { } replaced) { slot = replaced; _pending = null; _dropped++; }
-            if (slot is null) { _dropped++; return false; }
+            if (slot is null && _pending is { } replaced) { slot = replaced; _pending = null; NoteDroppedFrame(); }
+            if (slot is null) { NoteDroppedFrame(); return false; }
             slot.State = 1;
         }
         try
@@ -34,7 +35,7 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
             lock (_gate)
             {
                 if (_disposed) { slot.State = 0; slot.Dispose(); return false; }
-                if (_pending is { } old) { old.State = 0; _dropped++; }
+                if (_pending is { } old) { old.State = 0; NoteDroppedFrame(); }
                 slot.State = 2; _pending = slot; _generation = generation; return true;
             }
         }

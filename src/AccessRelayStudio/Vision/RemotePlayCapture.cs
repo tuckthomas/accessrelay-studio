@@ -275,7 +275,8 @@ internal sealed class RemotePlayCapture : IDisposable
                 if (next is null) break;
                 newest?.Dispose();
                 newest = next;
-                _frames.NoteDroppedFrame();
+                if (_resources?.GpuFrames is { } gpu) gpu.NoteDroppedFrame();
+                else _frames.NoteDroppedFrame();
             }
             return newest;
         }
