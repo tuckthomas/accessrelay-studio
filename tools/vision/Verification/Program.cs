@@ -23,6 +23,7 @@ if (args is ["--preprocessing-fixture", var outputDirectory])
 
 var tests = new (string Name, Action Test)[]
 {
+    ("Shared sampling is bit-exact with v2 and preserves temporal/freeze input ownership", RgbSamplingChecks.Run),
     ("BGRA player crop produces RGB planar data without channel inversion", CropColors),
     ("Canonical nearest256 recording and live crop preprocessing agree", () => CanonicalPreprocessing(null)),
     ("Manifest/model output rejects invalid dimensions and nonfinite results", InvalidModels),
