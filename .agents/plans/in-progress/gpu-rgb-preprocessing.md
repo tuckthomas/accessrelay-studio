@@ -8,15 +8,18 @@ semantics. Implement an explicit experimental D3D11/CUDA path beside the existin
 CPU path. A direct Remote Play client, YUV-native models and new inference
 providers are outside this plan. Do not promise an unmeasured latency reduction.
 
+Software implementation complete; actual NVIDIA hardware acceptance remains open.
+Final tested code: `d9dd7fb958ef9ab3147d1f868411d95b77388270`.
+
 ## 1. Delivery and compatibility
 
 - [x] Push this checklist to GitHub main before implementation.
       Plan commit: `f3a26aa916441e1edfbe1a8021ba4e6c40a89499`.
-- [ ] Deliver independently reviewable implementation commits; record full commit
+- [x] Deliver independently reviewable implementation commits; record full commit
       IDs and software evidence here in subsequent checklist updates.
 - [x] Preserve legacy settings/models, explicit CPU/CUDA provider selection,
       canonical transforms, cancellation, generation ownership and output arbitration.
-- [ ] Keep this plan in progress until actual hardware acceptance is complete.
+- [x] Keep this plan in progress until actual hardware acceptance is complete.
 
 ## 2. Shared preprocessing and temporal input boundary
 
@@ -67,7 +70,7 @@ providers are outside this plan. Do not promise an unmeasured latency reduction.
 
 - [x] Pass portable preprocessing/tracker/model/settings tests, frontend checks and
       browser coverage for backend selection/observation-only behavior.
-- [ ] Pass Windows publishing, compiled boundaries, actual D3D11 WARP shader parity,
+- [x] Pass Windows publishing, compiled boundaries, actual D3D11 WARP shader parity,
       native lease/lifetime tests and existing Windows runtime regression checks.
 - [x] Provide an executable CUDA integration/parity probe and a concrete local
       hardware procedure, with explicit unavailable-device results rather than a pass.
@@ -124,7 +127,29 @@ options, and updates retired-control assertions without restoring navbar control
 The executable probe reports explicit unavailable status on Linux (exit 2), not a
 passing CUDA result. The local Windows procedure and actual limitations are in
 [docs/gpu-rgb-preprocessing.md](../../../docs/gpu-rgb-preprocessing.md). Final
-probe source SHA and complete Windows CI evidence will follow in the next receipt.
+probe source and complete Windows evidence are recorded below.
+
+Probe, resource-lifetime/error follow-ups and validation guide:
+`0e869884ae1db7ccc07d731a335e3a7a887a96a9`; complete GPU capture-drop accounting:
+`d9dd7fb958ef9ab3147d1f868411d95b77388270`. The probe and PowerShell wrapper both
+returned unavailable/exit 2 on Linux; the executable refused an existing evidence
+file with exit 1 and preserved its bytes. Windows cross-compilation passed with
+zero warnings/errors. The native probe can test actual NVIDIA tensor registration,
+chronological history, resize/reacquisition and paired ORT inference when run with
+the target GPU and a matching model/runtime. No NVIDIA pass is inferred here.
+
+Final complete Windows publishing/boundaries/deployment, controller/profile, actual
+SDK, dataset, desktop evidence, vision/performance, physical probe build, Pending
+acceptance template, simulated runtime and native-helper checks passed:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43448388668.
+
+Final actual D3D11 WARP shader/ownership suite and explicit CUDA capability reporting
+passed: https://github.com/tuckthomas/accessrelay-studio/actions/runs/43448389813.
+The suite also rejects nonfinite GPU normalization before inference. Its CUDA result
+is **unavailable**, not NVIDIA integration acceptance. Both workflows tested
+`d9dd7fb958ef9ab3147d1f868411d95b77388270`. The remaining unchecked requirements are
+the two real hardware/parity/performance items in section 6. GPU mode remains
+experimental/observation-only and CPU preparation remains the default.
 
 Software checks and hardware measurements are recorded separately;
 cloud/WARP/synthetic checks do not establish console latency or GPU benefit.

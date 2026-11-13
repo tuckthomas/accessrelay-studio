@@ -381,6 +381,11 @@ history. CPU remains the default and the host keeps this mode observation-only.
 Software correctness, backend-specific diagnostics and an executable NVIDIA probe
 are tracked there; actual CUDA interoperability and representative CPU/GPU timings
 remain open. This does not complete the optimization-promotion items above.
+Final implementation/evidence receipt: `d9dd7fb958ef9ab3147d1f868411d95b77388270`,
+with full Windows CI and native WARP checks passing:
+https://github.com/tuckthomas/accessrelay-studio/actions/runs/43448388668.
+NVIDIA interoperability and actual performance remain unverified; follow the linked
+GPU checklist and probe procedure before making an optimization/promotion decision.
 
 Deadline freshness correction: `bfc997ecb7345b1c4d9ed4a97e9640dff94eecd3`. A deterministic
 actual-runtime regression reproduced a release using a pre-lock callback timestamp.
