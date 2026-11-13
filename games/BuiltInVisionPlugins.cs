@@ -3,20 +3,29 @@ using EliteScriptStudio.Packs.Nba2K27;
 
 namespace EliteScriptStudio.Packs;
 
-/// <summary>Composition of reviewed adapters; a manifest never authorizes loading a DLL.</summary>
-internal static class BuiltInVisionPlugins
+/// <summary>Installed manifests enable reviewed adapters; they never authorize loading downloaded code.</summary>
+internal sealed class InstalledVisionPlugins(string directory, Func<string, string?> dataDirectory)
 {
-    internal static IReadOnlyList<IVisionGamePlugin> Load(string bundledDirectory, Func<string, string?> dataDirectory)
+    private readonly Dictionary<string, IVisionGamePlugin> _instances = new(StringComparer.Ordinal);
+    internal IReadOnlyList<IVisionGamePlugin> Plugins { get; private set; } = [];
+    internal static bool Supports(GamePackManifest manifest) => manifest.GameId == "nba2k27"
+        && manifest.TrainingAdapter == "nba2k27-training-v1" && manifest.VisionAdapter == "temporal-release-v1";
+
+    internal void Reload()
     {
-        string manifest = Path.Combine(bundledDirectory, "nba2k27", "pack.json");
-        if (!File.Exists(manifest)) return [];
-        try
+        var packs = new GamePackLibrary(directory).LoadAll(out _);
+        var plugins = new List<IVisionGamePlugin>();
+        foreach (var pack in packs.Where(pack => Supports(pack.Manifest)))
         {
-            var pack = GamePackDefinition.Read(manifest);
-            return pack.Manifest.Id == "nba2k27" && pack.Manifest.VisionAdapter == "temporal-release-v1"
-                ? [new Nba2K27VisionPlugin(dataDirectory("ShotProfiles"))] : [];
+            string id = pack.Manifest.GameId;
+            if (!_instances.TryGetValue(id, out var plugin))
+                _instances[id] = plugin = new Nba2K27VisionPlugin(dataDirectory("ShotProfiles"));
+            if (!plugins.Any(item => item.Id == id)) plugins.Add(plugin);
         }
-        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException)
-        { return []; }
+        Plugins = plugins;
     }
+
+    // Controller tuning is independent of whether a training plugin is installed.
+    internal static IReadOnlyList<IGameControllerPlugin> ControllerAdapters(Func<string, string?> dataDirectory) =>
+        [new Nba2K27VisionPlugin(dataDirectory("ShotProfiles"))];
 }

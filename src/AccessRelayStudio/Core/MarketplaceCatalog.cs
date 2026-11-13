@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace EliteScriptStudio.Core;
 
 internal sealed record MarketplaceEntry(string Id, string Name, string Description, string Author, string Version,
-    string Kind, string License, string ManifestPath, string ManifestSha256, string[] Tags);
+    string Kind, string License, string ManifestPath, string ManifestSha256, string[] Tags, string GameId = "");
 internal sealed record MarketplaceCatalog(int SchemaVersion, MarketplaceEntry[] Entries)
 {
     internal void Validate()
@@ -15,7 +15,9 @@ internal sealed record MarketplaceCatalog(int SchemaVersion, MarketplaceEntry[] 
             throw new InvalidDataException("Unsupported or invalid marketplace catalog.");
         foreach (var entry in Entries)
             if (!GamePackManifest.Identifier(entry.Id, 60) || !GamePackManifest.Identifier(entry.Version, 40)
-                || entry.Kind is not ("script" or "plugin") || !Text(entry.Name, 80) || !Text(entry.Description, 1000)
+                || entry.Kind is not ("script" or "plugin" or "controller-profile" or "training-plugin")
+                || entry.GameId is null || (entry.GameId.Length != 0 && !GamePackManifest.Identifier(entry.GameId, 60))
+                || (entry.Kind == "training-plugin" && entry.GameId.Length == 0) || !Text(entry.Name, 80) || !Text(entry.Description, 1000)
                 || !Text(entry.Author, 80) || !Text(entry.License, 300) || !GamePackManifest.Hash(entry.ManifestSha256)
                 || entry.ManifestPath != $"packages/{entry.Id}/{entry.Version}/pack.json"
                 || entry.Tags is null || entry.Tags.Length > 10 || entry.Tags.Any(tag => !Text(tag, 40)))
@@ -47,6 +49,8 @@ internal sealed class MarketplaceClient(HttpClient http)
         manifest.Validate();
         if (manifest.Id != entry.Id || manifest.Version != entry.Version || manifest.Name != entry.Name || manifest.License != entry.License)
             throw new InvalidDataException("The package does not match its listing.");
+        if (entry.GameId != manifest.GameId || (entry.Kind == "training-plugin") != (manifest.TrainingAdapter != "none"))
+            throw new InvalidDataException("The package capabilities or game do not match its listing.");
         string prefix = entry.ManifestPath[..^"pack.json".Length];
         foreach (var asset in manifest.Assets)
         {

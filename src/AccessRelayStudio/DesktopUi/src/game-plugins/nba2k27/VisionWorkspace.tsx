@@ -9,7 +9,7 @@ type Box = { left: number; top: number; width: number; height: number };
 type Run = (action: string, args?: any, done?: (result: any) => void) => Promise<any>;
 const full: Box = { left: 0, top: 0, width: 1, height: 1 };
 const areas = [
-  ['Gameplay', 'var(--roi-player)', 'Keep the court; leave out browser controls and black bars.'],
+  ['Gameplay', 'var(--roi-player)', 'Keep the full gameplay picture, including the court and space above it for raised hands and the ball. Leave out browser controls and black bars.'],
   ['Player', 'var(--roi-meter)', 'Include your player’s body, hands and ball. This is a fixed capture area.'],
   ['Shot meter', 'var(--roi-feedback)', 'Include the meter’s full movement during a shot.'],
   ['Shot feedback', 'var(--roi-identity)', 'Include the panel where timing, tempo and contest feedback appear.'],
@@ -29,9 +29,9 @@ export function Nba2K27VisionWorkspace({ state = {}, status, command, mode, capt
   const s = status ?? state?.status ?? {}, session = s.session ?? {}, training = s.training ?? {}, profile = state?.selectedProfile;
   const selectedSourceId = s.selectedSourceId ?? state?.selectedSourceId ?? '', sources = s.sources ?? state?.sources ?? [];
   const locked = !!session.running || !!s.stopping, saving = !!training.hasTake && !training.isFinalized, recording = !!training.isRecording;
-  const working = !!busy || !!s.busy, context = !!profile && !!selectedSourceId, ready = s.captureLayoutConfirmed ?? !!state?.settings?.trainingCapture?.configured;
+  const working = !!busy || !!s.busy, context = !!profile && !!selectedSourceId, ready = (s.captureLayoutConfirmed ?? !!state?.settings?.trainingCapture?.configured) && (mode !== 'training' || state?.settings?.trainingCapture?.evidenceMode === 'sceneFirst');
   const gpuPreparation = settings.preprocessingBackend === 'd3D11Cuda';
-  const recordHint = !profile ? 'Choose a saved shot profile first.' : !selectedSourceId ? 'Choose the Gameplay window first.' : !ready ? 'Mark capture areas before recording.' : saving ? 'The previous clip is finishing.' : working ? 'Another vision action is finishing.' : 'Save up to 10 seconds of gameplay and controller input.';
+  const recordHint = !profile ? 'Choose a saved shot profile first.' : !selectedSourceId ? 'Choose the Gameplay window first.' : !ready ? 'Mark the gameplay scene and feedback panel before recording.' : saving ? 'The previous clip is finishing.' : working ? 'Another vision action is finishing.' : 'Save up to 10 seconds of gameplay and controller input.';
   useEffect(() => { if (!dirty) setSettings(state?.settings ?? {}); }, [state?.settings, dirty]);
   useEffect(() => setReview(state?.review), [state?.review]);
   const run: Run = async (action, args, done) => {
@@ -63,17 +63,17 @@ export function Nba2K27VisionWorkspace({ state = {}, status, command, mode, capt
         <div className="vision-stage">{captureWindow?.detached ? <div className="vision-stage-empty"><p>Capture is open in a separate window.</p><Button onClick={() => { void captureWindow.attach?.().catch(e => setError(String(e.message))); }}>Bring back</Button></div> : s.preview?.url ? <><img src={s.preview.url} alt={session.running ? 'Live gameplay capture' : 'Last captured gameplay preview'} /><span className="vision-stage-badge"><Badge tone={session.running ? 'success' : 'neutral'}>{session.running ? 'Preview · not saved' : 'Last preview'}</Badge></span></>
           : <div className="vision-stage-empty"><span><Icon name="camera" size={42} /></span><h3>Your gameplay belongs here</h3><p>{context ? 'Start a preview to check the picture before recording.' : 'Choose a shot profile and the window showing Remote Play.'}</p>{!profile && <Button onClick={() => setEditor(fresh())}>Create a shot profile</Button>}</div>}</div>
         <div className="vision-preview-foot"><span>{s.preview?.sourceWidth ? `${s.preview.sourceWidth} × ${s.preview.sourceHeight}` : 'Source resolution appears here'}</span><span>{session.frames ? `${session.frames.toLocaleString()} frames viewed` : 'Viewing alone does not save footage'}</span></div></section>
-        <div className="vision-aside"><Card title="Capture areas" description="Choose the parts of the picture worth keeping." actions={<span className="vision-step">2</span>}><div className="vision-areas">{areas.map(([label, color]) => <div key={label}><i style={{ background: color }} />{label}<Icon name={ready ? 'check' : 'circle'} size={15} /></div>)}</div>
+        <div className="vision-aside"><Card title="Capture areas" description="Keep the moving action in the full gameplay scene." actions={<span className="vision-step">2</span>}><div className="vision-areas">{[areas[0], areas[3]].map(([label, color]) => <div key={label}><i style={{ background: color }} />{label}<Icon name={ready ? 'check' : 'circle'} size={15} /></div>)}</div>
           <p className="subtle">{ready ? state.settings.trainingCapture.hudName : 'Mark these on a paused preview. Recheck them after changing the camera, HUD or window size.'}</p><Button disabled={!context || working || saving} busy={busy === 'freeze'} onClick={() => run('freeze', {}, result => setFrozen(result))}><Icon name="sliders" size={17} />{ready ? 'Adjust capture areas' : 'Mark capture areas'}</Button></Card>
           <Card title={recording ? 'Recording your clip' : saving ? 'Saving your clip' : training.isComplete ? 'Your last clip is saved' : 'Keep the evidence together'} actions={<span className="vision-step">3</span>}
-            description={recording ? 'Return to Remote Play. Keep playing through the shot feedback.' : saving ? 'Images and controller samples are being finalized.' : training.isComplete ? `${training.storedFrames?.toLocaleString() ?? 0} synchronized frames saved.` : 'Player, meter, feedback and actual controller movement. Up to 10 seconds; no model needed.'}>
+            description={recording ? 'Return to Remote Play. Keep playing through the shot feedback.' : saving ? 'Images and controller samples are being finalized.' : training.isComplete ? `${training.storedFrames?.toLocaleString() ?? 0} synchronized frames saved.` : 'Full gameplay, fixed feedback and actual controller movement. Up to 10 seconds; no model needed.'}>
             <div className="stack">{recording ? <Button variant="danger" onClick={() => run('recordStop')}><Icon name="stop" size={17} />Stop recording</Button> : <Button variant="primary" disabled={!context || !ready || working || saving} busy={busy === 'recordStart'} onClick={() => run('recordStart')}><Icon name="circle" size={16} />Record a clip</Button>}
               {training.isComplete && <Button disabled={working} onClick={() => run('reviewOpen', { latest: true }, result => { if (result) { setReview(result); setTab('clips'); } })}><Icon name="eye" size={17} />Review last clip</Button>}
               {!!training.droppedFrames && <p className="subtle">{training.droppedFrames.toLocaleString()} capture frames dropped.</p>}
               {training.hasTake && training.isFinalized && !training.isComplete && <Notice tone="warning">This clip is incomplete. Retained evidence is available in its folder.</Notice>}
               {training.hasTake && <Button variant="ghost" onClick={() => run('openClipFolder')}><Icon name="folder" size={16} />Open clip folder</Button>}</div></Card></div></div>
       {s.notice && <p className="vision-status-line" role="status"><Icon name="info" size={17} />{s.notice}</p>}
-      <details className="vision-details"><summary>How clips become training evidence</summary><div className="stack"><p>Meter-on footage records progression, tempo and later shot feedback. Meter-off validation uses a separate purpose and the actual meter-off setup.</p><p>The recorder keeps raw evidence. Automatic meter labels, dynamic player tracking and the reviewed training conversion are still being developed. The current capture areas stay fixed on screen.</p></div></details>
+      <details className="vision-details"><summary>How clips become training evidence</summary><div className="stack"><p>Meter-on footage records progression, tempo and later shot feedback. Meter-off validation uses a separate purpose and the actual meter-off setup.</p><p>The full scene preserves the player, moving meter and court for tracking annotations. Feedback uses its fixed HUD position. Player and meter tracking still require training and validation; scene overviews cannot be used as player crops.</p></div></details>
     </>}
     {mode === 'training' && tab === 'clips' && <><Card title="Find a useful moment" description="Review the player, meter and shot feedback on one timeline." actions={<div className="button-group"><Button disabled={!training.isComplete || working} onClick={() => transition(() => run('reviewOpen', { latest: true }, result => result && setReview(result)))}>Open last clip</Button><Button variant="primary" disabled={working} onClick={() => transition(() => run('reviewOpen', {}, result => result && setReview(result)))}><Icon name="folder" size={17} />Open a clip</Button></div>}>
       {!review && <EmptyState icon="camera" title="Give every shot some context" description="Open a completed clip to inspect its regions, mark shot intervals and save reviewed labels." />}</Card>{review && <ClipReview key={review.token + ':' + draftEpoch} review={review} busy={working} save={labels => run('reviewSave', { token: review.token, labels })} />}</>}
@@ -142,17 +142,17 @@ function ProfileEditor({ profile, isSaved, fingerprint, run, busy, error, close 
 
 function LayoutEditor({ frozen, profile, busy, error, save, close }: { frozen: any; profile: any; busy: boolean; error: string; save: (layout: any, player: Box) => void; close: () => void }) {
   const original = frozen.layout ?? {}, confirmed = !!original.configured && original.sourceWidth === frozen.sourceWidth && original.sourceHeight === frozen.sourceHeight;
-  const [boxes, setBoxes] = useState<(Box | null)[]>([original.gameplayRegion ?? full, frozen.player ?? full, original.meterRegion ?? null, original.feedbackRegion ?? null]);
+  const [boxes, setBoxes] = useState<(Box | null)[]>([original.gameplayRegion ?? full, null, null, original.feedbackRegion ?? null]);
   const [marked, setMarked] = useState([confirmed, confirmed, confirmed && !!original.meterRegion, confirmed && !!original.feedbackRegion]);
   const [active, setActive] = useState(0), [localError, setLocalError] = useState('');
-  const [layout, setLayout] = useState({ ...original, hudName: original.hudName ?? 'My gameplay HUD', gameBuild: original.gameBuild ?? '', purpose: !confirmed && !profile?.usesShotMeter ? 'meterOffValidation' : original.purpose ?? 'meterSupervisedTraining', shotCategory: original.shotCategory ?? categories[0] });
+  const [layout, setLayout] = useState({ ...original, evidenceMode: 'sceneFirst', hudName: original.hudName ?? 'My gameplay HUD', gameBuild: original.gameBuild ?? '', purpose: !confirmed && !profile?.usesShotMeter ? 'meterOffValidation' : original.purpose ?? 'meterSupervisedTraining', shotCategory: original.shotCategory ?? categories[0] });
   const originalDraft = useRef(JSON.stringify({ boxes, marked, layout }));
   const changed = JSON.stringify({ boxes, marked, layout }) !== originalDraft.current;
   const [closeRequested, setCloseRequested] = useState(false);
   useUnsavedChanges(changed);
   const requestClose = () => { if (!busy) { if (changed) setCloseRequested(true); else close(); } };
   const drag = useRef<{ x: number; y: number; before: Box | null; marked: boolean; pointer: number; index: number } | null>(null);
-  const needed = layout.purpose === 'meterOffValidation' ? [0, 1, 3] : [0, 1, 2, 3];
+  const needed = [0, 3];
   const mismatch = layout.purpose === 'meterSupervisedTraining' ? !profile?.usesShotMeter : !!profile?.usesShotMeter;
   const point = (event: Pointer<HTMLDivElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) }; };
   const update = (index: number, box: Box | null, done: boolean) => { setBoxes(old => old.map((value, i) => i === index ? box : value)); setMarked(old => old.map((value, i) => i === index ? done : value)); };
@@ -166,7 +166,7 @@ function LayoutEditor({ frozen, profile, busy, error, save, close }: { frozen: a
   }
   function cancel(event: Pointer<HTMLDivElement>) { if (drag.current) { const old = drag.current; drag.current = null; update(old.index, old.before, old.marked); if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } }
   return <><Modal open wide title="Choose what your clip keeps" description="Choose an area, then draw its box on this paused frame." onClose={requestClose}
-    footer={<><span className="vision-layout-count">{needed.filter(index => marked[index]).length} of {needed.length} areas marked</span><Button disabled={busy} onClick={requestClose}>Cancel</Button><Button variant="primary" disabled={busy || mismatch || !needed.every(index => marked[index])} onClick={() => save({ ...layout, configured: true, sourceWidth: frozen.sourceWidth, sourceHeight: frozen.sourceHeight, gameplayRegion: boxes[0], meterRegion: layout.purpose === 'meterSupervisedTraining' ? boxes[2] : null, feedbackRegion: boxes[3] }, boxes[1]!)}>Save capture areas</Button></>}>
+    footer={<><span className="vision-layout-count">{needed.filter(index => marked[index]).length} of {needed.length} areas marked</span><Button disabled={busy} onClick={requestClose}>Cancel</Button><Button variant="primary" disabled={busy || mismatch || !needed.every(index => marked[index])} onClick={() => save({ ...layout, configured: true, sourceWidth: frozen.sourceWidth, sourceHeight: frozen.sourceHeight, gameplayRegion: boxes[0], meterRegion: null, feedbackRegion: boxes[3] }, boxes[0]!)}>Save capture areas</Button></>}>
     <div className="stack">{(localError || error) && <Notice tone="danger">{localError || error}</Notice>}
       <div className="form-grid"><Field label="HUD layout name"><Input value={layout.hudName} maxLength={80} onChange={e => setLayout({ ...layout, hudName: e.target.value })} /></Field><Field label="Clip purpose"><Select value={layout.purpose} onValueChange={selectionValue => { setLayout({ ...layout, purpose: selectionValue }); if (active === 2 && selectionValue === 'meterOffValidation') setActive(3); }}><SelectOption value="meterSupervisedTraining">Training · meter on</SelectOption><SelectOption value="meterOffValidation">Validation · meter off</SelectOption></Select></Field></div>
       {mismatch && <Notice tone="warning">This shot profile has the meter {profile?.usesShotMeter ? 'on' : 'off'}. Match this purpose to the actual game setting, or edit the shot profile first.</Notice>}
@@ -184,7 +184,7 @@ function LayoutEditor({ frozen, profile, busy, error, save, close }: { frozen: a
 }
 
 function ClipReview({ review, busy, save }: { review: any; busy: boolean; save: (labels: any) => Promise<any> }) {
-  const [frame, setFrame] = useState(0), [renderFrame, setRenderFrame] = useState(0), [region, setRegion] = useState('player'), [loaded, setLoaded] = useState('');
+  const [frame, setFrame] = useState(0), [renderFrame, setRenderFrame] = useState(0), [region, setRegion] = useState(review.tracking === 'unannotated-scene' ? 'scene' : 'player'), [loaded, setLoaded] = useState('');
   const [split, setSplit] = useState(review.labels?.split ?? 'train'), [shots, setShots] = useState<any[]>(review.labels?.shots ?? []);
   const [editing, setEditing] = useState<string | null>(null), [name, setName] = useState('shot-001'), [start, setStart] = useState(0), [end, setEnd] = useState(review.frameCount - 1), [target, setTarget] = useState<number | null>(null);
   const [isTarget, setIsTarget] = useState(true), [identity, setIdentity] = useState(false), [reviewed, setReviewed] = useState(false), [message, setMessage] = useState('');

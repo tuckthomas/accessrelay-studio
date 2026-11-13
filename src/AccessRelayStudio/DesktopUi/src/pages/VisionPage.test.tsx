@@ -15,7 +15,7 @@ function fixture(overrides: any = {}) {
     sources: [{ id: 'window-one', title: 'Xbox Remote Play', processId: 100 }, { id: 'window-two', title: 'Another Remote Play window', processId: 200 }],
     selectedSourceId: 'window-one', models: [], modelScanComplete: true,
     settings: { executionProvider: 'cuda', shootButton: 'x', minimumConfidence: .9, crop: all, trainingCapture: {
-      configured: false, sourceWidth: 1920, sourceHeight: 1080, gameplayRegion: all, meterRegion: { left: .1, top: .1, width: .1, height: .3 },
+      configured: false, evidenceMode: 'sceneFirst', sourceWidth: 1920, sourceHeight: 1080, gameplayRegion: all, meterRegion: { left: .1, top: .1, width: .1, height: .3 },
       feedbackRegion: { left: .1, top: .1, width: .4, height: .1 }, purpose: 'meterSupervisedTraining', hudName: 'Prior HUD', gameBuild: '', shotCategory: 'Mixed / unclassified' } },
     status: { session: null, stopping: false, training: null, notice: 'Choose your source.' }, ...overrides };
 }
@@ -62,8 +62,8 @@ describe('vision workflows', () => {
     const record = screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement;
     expect(record.closest('.vision-preview-head')).toBeTruthy();
     expect(record.disabled).toBe(true);
-    expect(record.getAttribute('title')).toBe('Mark capture areas before recording.');
-    expect(document.getElementById(record.getAttribute('aria-describedby')!)?.textContent).toBe('Mark capture areas before recording.');
+    expect(record.getAttribute('title')).toBe('Mark the gameplay scene and feedback panel before recording.');
+    expect(document.getElementById(record.getAttribute('aria-describedby')!)?.textContent).toBe('Mark the gameplay scene and feedback panel before recording.');
     view.rerender(<VisionPage mode="training" state={state} status={{ session: { running: true }, busy: true,
       training: { hasTake: true, isRecording: true, isFinalized: false, storedFrames: 42 } }} command={command} />);
     const stop = screen.getByRole('button', { name: 'Stop training clip recording' }) as HTMLButtonElement;
@@ -125,7 +125,7 @@ describe('vision workflows', () => {
       profile: expect.objectContaining({ id: profile.id, heightInches: 82, release1Percent: 35, upperRelease1: profile.upperRelease1, upperRelease2: profile.upperRelease2, usesShotMeter: true }) })));
   });
 
-  it('does not silently reconfirm retained meter and feedback boxes after source or resolution invalidation', async () => {
+  it('does not silently reconfirm the scene and feedback after source changes after source or resolution invalidation', async () => {
     const state = fixture();
     const frozen = { token: 'frozen-frame', url: 'https://media.accessrelay.test/vision/frozen/frozen-frame', sourceWidth: 2560,
       sourceHeight: 1440, player: all, layout: state.settings.trainingCapture };
@@ -137,18 +137,16 @@ describe('vision workflows', () => {
     expect(save.disabled).toBe(true);
     fireEvent.click(within(dialog).getByText('Keyboard / precise coordinates'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Use these coordinates' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark Player area' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Use these coordinates' }));
     expect(save.disabled).toBe(true);
-    expect(within(dialog).getByText('2 of 4 areas marked')).toBeTruthy();
-    for (const area of ['Shot meter', 'Shot feedback']) {
-      fireEvent.click(within(dialog).getByRole('button', { name: `Mark ${area} area` }));
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Use these coordinates' }));
-    }
+    expect(within(dialog).getByText('1 of 2 areas marked')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Mark Player area' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Mark Shot meter area' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark Shot feedback area' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Use these coordinates' }));
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => expect(command).toHaveBeenCalledWith('layoutSave', expect.objectContaining({ token: 'frozen-frame',
-      layout: expect.objectContaining({ sourceWidth: 2560, sourceHeight: 1440, configured: true, meterRegion: state.settings.trainingCapture.meterRegion,
+      layout: expect.objectContaining({ sourceWidth: 2560, sourceHeight: 1440, configured: true, evidenceMode: 'sceneFirst', meterRegion: null,
         feedbackRegion: state.settings.trainingCapture.feedbackRegion }), player: all })));
   });
 
@@ -162,13 +160,13 @@ describe('vision workflows', () => {
     fireEvent.change(within(editor).getByRole('textbox', { name: 'HUD layout name' }), { target: { value: '  My unfinished HUD  ' } });
     fireEvent.click(within(editor).getByText('Keyboard / precise coordinates'));
     fireEvent.click(within(editor).getByRole('button', { name: 'Use these coordinates' }));
-    expect(within(editor).getByText('1 of 4 areas marked')).toBeTruthy();
+    expect(within(editor).getByText('1 of 2 areas marked')).toBeTruthy();
     fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
     expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     view.rerender(<VisionPage mode="training" state={{ ...state, settings: { ...state.settings } }} status={{ session: null, busy: false }} command={command} />);
     expect((within(editor).getByRole('textbox', { name: 'HUD layout name' }) as HTMLInputElement).value).toBe('  My unfinished HUD  ');
-    expect(within(editor).getByText('1 of 4 areas marked')).toBeTruthy();
+    expect(within(editor).getByText('1 of 2 areas marked')).toBeTruthy();
     expect(hasUnsavedChanges()).toBe(true);
     expect(command).toHaveBeenCalledTimes(1);
   });

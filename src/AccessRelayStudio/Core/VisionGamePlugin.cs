@@ -12,7 +12,10 @@ internal interface IVisionCaptureProfile : ITrainingCaptureProfile
     string AnimationProfile { get; }
     object ExportProfile();
     void ValidateCapture(VisionTrainingCaptureSettings settings);
+    IReadOnlyList<VisionEvidenceRegion> EvidenceRegions(VisionSettings settings);
 }
+
+internal sealed record VisionEvidenceRegion(string Name, string File, int Width, int Height, VisionCrop Crop);
 
 /// <summary>Trusted built-in adapters. Imported packs cannot load native code or write controller output.</summary>
 internal interface IVisionGamePlugin

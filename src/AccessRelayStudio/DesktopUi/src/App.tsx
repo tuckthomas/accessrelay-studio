@@ -111,7 +111,7 @@ export function App() {
           command={invoke} navigate={navigate} />}
         {page === 'controller' && <ControllerPage state={state.controller || {}} status={controllerStatus} command={controllerCommand} />}
         {page === 'vision' && <VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="live" captureWindow={captureWindow} />}
-        {page === 'training' && <div className="page-stack"><VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="training" captureWindow={captureWindow} />
+        {page === 'training' && <div className="page-stack"><VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="training" captureWindow={captureWindow} openMarketplace={() => navigate('marketplace')} />
           <TrainingJobsPanel initial={state.settings?.assistant} command={appCommand} /></div>}
         {page === 'voice' && <VoicePage state={state.voice || {}} status={voiceStatus} command={voiceCommand} />}
         {page === 'marketplace' && <MarketplacePage state={state.marketplace || {}} command={marketplaceCommand} openTraining={async pluginId => {

@@ -44,7 +44,35 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
     bool ITrainingCaptureProfile.UsesSupervisionOverlay => UsesShotMeter;
     string IVisionCaptureProfile.AnimationProfile => "nba2k27:" + ConfigurationFingerprint;
     object IVisionCaptureProfile.ExportProfile() => this;
-    void IVisionCaptureProfile.ValidateCapture(VisionTrainingCaptureSettings settings) => settings.ValidateForRecording(this);
+    void IVisionCaptureProfile.ValidateCapture(VisionTrainingCaptureSettings settings)
+    {
+        settings.Validate(); Validate();
+        if (!settings.Configured || settings.FeedbackRegion is null)
+            throw new InvalidDataException("Mark the gameplay scene and fixed shot feedback panel first.");
+        if (settings.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && (!UsesShotMeter ||
+            (settings.EvidenceMode == VisionEvidenceMode.FixedRegions && settings.MeterRegion is null)))
+            throw new InvalidDataException("NBA 2K27 training requires the shot meter on in the game and selected shot profile.");
+        if (settings.Purpose == VisionTrainingPurpose.MeterOffValidation && UsesShotMeter)
+            throw new InvalidDataException("NBA 2K27 meter-off validation requires the meter off in the game and selected profile.");
+    }
+
+    IReadOnlyList<VisionEvidenceRegion> IVisionCaptureProfile.EvidenceRegions(VisionSettings settings)
+    {
+        var layout = settings.TrainingCapture;
+        var regions = new List<VisionEvidenceRegion> { new("player", "frames.bgra", 256, 256,
+            layout.EvidenceMode == VisionEvidenceMode.SceneFirst ? layout.GameplayRegion : settings.Crop) };
+        if (!layout.Configured) return regions;
+        bool sceneFirst = layout.EvidenceMode == VisionEvidenceMode.SceneFirst;
+        double width = layout.SourceWidth * layout.GameplayRegion.Width, height = layout.SourceHeight * layout.GameplayRegion.Height;
+        double scale = Math.Min(1, 1280 / Math.Max(width, height));
+        int sceneWidth = sceneFirst ? Math.Max(1, (int)Math.Round(width * scale)) : 640;
+        int sceneHeight = sceneFirst ? Math.Max(1, (int)Math.Round(height * scale)) : 360;
+        regions.Add(new("scene", "scene.bgra", sceneWidth, sceneHeight, layout.GameplayRegion));
+        if (!sceneFirst && layout.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && layout.MeterRegion is { } meter)
+            regions.Add(new("meter", "meter.bgra", 256, 256, meter));
+        if (layout.FeedbackRegion is { } feedback) regions.Add(new("feedback", "feedback.bgra", 640, 192, feedback));
+        return regions;
+    }
 
     public int Release2Percent => 100 - Release1Percent;
 

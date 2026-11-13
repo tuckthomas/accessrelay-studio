@@ -15,6 +15,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
 {
     internal const int StoredWidth = 256, StoredHeight = 256, FrameBytes = StoredWidth * StoredHeight * 4;
     internal const long EvidenceByteLimit = 2L * 1024 * 1024 * 1024;
+    internal const long SceneEvidenceByteLimit = 4L * 1024 * 1024 * 1024;
     private sealed record StoredRegion(string Name, string File, int Width, int Height, VisionCrop Crop)
     { internal int ByteLength => checked(Width * Height * 4); }
     private sealed record RegionFrameEntry(string Name, string File, long OffsetBytes, int ByteLength);
@@ -64,21 +65,13 @@ internal sealed class VisionTrainingRecorder : IDisposable
         profile.Validate(); settings.Validate();
         // Legacy primary-only fixtures remain readable; the UI/session requires configured multi-region evidence.
         if (settings.TrainingCapture.Configured) profile.ValidateCapture(settings.TrainingCapture);
-        var regions = new List<StoredRegion> { new("player", "frames.bgra", StoredWidth, StoredHeight, settings.Crop) };
-        if (settings.TrainingCapture.Configured)
-        {
-            var layout = settings.TrainingCapture;
-            if (!VisionTrainingCaptureSettings.Contains(layout.GameplayRegion, settings.Crop))
-                throw new InvalidDataException("The player region must be inside the marked gameplay area.");
-            regions.Add(new("scene", "scene.bgra", 640, 360, layout.GameplayRegion));
-            if (layout.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && layout.MeterRegion is { } meter)
-                regions.Add(new("meter", "meter.bgra", 256, 256, meter));
-            if (layout.FeedbackRegion is { } feedback)
-                regions.Add(new("feedback", "feedback.bgra", 640, 192, feedback));
-        }
-        _regions = regions.ToArray();
+        if (settings.TrainingCapture.Configured && !VisionTrainingCaptureSettings.Contains(settings.TrainingCapture.GameplayRegion, settings.Crop))
+            throw new InvalidDataException("The primary region must be inside the gameplay scene.");
+        _regions = profile.EvidenceRegions(settings).Select(r => new StoredRegion(r.Name, r.File, r.Width, r.Height, r.Crop)).ToArray();
         _bytesPerFrame = _regions.Sum(region => region.ByteLength);
-        long productionByteLimit = settings.TrainingCapture.Configured ? EvidenceByteLimit : 512L * 1024 * 1024;
+        long productionByteLimit = settings.TrainingCapture.Configured
+            ? settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? SceneEvidenceByteLimit : EvidenceByteLimit
+            : 512L * 1024 * 1024;
         _byteLimit = byteLimit ?? productionByteLimit;
         if (_byteLimit < _bytesPerFrame || _byteLimit > productionByteLimit)
             throw new ArgumentOutOfRangeException(nameof(byteLimit));
@@ -93,7 +86,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
         Directory.CreateDirectory(parent);
         if (new DriveInfo(Path.GetPathRoot(parent)!).AvailableFreeSpace < _byteLimit + 64L * 1024 * 1024)
             throw new IOException(settings.TrainingCapture.Configured
-                ? "Training evidence needs at least 2.1 GiB free in the selected location. Choose a drive with enough space."
+                ? $"Training evidence needs at least {(_byteLimit + 64L * 1024 * 1024) / (1024d * 1024 * 1024):F1} GiB free in the selected location."
                 : "Training capture needs at least 576 MiB of free space in the selected location.");
         DirectoryPath = Path.Combine(parent, "take-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(DirectoryPath);
@@ -244,7 +237,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
             cameraView = _profile.CameraView,
             captureWidth = _width, captureHeight = _height, stride = _width * 4, crop = _settings.Crop,
             storedWidth = StoredWidth, storedHeight = StoredHeight, storedStride = StoredWidth * 4, pixelFormat = "BGRA8",
-            preprocessing = "bgra8-player-crop-nearest256-bilinear-rgb-unit-ntchw-v2",
+            preprocessing = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst
+                ? "scene-first-untracked-v1" : "bgra8-player-crop-nearest256-bilinear-rgb-unit-ntchw-v2",
             sourceTitle = _sourceTitle, shotProfile = _profile.ExportProfile(), stopwatchFrequency = Stopwatch.Frequency,
             frames = _index, droppedFrames = Interlocked.Read(ref _dropped), complete,
             labelsRequired = "Target release labels require reviewed practice experiments; physical release and ball departure are not automatically ground truth.",
@@ -252,7 +246,9 @@ internal sealed class VisionTrainingRecorder : IDisposable
             timingScope = "captureTicks marks local WGC frame receipt before image copies. compositorTicks preserves WGC metadata separately and can lead receipt. Original Xbox render time is not measured.",
             captureEvidence = _settings.TrainingCapture.Configured ? new
             {
-                version = 1, purpose = _settings.TrainingCapture.Purpose, layout = _settings.TrainingCapture,
+                version = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? 2 : 1,
+                purpose = _settings.TrainingCapture.Purpose, layout = _settings.TrainingCapture,
+                tracking = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? "unannotated-scene" : "fixed-region",
                 streams = _regions.Select(region => new { region.Name, region.File, region.Width, region.Height,
                     stride = region.Width * 4, pixelFormat = "BGRA8", region.Crop }),
                 controllerTraceFile = _controllerTrace is not null ? "controller-trace.json" : null,

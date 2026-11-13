@@ -22,10 +22,10 @@ try
     Reject(() => DesktopVisionBitmap.Encode(new byte[8], 4, 2, 16), "Short pixel buffer");
     Console.WriteLine("SUCCESS: binary top-down BMP, padded stride, pixels, invalid dimensions and bounded1440p preview.");
 
-    JsonObject Metadata(bool enriched, bool meter = true)
+    JsonObject Metadata(bool enriched, bool meter = true, bool sceneFirst = false)
     {
         var regions = new List<(string Name, string File, int Width, int Height)> { ("player", "frames.bgra", 256, 256) };
-        if (enriched) { regions.Add(("scene", "scene.bgra", 640, 360)); if (meter) regions.Add(("meter", "meter.bgra", 256, 256)); regions.Add(("feedback", "feedback.bgra", 640, 192)); }
+        if (enriched) { regions.Add(("scene", "scene.bgra", sceneFirst ? 1280 : 640, sceneFirst ? 720 : 360)); if (meter) regions.Add(("meter", "meter.bgra", 256, 256)); regions.Add(("feedback", "feedback.bgra", 640, 192)); }
         foreach (var region in regions)
         {
             int size = region.Width * region.Height * 4;
@@ -40,13 +40,13 @@ try
             frames.Add(frame);
         }
         var metadata = new JsonObject { ["schemaVersion"] = 1, ["sessionId"] = "synthetic-desktop-reader", ["complete"] = true, ["stopwatchFrequency"] = 1000, ["storedWidth"] = 256, ["storedHeight"] = 256, ["storedStride"] = 1024, ["pixelFormat"] = "BGRA8", ["frames"] = frames };
-        if (enriched) metadata["captureEvidence"] = new JsonObject { ["version"] = 1, ["purpose"] = meter ? "meterSupervisedTraining" : "meterOffValidation", ["streams"] = new JsonArray(regions.Select(region => (JsonNode)new JsonObject { ["name"] = region.Name, ["file"] = region.File, ["width"] = region.Width, ["height"] = region.Height, ["stride"] = region.Width * 4, ["pixelFormat"] = "BGRA8", ["crop"] = new JsonObject { ["left"] = 0, ["top"] = 0, ["width"] = 1, ["height"] = 1 } }).ToArray()) };
+        if (enriched) metadata["captureEvidence"] = new JsonObject { ["version"] = sceneFirst ? 2 : 1, ["tracking"] = sceneFirst ? "unannotated-scene" : "fixed-region", ["purpose"] = meter ? "meterSupervisedTraining" : "meterOffValidation", ["streams"] = new JsonArray(regions.Select(region => (JsonNode)new JsonObject { ["name"] = region.Name, ["file"] = region.File, ["width"] = region.Width, ["height"] = region.Height, ["stride"] = region.Width * 4, ["pixelFormat"] = "BGRA8", ["crop"] = new JsonObject { ["left"] = 0, ["top"] = 0, ["width"] = 1, ["height"] = 1 } }).ToArray()) };
         return metadata;
     }
     void Write(JsonObject metadata) { File.WriteAllText(Path.Combine(directory, "session.json"), metadata.ToJsonString()); string labels = Path.Combine(directory, "labels.json"); if (File.Exists(labels)) File.Delete(labels); }
-    foreach (var (enriched, meter, expectedCount) in new[] { (false, false, 1), (true, true, 4), (true, false, 3) })
+    foreach (var (enriched, meter, expectedCount, sceneFirst) in new[] { (false, false, 1, false), (true, true, 4, false), (true, false, 3, false), (true, false, 3, true) })
     {
-        Write(Metadata(enriched, meter)); using var dataset = new DesktopVisionDataset(directory);
+        Write(Metadata(enriched, meter, sceneFirst)); using var dataset = new DesktopVisionDataset(directory);
         Check(dataset.Regions.Length == expectedCount && dataset.FrameCount == 2, "Supported stream counts");
         foreach (var region in dataset.Regions) { var image = dataset.ReadFrame(region.Name, 1); Check(image.Bytes[54] == 67, "Read correct region and frame offset"); }
         Reject(() => dataset.ReadFrame("../../outside", 0), "Unknown region"); Reject(() => dataset.ReadFrame("player", -1), "Negative frame");

@@ -4,6 +4,7 @@ internal static class DesktopEnvironment
 {
     private static readonly string? IsolatedRoot = FindVerificationRoot();
     internal static bool IsVerification => IsolatedRoot is not null;
+    internal static string GamePackDirectory => DataDirectory("GamePacks") ?? Path.Combine(AppContext.BaseDirectory, "InstalledPacks");
     internal static string? DataDirectory(string component) => IsolatedRoot is null ? null : Path.Combine(IsolatedRoot, component);
     private static string? FindVerificationRoot()
     {

@@ -77,6 +77,8 @@ def validate_source(session, directory=None):
     if "trainingConversion" in session:
         raise ValueError("Convert original acquisition evidence, not an already converted session")
     profile, evidence = session.get("shotProfile"), session.get("captureEvidence")
+    if isinstance(evidence, dict) and evidence.get("version") == 2:
+        raise ValueError("Scene-first footage needs reviewed per-frame player/meter tracking before release-model conversion; a scene overview is not a player crop")
     if not isinstance(profile, dict) or not isinstance(evidence, dict) or evidence.get("version") != 1:
         raise ValueError("Conversion requires original version-1 enriched evidence")
     purpose = evidence.get("purpose")

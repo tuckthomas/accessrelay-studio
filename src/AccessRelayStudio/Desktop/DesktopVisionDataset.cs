@@ -14,7 +14,7 @@ internal sealed class DesktopVisionDataset : IDisposable
     internal sealed record Region(string Name, string Label, string File, int Width, int Height)
     { internal int ByteLength => checked(Width * Height * 4); }
     private sealed record StreamInfo(string Name, string File, int Width, int Height, int Stride, string PixelFormat, VisionCrop Crop);
-    private sealed record Evidence(int Version, string Purpose, StreamInfo[] Streams);
+    private sealed record Evidence(int Version, string Purpose, StreamInfo[] Streams, string? Tracking = null);
     private sealed record SessionInfo(int SchemaVersion, string SessionId, bool Complete, long StopwatchFrequency,
         int StoredWidth, int StoredHeight, int StoredStride, string PixelFormat, Frame[] Frames, Evidence? CaptureEvidence = null);
     internal sealed record Shot(string ShotId, long StartTicks, long EndTicks, long? TargetReleaseTicks,
@@ -74,6 +74,7 @@ internal sealed class DesktopVisionDataset : IDisposable
         {
             token = Token, sessionId = _session.SessionId, directory = _directory, frameCount = FrameCount,
             enriched = _session.CaptureEvidence is not null, purpose = _session.CaptureEvidence?.Purpose,
+            tracking = _session.CaptureEvidence?.Tracking,
             regions = Regions.Select(r => new { r.Name, r.Label, r.Width, r.Height }), labels = Labels,
             frames = _session.Frames.Select(f => new { ticks = f.CaptureTicks, sequence = f.Sequence,
                 timeMs = ((double)f.CaptureTicks - _session.Frames[0].CaptureTicks) * 1000 / _session.StopwatchFrequency })
@@ -126,17 +127,22 @@ internal sealed class DesktopVisionDataset : IDisposable
 
     private Region[] ValidateEvidence(long primaryLength)
     {
-        var player = new Region("player", "Player", "frames.bgra", 256, 256);
+        bool sceneFirst = _session.CaptureEvidence?.Version == 2;
+        var player = new Region("player", sceneFirst ? "Overview" : "Player", "frames.bgra", 256, 256);
         if (_session.CaptureEvidence is not { } evidence)
         {
             if (_session.Frames.Any(f => f.Evidence is { Length: > 0 }))
                 throw new InvalidDataException("Region frames have no matching evidence metadata.");
             return [player];
         }
-        if (evidence.Version != 1 || evidence.Purpose is not ("meterSupervisedTraining" or "meterOffValidation"))
+        if (evidence.Version is not (1 or 2) || evidence.Purpose is not ("meterSupervisedTraining" or "meterOffValidation")
+            || (sceneFirst && evidence.Tracking != "unannotated-scene"))
             throw new InvalidDataException("This clip's evidence format is not supported.");
-        var expected = new List<Region> { player, new("scene", "Court", "scene.bgra", 640, 360) };
-        if (evidence.Purpose == "meterSupervisedTraining") expected.Add(new("meter", "Meter", "meter.bgra", 256, 256));
+        var scene = evidence.Streams?.FirstOrDefault(s => s?.Name == "scene");
+        if (sceneFirst && (scene is null || scene.Width is < 1 or > 1280 || scene.Height is < 1 or > 1280))
+            throw new InvalidDataException("The gameplay scene exceeds its dimension limit.");
+        var expected = new List<Region> { player, new("scene", sceneFirst ? "Gameplay scene" : "Court", "scene.bgra", sceneFirst ? scene!.Width : 640, sceneFirst ? scene!.Height : 360) };
+        if (!sceneFirst && evidence.Purpose == "meterSupervisedTraining") expected.Add(new("meter", "Meter", "meter.bgra", 256, 256));
         expected.Add(new("feedback", "Shot feedback", "feedback.bgra", 640, 192));
         if (evidence.Streams is null || evidence.Streams.Length != expected.Count)
             throw new InvalidDataException("The clip has missing evidence streams.");
@@ -155,7 +161,7 @@ internal sealed class DesktopVisionDataset : IDisposable
             if (length != (long)FrameCount * region.ByteLength) throw new InvalidDataException("The region data does not match its frame index.");
             total = checked(total + length);
         }
-        if (total > 2L * 1024 * 1024 * 1024) throw new InvalidDataException("The clip exceeds the evidence size limit.");
+        if (total > (sceneFirst ? 4L : 2L) * 1024 * 1024 * 1024) throw new InvalidDataException("The clip exceeds the evidence size limit.");
         long sequence = -1;
         for (int index = 0; index < FrameCount; index++)
         {

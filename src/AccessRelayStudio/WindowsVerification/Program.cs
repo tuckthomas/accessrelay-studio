@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--training-plugin-only", var trainingEvidence])
+{
+    TrainingPluginChecks.Run(trainingEvidence);
+    return;
+}
+
 if (args.Contains("--cuda-preprocessing-probe", StringComparer.Ordinal))
 {
     Environment.ExitCode = CudaPreprocessingProbe.Run(args);

@@ -29,6 +29,8 @@ public sealed record GamePackManifest
     public string Description { get; init; } = "";
     public string License { get; init; } = "";
     public string VisionAdapter { get; init; } = "none";
+    public string GameId { get; init; } = "";
+    public string TrainingAdapter { get; init; } = "none";
     public ImmutableArray<GamePackAsset> Assets { get; init; } = [];
     public ImmutableArray<GamePackBinding> Bindings { get; init; } = [];
     public ImmutableArray<GamePackTuning> Tuning { get; init; } = [];
@@ -48,6 +50,9 @@ public sealed record GamePackManifest
         if (SchemaVersion != 1 || ApiVersion != 1 || !Identifier(Id, 60) || !Identifier(Version, 40) || !Text(Name, 80)
             || !Text(Description, 1000) || !Text(License, 300) || VisionAdapter is not ("none" or "temporal-release-v1"))
             throw new InvalidDataException("Unsupported game-pack schema/API, identity, metadata or typed vision adapter.");
+        if (GameId is null || (GameId.Length != 0 && !Identifier(GameId, 60)) || !Identifier(TrainingAdapter, 80)
+            || (TrainingAdapter != "none" && (GameId.Length == 0 || VisionAdapter == "none" || Bindings.IsDefaultOrEmpty == false)))
+            throw new InvalidDataException("A training plugin must identify its game and reviewed adapter, independently of controller bindings.");
         if (Assets.IsDefault || Assets.Length > 40 || Assets.Any(asset => asset is null) || Assets.Select(asset => asset.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Assets.Length)
             throw new InvalidDataException("A game pack needs at most 40 uniquely named resources.");
         long total = 0;

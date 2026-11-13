@@ -18,7 +18,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     private readonly Func<StudioRuntime?> _runtime;
     private readonly Func<StudioProfile> _activeProfile;
     private readonly Func<Task> _connectOutput;
-    private readonly IReadOnlyList<IVisionGamePlugin> _plugins;
+    private readonly Func<IReadOnlyList<IVisionGamePlugin>> _plugins;
     private IVisionGamePlugin? _plugin;
     private IVisionCaptureProfile? _profile => _plugin?.SelectedProfile;
     private readonly VisionSettingsStore _settingsStore = new(DesktopEnvironment.DataDirectory("Vision"));
@@ -48,7 +48,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         (_session?.Status.Running == true, _session?.Status.ModelReady == true, _session?.Status.CanArm == true, _session?.Status.SourceStale == true);
 
     internal DesktopVisionService(WindowId owner, Func<StudioRuntime?> runtime, Func<StudioProfile> activeProfile,
-        Func<Task> connectOutput, IReadOnlyList<IVisionGamePlugin> plugins)
+        Func<Task> connectOutput, Func<IReadOnlyList<IVisionGamePlugin>> plugins)
     {
         _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput; _plugins = plugins;
         LoadSettings(); RefreshSources();
@@ -69,7 +69,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         var selectedModel = _models.FirstOrDefault(m => m.ManifestPath == _settings.ModelManifestPath);
         return new
         {
-            plugins = _plugins.Select(plugin => new { plugin.Id, plugin.Name, plugin.OutputContract }), selectedPluginId = _plugin?.Id ?? "",
+            plugins = _plugins().Select(plugin => new { plugin.Id, plugin.Name, plugin.OutputContract }), selectedPluginId = _plugin?.Id ?? "",
             profiles = _plugin?.Profiles.Select(profile => profile.ExportProfile()) ?? [],
             selectedProfile = _profile?.ExportProfile(), selectedFingerprint = _profile?.ConfigurationFingerprint,
             sources = _sources.Select(s => new { id = SourceId(s), s.Title, s.ProcessId }), selectedSourceId = _selectedSourceId,
@@ -134,7 +134,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                 case "pluginSelect":
                 {
                     RequireStopped(); string pluginId = args.Text("id");
-                    var plugin = pluginId.Length == 0 ? null : _plugins.FirstOrDefault(item => item.Id == pluginId)
+                    var plugin = pluginId.Length == 0 ? null : _plugins().FirstOrDefault(item => item.Id == pluginId)
                         ?? throw new InvalidOperationException("Choose an installed game plugin.");
                     if (plugin == _plugin) return null;
                     _runtime()?.SetVisionArmed(false);
@@ -309,6 +309,8 @@ internal sealed class DesktopVisionService : IDesktopModule
         if (loadModel)
         {
             var plugin = RequirePlugin();
+            if (_settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst)
+                throw new InvalidOperationException("Scene-first capture collects tracking data. A validated player tracker and tracked model input are required before live release analysis.");
             if (_profile is null) throw new InvalidOperationException("Choose a game plugin profile before starting analysis.");
             if (_settings.ModelManifestPath.Length == 0) throw new InvalidOperationException("Choose a model before starting analysis.");
             var (manifest, _) = VisionModelManifest.Read(_settings.ModelManifestPath);
@@ -380,7 +382,8 @@ internal sealed class DesktopVisionService : IDesktopModule
             throw new InvalidOperationException("The capture context changed. Open a fresh preview to mark the areas again.");
         var layout = args.GetProperty("layout").Read<VisionTrainingCaptureSettings>() with
         { Configured = true, SourceWidth = frozen.Image.SourceWidth, SourceHeight = frozen.Image.SourceHeight };
-        var crop = args.GetProperty("player").Read<VisionCrop>(); crop.Validate(); _profile.ValidateCapture(layout);
+        var crop = layout.EvidenceMode == VisionEvidenceMode.SceneFirst ? layout.GameplayRegion : args.GetProperty("player").Read<VisionCrop>();
+        crop.Validate(); _profile.ValidateCapture(layout);
         if (!VisionTrainingCaptureSettings.Contains(layout.GameplayRegion, crop))
             throw new InvalidDataException("Keep the player area inside the gameplay area.");
         _settings = _settings with { Crop = crop, TrainingCapture = layout, CorrectionMs = 0 }; SaveSettings(); _calibration = null;

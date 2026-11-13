@@ -18,7 +18,8 @@ internal sealed class VisionSettingsStore
         {
             new JsonStringEnumConverter<ControlId>(JsonNamingPolicy.CamelCase, false),
             new JsonStringEnumConverter<VisionExecutionProvider>(JsonNamingPolicy.CamelCase, false),
-            new JsonStringEnumConverter<VisionTrainingPurpose>(JsonNamingPolicy.CamelCase, false)
+            new JsonStringEnumConverter<VisionTrainingPurpose>(JsonNamingPolicy.CamelCase, false),
+            new JsonStringEnumConverter<VisionEvidenceMode>(JsonNamingPolicy.CamelCase, false)
         }
     };
     private readonly string _directory;

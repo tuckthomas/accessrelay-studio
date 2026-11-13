@@ -26,7 +26,7 @@ internal sealed class DesktopControllerService : IDesktopModule
     private string _notice = "Ready. Controller output and scripts start only when you turn them on.";
     private bool _disposed;
     private int _revision;
-    private readonly GamePackLibrary _packLibrary = new(DesktopEnvironment.DataDirectory("GamePacks"), Path.Combine(AppContext.BaseDirectory, "GamePacks"));
+    private readonly GamePackLibrary _packLibrary = new(DesktopEnvironment.GamePackDirectory, Path.Combine(AppContext.BaseDirectory, "GamePacks"));
     private readonly Func<string, Task>? _importPackModel;
     private IReadOnlyList<GamePackDefinition> _packs = [];
     private string[] _packErrors = [];
@@ -112,7 +112,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         devices = _runtime()?.Latest?.Input.Devices ?? [], selectedDeviceId = _runtime()?.Latest?.Input.DeviceId,
         deadzone = _deadzone, feedback = _feedbackSettings,
         coPilot = _coPilotSettings with { Enabled = _runtime()?.CoPilotSettings.Enabled == true },
-        gamePacks = _packs.Select(pack => new { key = pack.Manifest.Id + "@" + pack.Manifest.Version, manifest = pack.Manifest,
+        gamePacks = _packs.Where(pack => pack.Manifest.TrainingAdapter == "none").Select(pack => new { key = pack.Manifest.Id + "@" + pack.Manifest.Version, manifest = pack.Manifest,
             pack.ManifestSha256, models = pack.Manifest.Assets.Where(asset => asset.Kind == GamePackAssetKind.VisionManifest).Select(asset => asset.Path) }),
         gamePackErrors = _packErrors,
         controls = ControlMap.All.Select(control => new { id = EnumName(control), label = ControlLabel(control), mask = (uint)control }),

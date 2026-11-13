@@ -1,38 +1,31 @@
 # Marketplace
 
-The app's Marketplace page reads the catalog in the separate public
-[accessrelay-marketplace repository](https://github.com/tuckthomas/accessrelay-marketplace).
-That repository owns package source, listings, contribution review and licenses.
-No community package is bundled into the app repository. Its initial two listings
-are clearly attributed AccessRelay examples, not a claim of an existing community.
+The separate [accessrelay-marketplace repository](https://github.com/tuckthomas/accessrelay-marketplace)
+owns listings, versioned packages, source, contribution review and licenses.
+Marketplace filters distinguish game scripts, controller profiles, game plugins and
+model training plugins. Listings also identify the game when applicable.
 
-Marketplace provides search, script/plugin filters, source links, explicit install,
-refresh and installed status. Opening the page reads the catalog; it does not
-activate scripts or controller output. Installed content appears under Controller
-→ Plugins, where the existing pack workflow creates a separate controller profile.
+**NBA 2K27 Model Training** is separate from **NBA 2K27 Rhythm Script**. Install the
+training package, then select NBA 2K27 under **Model Training → Training plugin**, or
+choose **Open training** on the installed listing. A controller package cannot
+activate a training adapter. Installation never starts capture or controller output.
 
-The consumer accepts catalog schema 1 and the existing game-pack API 1. It checks
-catalog paths/metadata, manifest identity/SHA-256, declared asset sizes/hashes,
-resource types, Lua sandbox compilation and typed vision manifests. Downloads are
-bounded, use the repository's fixed HTTPS content origin without redirects, and
-stage under the installed app's MarketplaceCache before validated library import.
-The package API supports Lua, declarative tuning and supported vision resources;
-it does not load arbitrary native plugin DLLs or downloaded React UI.
+A training manifest declares `gameId` and `trainingAdapter`. Installed manifests
+enable reviewed adapters supported by this Studio build; the host does not execute
+downloaded DLLs, React or Python. Unknown adapters cannot be installed through the
+training Marketplace workflow. Adding a new native adapter requires a host release.
+NBA profile fields, cue/meter rules, camera options, UI and evidence-stream selection
+belong to the NBA plugin. Generic capture, storage, models, timing, scheduling and
+device ownership belong to the host.
 
-Game Vision is the renamed Remote Play workspace: it captures an existing game
-window for training evidence and live AI assistance, rather than hosting Xbox
-Remote Play. Capture/training, clip review and live assistance have distinct tabs
-inside the selected game plugin.
+Packages install under `InstalledPacks` beside the app, on the installation drive.
+The consumer checks catalog metadata, manifest identity/SHA-256, declared resource
+sizes/hashes, bounded HTTPS downloads, sandbox compilation and model declarations.
+Controller content appears under **Controller → Plugins**; training-only packages
+do not appear there. Published versioned package bytes remain immutable.
 
-The UI follows the reusable primitive/composition pattern in the user's CRM
-component library. Every app/game-plugin screen uses shared controls from `ui.tsx`,
-with form primitives in `components/ui/`. Dropdowns share rounded theme tokens,
-keyboard/typeahead selection, disabled items, adaptive placement/scrolling and
-dialog-aware portals. ProfilePicker keeps selectors and create buttons aligned.
-The UI AGENTS.md and a source guard preserve this app-wide requirement.
-
-Focused checks cover catalog downloads, real example-package imports into an
-isolated library, inactive profiles, altered manifest/path/size rejection, affected
-UI workflows, Marketplace filtering/install requests, shared-control usage, profile
-alignment, upward dropdown positioning, keyboard focus return and dark-mode
-dropdowns inside native dialogs.
+The NBA training plugin contains no trained tracker or release model. New acquisition
+retains the full gameplay scene and fixed feedback panel with synchronized controller
+input. Scene overviews cannot be passed off as player crops. See
+[the tracking plan](../.agents/plans/in-progress/training-plugin-and-player-tracking.md)
+for court/identity association and moving player/meter requirements.

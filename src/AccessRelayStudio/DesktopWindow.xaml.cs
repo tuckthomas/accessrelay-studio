@@ -81,10 +81,11 @@ public sealed partial class DesktopWindow : Window
         {
             if (!_started)
             {
-                var gamePlugins = EliteScriptStudio.Packs.BuiltInVisionPlugins.Load(Path.Combine(AppContext.BaseDirectory, "GamePacks"), DesktopEnvironment.DataDirectory);
+                var gamePlugins = new EliteScriptStudio.Packs.InstalledVisionPlugins(DesktopEnvironment.GamePackDirectory, DesktopEnvironment.DataDirectory);
+                gamePlugins.Reload();
                 _controller ??= new DesktopControllerService(AppWindow.Id, () => _runtime, StopAllAsync,
                     path => _vision?.ImportGamePackModelAsync(path) ?? throw new InvalidOperationException("Vision is unavailable."),
-                    gamePlugins.OfType<IGameControllerPlugin>().ToArray());
+                    EliteScriptStudio.Packs.InstalledVisionPlugins.ControllerAdapters(DesktopEnvironment.DataDirectory));
                 try
                 {
                     if (_runtime is null)
@@ -105,7 +106,7 @@ public sealed partial class DesktopWindow : Window
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
                 _marketplace ??= new DesktopMarketplaceService(_controller, gamePlugins);
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync(),
-                    gamePlugins);
+                    () => gamePlugins.Plugins);
                 _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
                     () => _runtime, () => _hasUnsavedChanges);
                 _started = true;

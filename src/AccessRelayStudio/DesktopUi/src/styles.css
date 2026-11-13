@@ -314,7 +314,7 @@ details[open] > summary { margin-bottom: 12px; }
 .profile-picker-controls { display:flex; align-items:center; gap:8px; min-width:0; }
 .profile-picker-controls>.ui-select-trigger { flex:1; }
 .profile-picker-controls>.button { flex:none; width:var(--control-height); min-height:var(--control-height); padding:0; }
-.marketplace-filters { display:grid; grid-template-columns:minmax(0,1fr) minmax(210px,280px); gap:18px; }
+.marketplace-filters { display:grid; grid-template-columns:minmax(0,1fr) minmax(210px,280px) minmax(160px,210px); gap:18px; }
 .marketplace-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
 .marketplace-item { display:flex; flex-direction:column; gap:14px; min-width:0; }
 .marketplace-item h2 { margin:0; font-size:20px; }

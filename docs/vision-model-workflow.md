@@ -46,13 +46,43 @@ Live viewing reads frames temporarily for preview/analysis. The live-frame count
 
 Record through AccessRelay's opt-in training controls. Choose the relevant shot profile before recording. Each take is bounded, stored outside the repository, and includes its shot-profile configuration fingerprint. A source change or incomplete write marks a take incomplete. Enriched captures are not accepted by the current trainer even when complete.
 
-In **Plugins**, create and save the player/shot profile, including height, three-point rating, base, both upper releases, four-level shot speed, release blend and meter settings. Release percentages are linked to total 100%; release type is enabled only with the meter on. In **Remote Play Vision**, select the source window and set up the training-capture regions on a fresh live preview. Name the HUD layout and mark the gameplay area, player, meter and shot-feedback region. Browser chrome and letterboxing should be outside the gameplay rectangle; coordinates are normalized to the captured window and confirmation binds the current source size. These are manual regions, not automatic player/meter trackers.
+Install **NBA 2K27 Model Training** from Marketplace, then choose it from the
+**Training plugin** selector on **Model Training**. NBA shot-profile fields and
+training rules belong to that plugin. Its controller rhythm script is a separate
+Marketplace item and does not enable training.
 
-Use **Meter-supervised training** for initial collection with the actual in-game meter and selected profile both on. Mark the meter and feedback regions; the application cannot verify in-game visibility merely from a checked setting. Use the separate **Meter-off validation** purpose with the actual meter and profile both off when collecting no-meter evaluation footage. Optional game-build and shot-category metadata help distinguish current-game conditions, including standing/catch-and-shoot, off-dribble and fades; unknown/mixed values do not establish support for every case.
+Create/save the player profile with height, three-point rating, base, releases,
+speed, blend, meter state/cue and camera. New capture-area setup marks only the
+**full gameplay scene** and **fixed shot feedback** panel. Keep the court and room
+above its floor for raised hands and the ball; exclude browser chrome and black
+bars. Player/meter boxes cannot remain fixed when the player or camera moves.
 
-The persistent **Record training clip…** button chooses a local dataset folder, starts live view automatically if needed, and records up to ten seconds with automatic release inhibited. A manually started recording session skips model loading/warm-up entirely. **Stop recording** finalizes a shorter clip. Capture continues across the manually recorded interval, so leave the clip running long enough to include the post-shot feedback. Feedback is a sequence from the selected region; there is no automatic shot-boundary/feedback parser or inferred teacher label. **Review and label clip…** offers a **Capture region** dropdown with Player, Court, Meter (when recorded) and Shot feedback, all tied to the same frame slider and capture timestamp. Scrub later in the take to inspect post-shot feedback. Reviewed interval labels can still be saved manually; review does not itself convert enriched evidence; use the integrity-bound offline conversion below after labeling. Viewing and recording do not require a model.
+Use meter-on footage for initial supervision and the distinct meter-off purpose
+for evaluation. The application cannot verify game settings from a checkbox.
+Record training clip chooses a local folder and starts up to ten seconds of
+synchronized visual/controller evidence without loading a model. Review the scene
+and feedback on their shared timeline.
 
-A session directory retains `session.json` and `frames.bgra`. Frame metadata identifies a byte offset and size inside the packed BGRA file. The primary images remain nearest-neighbor player-cropped to the canonical 256×256 grid. Enriched sessions additionally identify their capture purpose, layout and auxiliary gameplay/meter/feedback streams in `captureEvidence`, and save `controller-trace.json`. Image regions from an acquired frame share its sequence/capture timestamp; controller polls carry independent timestamps on the same PC QPC clock. See the [evidence contract](vision-training-evidence-design.md) for sizes, bounds and timing limits.
+From beta.17, new scene-first layouts use `captureEvidence.version=2`,
+`tracking=unannotated-scene` and `preprocessing=scene-first-untracked-v1`. The scene
+keeps its aspect ratio, with each axis bounded to 1280 pixels; feedback is 640×192.
+The legacy `frames.bgra` slot is a 256×256 scene overview for file compatibility,
+**not a player crop**. The visual budget is 4 GiB per ten-second take, with bounded
+pending writes and explicit drop/incomplete status. Use a drive with at least
+4.1 GiB free. Actual recording overhead and meter legibility still need review.
+
+Old fixed-region version-1 takes remain readable. Their existing integrity-bound
+conversion is unchanged. Version-2 scene-first footage needs reviewed per-frame
+player/meter tracking and conversion before release-model training; the current
+converter rejects it explicitly. Live release analysis also rejects scene-first
+setups. Do not strip the evidence marker to bypass that distinction.
+
+The [tracking plan](../.agents/plans/in-progress/training-plugin-and-player-tracking.md)
+requires a moving court projection, intended-player identity, dynamically padded
+body/hand/ball regions and player-associated meter regions. Court position gates
+identity association; the floor polygon must not clip the upper body or raised
+hands. Automatic tracking, scene-to-player conversion and real shot accuracy remain
+unfinished. Capturing full context supplies data for that work.
 
 From beta.16, new takes declare `captureTimeBasis="wgc-local-receipt-qpc-v1"`:
 `captureTicks` marks local WGC frame receipt before image copies. The unmodified WGC
@@ -191,7 +221,7 @@ Five timing rows report samples, latest, p50, p95, p99 and maximum milliseconds 
 
 Use **Save performance run** to write a local JSON snapshot with configuration context, and **Load performance run** to select a baseline. Comparisons require at least 100 model decisions in each run and matching non-provider context; selecting a different backend is allowed for comparison. Preserve the same model, source/crop, shot profile, camera and timing settings. Different live scenes remain uncontrolled inputs, so reported p95/p99 changes are observed differences, not a controlled benchmark or gameplay-accuracy result. Capture-only snapshots cannot establish model performance. Raw gameplay frames are not part of a performance snapshot.
 
-The planned gamertag-assisted moving crop is not implemented by these metrics. Current inference and training use the manually selected fixed crop. A future camera-aware tracker needs resolution/scale-relative body regions, temporal stabilization, identity-loss cancellation and matching per-frame dataset provenance before its performance or accuracy can be compared fairly.
+The intended-player tracker is not implemented by these metrics. Legacy inference uses a manually selected fixed crop; new acquisition retains the full scene for tracker development. A future camera-aware tracker needs resolution/scale-relative body regions, temporal stabilization, identity-loss cancellation and matching per-frame dataset provenance before its performance or accuracy can be compared fairly.
 
 ## Verification
 

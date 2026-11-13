@@ -27,7 +27,7 @@ async function openMappingDraft() {
 describe('workspace draft and capture visibility', () => {
   it('opens NBA training from marketplace with the actual plugin selected', async () => {
     state.marketplace = { loaded: true, entries: [{ id: 'nba2k27', name: 'NBA 2K27', description: 'Training capture', author: 'AccessRelay',
-      version: '1.0.0', kind: 'plugin', license: '0BSD', tags: ['training'], installed: false, trainingPluginId: 'nba2k27' }] };
+      version: '1.0.0', kind: 'training-plugin', license: '0BSD', tags: ['training'], installed: true, trainingPluginId: 'nba2k27' }] };
     harness.command.mockImplementation(async (method: string, args: any) => {
       if (method === 'app.bootstrap') return structuredClone(state);
       if (method === 'vision.pluginSelect') {
@@ -39,7 +39,7 @@ describe('workspace draft and capture visibility', () => {
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
     fireEvent.click(screen.getByRole('button', { name: 'Marketplace', exact: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Open training', exact: true }));
-    await screen.findByRole('heading', { name: 'AI Model Training', exact: true });
+    await screen.findByRole('heading', { name: /^(AI )?Model Training$/, exact: true });
     expect(harness.command).toHaveBeenCalledWith('vision.pluginSelect', { id: 'nba2k27' });
     expect(screen.getByRole('button', { name: 'Record training clip' })).toBeTruthy();
     expect(harness.command.mock.calls.some(([method]) => ['vision.start', 'vision.recordStart', 'controller.outputStart'].includes(method))).toBe(false);
