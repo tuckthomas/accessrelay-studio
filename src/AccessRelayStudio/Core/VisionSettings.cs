@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 namespace EliteScriptStudio.Core;
 
 internal enum VisionExecutionProvider { Cpu, Cuda }
+internal enum VisionPreprocessingBackend { Cpu, D3D11Cuda }
 
 internal readonly record struct VisionCrop(double Left, double Top, double Width, double Height)
 {
@@ -24,6 +25,14 @@ internal sealed record VisionSettings
     public string AnimationProfile { get; init; } = "Default";
     public string CameraView { get; init; } = "";
     public VisionExecutionProvider ExecutionProvider { get; init; } = VisionExecutionProvider.Cuda;
+    public VisionPreprocessingBackend PreprocessingBackend { get; init; } = VisionPreprocessingBackend.Cpu;
+    [JsonIgnore]
+    public string PreprocessingBackendName => PreprocessingBackend switch
+    {
+        VisionPreprocessingBackend.Cpu => "cpu-rgb-v2",
+        VisionPreprocessingBackend.D3D11Cuda => "d3d11-cuda-rgb-v2-experimental",
+        _ => throw new InvalidDataException("Choose CPU or experimental D3D11/CUDA preprocessing.")
+    };
     [JsonIgnore]
     public string ExecutionProviderName => ExecutionProvider switch
     {
@@ -48,6 +57,8 @@ internal sealed record VisionSettings
         TrainingCapture.Validate();
         if (!Enum.IsDefined(ExecutionProvider))
             throw new InvalidDataException("Choose CPU or CUDA as the inference backend.");
+        if (!Enum.IsDefined(PreprocessingBackend) || (PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda && ExecutionProvider != VisionExecutionProvider.Cuda))
+            throw new InvalidDataException("Experimental GPU preprocessing requires NVIDIA CUDA inference. Select CPU preprocessing for CPU inference.");
         if (!Enum.IsDefined(ShootButton) || (uint)ShootButton > ushort.MaxValue)
             throw new InvalidDataException("Vision release requires a digital controller button.");
         if (ModelManifestPath is null || ModelManifestPath.Length > 2048 || ModelManifestPath.Any(char.IsControl))

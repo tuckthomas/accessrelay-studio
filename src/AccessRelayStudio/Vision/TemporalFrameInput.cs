@@ -1,4 +1,5 @@
 using EliteScriptStudio.Core;
+using Microsoft.ML.OnnxRuntime;
 
 namespace EliteScriptStudio.Vision;
 
@@ -9,6 +10,11 @@ internal interface ITemporalFrameInput
     bool PrepareFrame(CapturedVisionFrame frame, int historyIndex, bool shiftHistory);
     void RestartWithCurrentFrame(int historyIndex);
     void ResetContent();
+}
+
+internal interface IDeviceTemporalFrameInput : ITemporalFrameInput, IDisposable
+{
+    OrtValue CreateTensorValue();
 }
 
 internal sealed class CpuTemporalFrameInput(VisionModelManifest manifest, VisionSettings settings, float[] history) : ITemporalFrameInput

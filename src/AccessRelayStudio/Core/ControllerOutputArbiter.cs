@@ -52,6 +52,11 @@ internal sealed class ControllerOutputArbiter
 
     public bool SetArmed(bool armed)
     {
+        if (armed && _settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda)
+        {
+            Invalidate("Experimental GPU preprocessing is observation-only until matching hardware acceptance.", disarm: true);
+            return false;
+        }
         if (_trainingRecording)
         {
             Invalidate("Training recording is active. Automatic release is inhibited.", disarm: true);

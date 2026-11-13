@@ -77,6 +77,8 @@ internal sealed record VisionModelManifest
     internal string CheckArmingEvidence(string manifestPath, VisionSettings settings, out VisionValidationReport? acceptedReport)
     {
         acceptedReport = null;
+        if (settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda)
+            return "Observation only: experimental GPU preprocessing has not passed matching hardware acceptance. Existing CPU-preprocessing evidence cannot authorize it.";
         if (settings.CameraView.Length != 0 && settings.CameraView != CameraConfiguration)
             return "The selected camera view does not match the model's camera configuration.";
         if (Validation is not { } evidence)

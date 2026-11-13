@@ -200,6 +200,15 @@ static void ArmingEvidence()
 
 static void ExecutionProviders()
 {
+    Require(VisionSettings.Default.PreprocessingBackend == VisionPreprocessingBackend.Cpu, "Legacy/default preprocessing must remain CPU.");
+    var gpuPreprocessing = VisionSettings.Default with { PreprocessingBackend = VisionPreprocessingBackend.D3D11Cuda };
+    gpuPreprocessing.Validate();
+    Throws(() => (gpuPreprocessing with { ExecutionProvider = VisionExecutionProvider.Cpu }).Validate());
+    Throws(() => (gpuPreprocessing with { PreprocessingBackend = (VisionPreprocessingBackend)99 }).Validate());
+    Require(Manifest().CheckArmingEvidence("unused.json", gpuPreprocessing).Contains("GPU preprocessing"), "Existing evidence authorized experimental preprocessing.");
+    var experimental = new ControllerOutputArbiter(1000);
+    experimental.Configure(gpuPreprocessing); experimental.BeginSession(); experimental.Sample(default, default, true, true, false, 1);
+    Require(!experimental.SetArmed(true) && !experimental.Status.Armed, "The host arbiter armed experimental GPU preprocessing.");
     Require(VisionSettings.Default.ExecutionProvider == VisionExecutionProvider.Cuda, "Legacy/default settings must explicitly select CUDA.");
     Require(VisionSettings.Default.ExecutionProviderName == "CUDAExecutionProvider", "CUDA provider identity is incorrect.");
     var cpu = VisionSettings.Default with { ExecutionProvider = VisionExecutionProvider.Cpu };
@@ -219,6 +228,9 @@ static void ExecutionProviders()
         document["settings"]!.AsObject().Remove("executionProvider");
         File.WriteAllText(path, document.ToJsonString());
         Require(store.Load(id).ExecutionProvider == VisionExecutionProvider.Cuda, "Legacy settings missing backend did not default to CUDA.");
+        Require(store.Load(id).PreprocessingBackend == VisionPreprocessingBackend.Cpu, "Legacy settings changed preprocessing defaults.");
+        store.Save(id, gpuPreprocessing);
+        Require(store.Load(id).PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda, "Explicit GPU preprocessing did not persist.");
     }
     finally
     {

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Buffers;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using EliteScriptStudio.Core;
 
 namespace EliteScriptStudio.Vision;
@@ -137,13 +138,19 @@ internal sealed class VisionSession : IDisposable
         try
         {
             using var capture = new RemotePlayCapture();
-            capture.Start(hwnd);
+            bool gpuFrames = loadModel && !string.IsNullOrWhiteSpace(settings.ModelManifestPath)
+                && settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda;
+            nint adapter = gpuFrames ? CudaD3D11Interop.FindAdapter() : 0;
+            try { capture.Start(hwnd, gpuFrames, adapter); }
+            finally { if (adapter != 0) Marshal.Release(adapter); }
             string modelMessage = "Capture only. Select a validated animation model to enable assistance.";
             if (loadModel && !string.IsNullOrWhiteSpace(settings.ModelManifestPath))
             {
                 try
                 {
-                    model = VisionModel.Load(settings.ModelManifestPath, settings, cancellation);
+                    model = VisionModel.Load(settings.ModelManifestPath, settings, cancellation,
+                        (manifest, configuration) => new CudaTemporalFrameInput(manifest, configuration, capture.GraphicsDevice,
+                            capture.Status.Width, capture.Status.Height));
                     lock (_gate) { _model = model; _modelHash = model.ManifestHash; }
                     modelMessage = model.ValidationSummary;
                 }

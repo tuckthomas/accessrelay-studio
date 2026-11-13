@@ -15,6 +15,8 @@ internal sealed class VisionModel : IDisposable
     private readonly string[] _inputNames, _outputNames;
     private readonly float[] _input, _output = new float[5];
     private readonly ShotTracker _tracker;
+    private readonly IDeviceTemporalFrameInput? _deviceInput;
+    private readonly OrtIoBinding? _binding;
     private readonly VisionValidationReport? _validatedReport;
     private int _stopping, _disposed;
 
@@ -27,7 +29,8 @@ internal sealed class VisionModel : IDisposable
 
     private VisionModel(VisionModelManifest manifest, string manifestHash, VisionSettings settings,
         InferenceSession session, RunOptions runOptions, float[] input, OrtValue inputValue, OrtValue outputValue,
-        float[] output, string blocker, VisionValidationReport? validatedReport)
+        float[] output, string blocker, VisionValidationReport? validatedReport,
+        IDeviceTemporalFrameInput? deviceInput = null, OrtIoBinding? binding = null)
     {
         Manifest = manifest;
         ManifestHash = manifestHash;
@@ -37,18 +40,22 @@ internal sealed class VisionModel : IDisposable
         _input = input;
         _output = output;
         _validatedReport = validatedReport;
+        _deviceInput = deviceInput; _binding = binding;
         _inputs = [inputValue];
         _outputs = [outputValue];
         _inputNames = [manifest.InputName];
         _outputNames = [manifest.OutputName];
         CanArm = blocker.Length == 0;
         ValidationSummary = CanArm ? $"Validation gates pass for {manifest.AnimationProfile}; {manifest.GameVersion}; {manifest.CameraConfiguration}; {ExecutionProvider}. Confirm this source configuration and calibration before arming." : blocker;
-        _tracker = new ShotTracker(manifest, settings, _input, RunInference, Diagnostics);
+        _tracker = new ShotTracker(manifest, settings, _input, RunInference, Diagnostics, input: deviceInput);
     }
 
-    internal static VisionModel Load(string manifestPath, VisionSettings settings, CancellationToken cancellation = default)
+    internal static VisionModel Load(string manifestPath, VisionSettings settings, CancellationToken cancellation = default,
+        Func<VisionModelManifest, VisionSettings, IDeviceTemporalFrameInput>? deviceInputFactory = null)
     {
         settings.Validate();
+        if (settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda && deviceInputFactory is null)
+            throw new NotSupportedException("This host does not provide D3D11/CUDA frame interoperability. Select CPU preprocessing; no automatic fallback was used.");
         cancellation.ThrowIfCancellationRequested();
         var (manifest, hash) = VisionModelManifest.Read(manifestPath);
         if (settings.CameraView.Length != 0 && settings.CameraView != manifest.CameraConfiguration)
@@ -79,6 +86,8 @@ internal sealed class VisionModel : IDisposable
         InferenceSession? session = null;
         RunOptions? run = null;
         OrtValue? inputValue = null, outputValue = null;
+        IDeviceTemporalFrameInput? deviceInput = null;
+        OrtIoBinding? binding = null;
         try
         {
             using var options = CreateSessionOptions(settings.ExecutionProvider);
@@ -88,30 +97,44 @@ internal sealed class VisionModel : IDisposable
                 [1, manifest.HistoryLength, 3, manifest.InputHeight, manifest.InputWidth], "input");
             RequireMetadata(session.OutputMetadata, manifest.OutputName, [1, 5], "output");
             int inputLength = checked(manifest.HistoryLength * 3 * manifest.InputWidth * manifest.InputHeight);
-            var input = GC.AllocateUninitializedArray<float>(inputLength, pinned: true);
+            var input = settings.PreprocessingBackend == VisionPreprocessingBackend.Cpu
+                ? GC.AllocateUninitializedArray<float>(inputLength, pinned: true) : [];
             Array.Clear(input);
             var output = GC.AllocateUninitializedArray<float>(5, pinned: true);
             Array.Clear(output);
-            inputValue = OrtValue.CreateTensorValueFromMemory(input,
-                [1, manifest.HistoryLength, 3, manifest.InputHeight, manifest.InputWidth]);
+            if (settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                deviceInput = deviceInputFactory!(manifest, settings);
+                inputValue = deviceInput.CreateTensorValue();
+            }
+            else inputValue = OrtValue.CreateTensorValueFromMemory(input,
+                    [1, manifest.HistoryLength, 3, manifest.InputHeight, manifest.InputWidth]);
             outputValue = OrtValue.CreateTensorValueFromMemory(output, [1, 5]);
             run = new RunOptions();
             var warmupRun = run;
             using var registration = cancellation.Register(() => warmupRun.Terminate = true);
             string[] inputNames = [manifest.InputName], outputNames = [manifest.OutputName];
             OrtValue[] inputs = [inputValue], outputs = [outputValue];
+            if (deviceInput is not null)
+            {
+                binding = session.CreateIoBinding();
+                binding.BindInput(manifest.InputName, inputValue); binding.BindOutput(manifest.OutputName, outputValue);
+            }
             for (int warm = 0; warm < 3; warm++)
             {
                 cancellation.ThrowIfCancellationRequested();
-                session.Run(run, inputNames, inputs, outputNames, outputs);
+                if (binding is null) session.Run(run, inputNames, inputs, outputNames, outputs);
+                else { session.RunWithBinding(run, binding); binding.SynchronizeBoundOutputs(); }
                 ValidateObservation(output, manifest.MaximumPredictionHorizonMs);
             }
             cancellation.ThrowIfCancellationRequested();
             string blocker = manifest.CheckArmingEvidence(manifestPath, settings, out var validatedReport);
-            var result = new VisionModel(manifest, hash, settings, session, run, input, inputValue, outputValue, output, blocker, validatedReport);
+            var result = new VisionModel(manifest, hash, settings, session, run, input, inputValue, outputValue, output, blocker, validatedReport, deviceInput, binding);
             session = null;
             run = null;
             inputValue = outputValue = null;
+            deviceInput = null; binding = null;
             return result;
         }
         catch (OnnxRuntimeException error)
@@ -123,10 +146,11 @@ internal sealed class VisionModel : IDisposable
         }
         finally
         {
+            binding?.Dispose();
             outputValue?.Dispose();
             inputValue?.Dispose();
-            run?.Dispose();
-            session?.Dispose();
+            try { deviceInput?.Dispose(); }
+            finally { run?.Dispose(); session?.Dispose(); }
         }
     }
 
@@ -204,8 +228,14 @@ internal sealed class VisionModel : IDisposable
     {
         if (Volatile.Read(ref _stopping) != 0) throw new OperationCanceledException("Vision is stopping.");
         long started = Stopwatch.GetTimestamp();
-        // Host buffers are reused. ORT performs the measured upload/download; these are not VRAM buffers.
-        _session.Run(_runOptions, _inputNames, _inputs, _outputNames, _outputs);
+        if (_binding is null)
+            _session.Run(_runOptions, _inputNames, _inputs, _outputNames, _outputs);
+        else
+        {
+            // Input is a stable CUDA allocation populated by D3D11/CUDA interop.
+            // Only the five-value observation is bound to host memory.
+            _session.RunWithBinding(_runOptions, _binding); _binding.SynchronizeBoundOutputs();
+        }
         ValidateObservation(_output, Manifest.MaximumPredictionHorizonMs);
         double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         Diagnostics.InferenceCompleted(elapsed, _output[0], _output[1], _output[3], _output[4]);
@@ -234,10 +264,11 @@ internal sealed class VisionModel : IDisposable
         RequestStop();
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         // Owner must join PushFrame before disposal; no native buffer may be freed during an active Run.
+        _binding?.Dispose();
         _outputs[0].Dispose();
         _inputs[0].Dispose();
-        _runOptions.Dispose();
-        _session.Dispose();
+        try { _deviceInput?.Dispose(); }
+        finally { _runOptions.Dispose(); _session.Dispose(); }
         Diagnostics.SetStatus("Vision model stopped");
     }
 }
