@@ -10,7 +10,7 @@
     <AssemblyTitle>AccessRelay Studio Beta</AssemblyTitle>
     <Description>Assistive controller input and voice access for Windows</Description>
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
-    <Version>1.9.0-beta.11</Version>
+    <Version>1.9.0-beta.12</Version>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>

@@ -1,6 +1,8 @@
 import { cloneElement, isValidElement, useContext, useEffect, useId, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Input, Slider, Checkbox, Textarea, Select, SelectOption } from './components/ui/form-controls';
+export { Input, Slider, Checkbox, Textarea, Select, SelectOption };
 import { AnnouncementContext, LiveAnnouncements } from './announcements';
 import {
   Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, AudioLines, BookOpen, Camera, Check,
@@ -8,7 +10,7 @@ import {
   Download, Ellipsis, Eye, FileCode2, FilePlus2, FolderOpen, Gamepad2, Gauge, Headphones,
   Info, LayoutDashboard, List, LoaderCircle, Mic, Monitor, Moon, MoreHorizontal, Pencil, Plus,
   Power, Radio, RefreshCw, Save, Search, Settings2, ShieldCheck, SlidersHorizontal, Square,
-  Sun, Trash2, Upload, Volume2, Waves, X, Zap
+  Sun, Trash2, Upload, Volume2, Waves, X, Zap, ShoppingBag
 } from 'lucide-react';
 
 export interface PageProps { state: any; status: any; command: (action: string, args?: any) => Promise<any> }
@@ -57,15 +59,15 @@ const icons: Record<string, any> = {
   list: List, loader: LoaderCircle, mic: Mic, monitor: Monitor, moon: Moon, sun: Sun, pencil: Pencil, plus: Plus,
   power: Power, radio: Radio, refresh: RefreshCw, save: Save, search: Search, settings: Settings2,
   shield: ShieldCheck, sliders: SlidersHorizontal, stop: Square, trash: Trash2, upload: Upload,
-  volume: Volume2, waves: Waves, x: X, zap: Zap
+  volume: Volume2, waves: Waves, x: X, zap: Zap, store: ShoppingBag
 };
 export function Icon({ name, size = 20, className = '' }: { name: string; size?: number; className?: string }) {
   const Component = icons[name] || Circle;
   return <Component size={size} strokeWidth={1.75} aria-hidden="true" className={className} />;
 }
 export function Button({ variant = 'secondary', busy = false, children, className = '', disabled, ...props }:
-  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; busy?: boolean }) {
-  return <button type="button" {...props} className={'button button-' + variant + ' ' + className}
+  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'unstyled'; busy?: boolean }) {
+  return <button type="button" {...props} data-slot="button" className={(variant === 'unstyled' ? '' : 'button button-' + variant + ' ') + className}
     disabled={disabled || busy} aria-busy={busy || undefined}>{busy && <Icon name="loader" size={17} className="spin" />}{children}</button>;
 }
 export function ActionMenu({ label, children }: { label: string; children: ReactNode }) {
@@ -105,11 +107,12 @@ export function Card({ title, description, actions, children, className = '' }:
 }
 export function Field({ label, hint, children, className = '' }: { label: ReactNode; hint?: ReactNode; children: ReactNode; className?: string }) {
   const id = useId(), wrapper = useRef<HTMLDivElement>(null);
-  const direct = isValidElement(children) && typeof children.type === 'string' && ['input', 'select', 'textarea'].includes(children.type);
+  const direct = isValidElement(children) && ((typeof children.type === 'string' && ['input', 'select', 'textarea'].includes(children.type))
+    || [Input, Slider, Checkbox, Textarea, Select].includes(children.type as any));
   const inputId = direct ? ((children.props as any).id || id) : id;
   useEffect(() => {
     if (direct) return;
-    const input = wrapper.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input:not([type="hidden"]),select,textarea');
+    const input = wrapper.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-slot="select-trigger"],input:not([type="hidden"]),select,textarea');
     const fieldLabel = wrapper.current?.querySelector<HTMLLabelElement>('label');
     if (!input || !fieldLabel) return;
     if (!input.id) input.id = id + '-input';
@@ -141,6 +144,15 @@ export function EmptyState({ title, description, icon = 'folder', action }: { ti
 export function SectionHeader({ title, description, eyebrow, actions }: { title: string; description?: ReactNode; eyebrow?: string; actions?: ReactNode }) {
   return <div className="section-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p>{description}</p>}</div>
     {actions && <div className="header-actions">{actions}</div>}</div>;
+}
+export function ProfilePicker({ label, value, options, onSelect, onCreate, disabled = false }: {
+  label: string; value: string; options: { id: string; name: string; disabled?: boolean }[]; onSelect: (id: string) => void; onCreate: () => void; disabled?: boolean;
+}) {
+  return <Field label={label} className="profile-picker"><div className="profile-picker-controls">
+    <Select aria-label={label} value={value} disabled={disabled} onValueChange={onSelect}>
+      {options.map(option => <SelectOption key={option.id} value={option.id} disabled={option.disabled}>{option.name}</SelectOption>)}
+    </Select><Button className="icon-button" disabled={disabled} aria-label={'Create ' + label.toLowerCase()} title={'Create ' + label.toLowerCase()} onClick={onCreate}><Icon name="plus" /></Button>
+  </div></Field>;
 }
 export function Tabs({ items, value, onChange, ariaLabel = 'Section' }: {
   items: { id: string; label: string; count?: number }[]; value: string; onChange: (value: string) => void; ariaLabel?: string;

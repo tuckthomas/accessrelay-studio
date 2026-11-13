@@ -3,7 +3,7 @@ export interface SystemStatus { cpuPercent?: number | null; memoryUsedBytes?: nu
   appCpuPercent?: number | null; appMemoryBytes?: number | null; appPrivateBytes?: number | null; appThreadCount?: number | null;
   logicalProcessors?: number; sampledAtUtc?: string | null; samplesCollected?: number; isSampling?: boolean; error?: string | null;
   history?: { atUtc: string; cpuPercent?: number | null; gpuPercent?: number | null; appCpuPercent?: number | null }[] | null }
-export interface StudioState { version: string; controller: any; vision: any; voice: any; settings: any; system?: SystemStatus }
+export interface StudioState { version: string; controller: any; vision: any; voice: any; settings: any; marketplace?: any; system?: SystemStatus }
 export interface StudioStatus { controller?: any; vision?: any; voice?: any; system?: SystemStatus }
 type HostMessage = { type: 'snapshot'; state: StudioState } | { type: 'status'; status: StudioStatus }
   | { type: 'closeRequested' }

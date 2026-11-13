@@ -1,3 +1,4 @@
+import { selectValue } from '../select-test-helper';
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -23,7 +24,7 @@ describe('vision workflows', () => {
   it('opens and changes workspaces without starting capture or controller output', () => {
     const command = vi.fn().mockResolvedValue(null);
     render(<VisionPage state={fixture()} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Assistance' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Live assistance' }));
     fireEvent.click(screen.getByRole('tab', { name: 'Clips & review' }));
     expect(command).not.toHaveBeenCalled();
   });
@@ -47,7 +48,7 @@ describe('vision workflows', () => {
   it('retains a native-validated source selection and requires fresh layout confirmation before recording', async () => {
     const command = vi.fn().mockResolvedValue(null), state = fixture();
     const view = render(<VisionPage state={state} status={null} command={command} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Remote Play window' }), { target: { value: 'window-two' } });
+    selectValue(screen.getByRole('combobox', { name: 'Gameplay window' }), 'window-two');
     await waitFor(() => expect(command).toHaveBeenCalledWith('sourceSelect', { id: 'window-two' }));
     view.rerender(<VisionPage state={{ ...state, selectedSourceId: 'window-two', settings: { ...state.settings,
       trainingCapture: { ...state.settings.trainingCapture, configured: false } } }} status={state.status} command={command} />);
@@ -59,7 +60,7 @@ describe('vision workflows', () => {
   it('keeps the source picker usable while refreshing its window list on focus', () => {
     const command = vi.fn(() => new Promise(() => {}));
     render(<VisionPage state={fixture()} status={null} command={command} />);
-    const picker = screen.getByRole('combobox', { name: 'Remote Play window' }) as HTMLSelectElement;
+    const picker = screen.getByRole('combobox', { name: 'Gameplay window' }) as HTMLSelectElement;
     fireEvent.focus(picker);
     expect(command).toHaveBeenCalledWith('sourceRefresh');
     expect(picker.disabled).toBe(false);
@@ -72,25 +73,27 @@ describe('vision workflows', () => {
     expect((screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement).disabled).toBe(false);
     view.rerender(<VisionPage state={state} status={{ selectedSourceId: '', sources: [state.sources[1]], captureLayoutConfirmed: false,
       notice: 'The selected window closed.' }} command={command} />);
-    expect((screen.getByRole('combobox', { name: 'Remote Play window' }) as HTMLSelectElement).value).toBe('');
+    expect((screen.getByRole('combobox', { name: 'Gameplay window' }) as HTMLSelectElement).value).toBe('');
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Gameplay window' }), { key: 'ArrowDown' });
     expect(screen.queryByRole('option', { name: 'Xbox Remote Play' })).toBeNull();
     expect(screen.getByRole('option', { name: 'Another Remote Play window' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('option', { name: 'Another Remote Play window' }), { key: 'Escape' });
     expect((screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(command).not.toHaveBeenCalled();
+    expect(command.mock.calls.some(([action]) => ['start', 'recordStart', 'connectOutput', 'armedSet'].includes(action))).toBe(false);
   });
 
   it('lets height be cleared and reentered and keeps release blending complementary in saved profile data', async () => {
     const command = vi.fn().mockResolvedValue(profile);
     render(<VisionPage state={fixture()} status={null} command={command} />);
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const dialog = screen.getByRole('dialog', { name: 'Edit shot setup' });
+    const dialog = screen.getByRole('dialog', { name: 'Edit shot profile' });
     fireEvent.change(within(dialog).getByRole('spinbutton', { name: 'Height feet' }), { target: { value: '' } });
     fireEvent.change(within(dialog).getByRole('spinbutton', { name: 'Height feet' }), { target: { value: '6' } });
     fireEvent.change(within(dialog).getByRole('spinbutton', { name: 'Height inches' }), { target: { value: '10' } });
     fireEvent.change(within(dialog).getByRole('slider', { name: 'Upper release 1 allocation' }), { target: { value: '35' } });
     expect(within(dialog).getByText('35% release 1')).toBeTruthy();
     expect(within(dialog).getByText('65% release 2')).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save shot setup' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save shot profile' }));
     await waitFor(() => expect(command).toHaveBeenCalledWith('profileSave', expect.objectContaining({ expectedFingerprint: 'native-profile-fingerprint',
       profile: expect.objectContaining({ id: profile.id, heightInches: 82, release1Percent: 35, upperRelease1: profile.upperRelease1, upperRelease2: profile.upperRelease2, usesShotMeter: true }) })));
   });
@@ -146,7 +149,7 @@ describe('vision workflows', () => {
   it('keeps unapplied analysis changes through native status refreshes and disallows unvalidated arming', () => {
     const command = vi.fn().mockResolvedValue(null), state = fixture();
     const view = render(<VisionPage state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Assistance' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Live assistance' }));
     fireEvent.click(screen.getByText('Analysis settings & measured calibration'));
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }), { target: { value: '120' } });
     view.rerender(<VisionPage state={{ ...state, settings: { ...state.settings } }} status={{ session: { running: true, canArm: false }, output: { armed: false }, performance: { totalDecisions: 23 } }} command={command} />);
@@ -155,12 +158,12 @@ describe('vision workflows', () => {
     expect(command).not.toHaveBeenCalled();
   });
 
-  it('keeps the exact unsaved shot setup text when closing is declined and native status refreshes', async () => {
+  it('keeps the exact unsaved shot profile text when closing is declined and native status refreshes', async () => {
     const state = fixture(), command = vi.fn().mockResolvedValue(null);
     const view = render(<VisionPage state={state} status={null} command={command} />);
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    const editor = screen.getByRole('dialog', { name: 'Edit shot setup' });
-    const name = within(editor).getByRole('textbox', { name: 'Shot setup name' }) as HTMLInputElement;
+    const editor = screen.getByRole('dialog', { name: 'Edit shot profile' });
+    const name = within(editor).getByRole('textbox', { name: 'Shot profile name' }) as HTMLInputElement;
     const exact = '  My unfinished setup — keep this  ';
     fireEvent.change(name, { target: { value: exact } });
     expect(hasUnsavedChanges()).toBe(true);
@@ -168,7 +171,7 @@ describe('vision workflows', () => {
     expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     view.rerender(<VisionPage state={{ ...state, selectedProfile: { ...state.selectedProfile } }} status={{ session: null, busy: false, notice: 'Device status refreshed.' }} command={command} />);
-    expect((within(editor).getByRole('textbox', { name: 'Shot setup name' }) as HTMLInputElement).value).toBe(exact);
+    expect((within(editor).getByRole('textbox', { name: 'Shot profile name' }) as HTMLInputElement).value).toBe(exact);
     expect(hasUnsavedChanges()).toBe(true);
     expect(command).not.toHaveBeenCalled();
   });
@@ -176,19 +179,19 @@ describe('vision workflows', () => {
   it('guards internal navigation and preserves analysis edits even when the source closes in a status update', async () => {
     const state = fixture(), command = vi.fn().mockResolvedValue(null);
     const view = render(<VisionPage state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Assistance' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Live assistance' }));
     fireEvent.click(screen.getByText('Analysis settings & measured calibration'));
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }), { target: { value: '137' } });
-    fireEvent.click(screen.getByRole('tab', { name: 'Capture' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Capture & training' }));
     expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     view.rerender(<VisionPage state={{ ...state, settings: { ...state.settings } }} status={{ selectedSourceId: '', sources: [], captureLayoutConfirmed: false, notice: 'The selected window closed.' }} command={command} />);
-    expect((screen.getByRole('tab', { name: 'Assistance' })).getAttribute('aria-selected')).toBe('true');
+    expect((screen.getByRole('tab', { name: 'Live assistance' })).getAttribute('aria-selected')).toBe('true');
     expect((screen.getByRole('spinbutton', { name: 'Estimated stream delay (ms)' }) as HTMLInputElement).value).toBe('137');
     expect(hasUnsavedChanges()).toBe(true);
-    fireEvent.click(screen.getByRole('tab', { name: 'Capture' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Capture & training' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
-    expect(screen.getByRole('tab', { name: 'Capture' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Capture & training' }).getAttribute('aria-selected')).toBe('true');
     expect(hasUnsavedChanges()).toBe(false);
     expect(command).not.toHaveBeenCalled();
   });

@@ -1,3 +1,4 @@
+import { selectValue } from '../select-test-helper';
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -13,7 +14,7 @@ const state = {
 it('previews any game without an NBA profile, training controls, or an idle tag', async () => {
   const command = vi.fn().mockResolvedValue(null);
   render(<VisionPage state={state} status={{}} command={command} />);
-  expect(screen.queryByRole('combobox', { name: 'Shot setup' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Shot profile' })).toBeNull();
   expect(screen.queryByText('Shot meter')).toBeNull();
   expect(screen.queryByText('Ready when you are')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Record training clip' })).toBeNull();
@@ -24,11 +25,11 @@ it('previews any game without an NBA profile, training controls, or an idle tag'
 it('shows NBA configuration only after the host selects the NBA plugin', async () => {
   const command = vi.fn().mockResolvedValue(null);
   const view = render(<VisionPage state={state} status={{}} command={command} />);
-  fireEvent.change(screen.getByRole('combobox', { name: 'Game plugin' }), { target: { value: 'nba2k27' } });
+  selectValue(screen.getByRole('combobox', { name: 'Game plugin' }), 'nba2k27');
   await waitFor(() => expect(command).toHaveBeenCalledWith('pluginSelect', { id: 'nba2k27' }));
-  expect(screen.queryByRole('combobox', { name: 'Shot setup' })).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Shot profile' })).toBeNull();
   view.rerender(<VisionPage state={{ ...state, selectedPluginId: 'nba2k27' }} status={{}} command={command} />);
-  expect(screen.getByRole('combobox', { name: 'Shot setup' })).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: 'Shot profile' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Record training clip' })).toBeTruthy();
   expect(screen.queryByText('Ready when you are')).toBeNull();
 });

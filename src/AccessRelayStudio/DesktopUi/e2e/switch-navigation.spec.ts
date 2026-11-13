@@ -1,3 +1,4 @@
+import { selectOption } from './select-control';
 import { expect, test, type Page } from '@playwright/test';
 
 async function configure(page: Page, mode = 'step') {
@@ -57,7 +58,7 @@ test('switch scanning edits a slider and a choice without native popup or mouse 
   await expect(page.locator('[data-scan-editor]')).toHaveCount(0);
   await stepTo(page, 'Save smoothing'); await press(page, 'Space');
   await expect(page.getByText('Stick smoothing saved.', { exact: true })).toBeVisible();
-  const choice = page.getByLabel('Controller setup', { exact: true });
+  const choice = page.getByLabel('Controller profile', { exact: true });
   for (let count = 0; count < 100 && !(await choice.evaluate(element => element.classList.contains('scan-target'))); count++) await press(page, 'Enter');
   await expect(choice).toHaveClass(/scan-target/); await press(page, 'Space');
   await stepTo(page, 'Increase / next'); await press(page, 'Space');
@@ -122,7 +123,7 @@ test('controller bridge preserves event order, ignores pre-activation snapshots 
   });
   await page.getByRole('button', { name: 'Switch navigation', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Switch navigation' });
-  await dialog.getByLabel('Switch source').selectOption('controller');
+  await selectOption(dialog.getByLabel('Switch source'), 'controller');
   await dialog.getByRole('button', { name: 'Start scanning' }).click();
   await expect(page.locator('.scan-target')).toHaveCount(1);
   const step = { sequence: 1, timestampMs: 105, action: 'step' };

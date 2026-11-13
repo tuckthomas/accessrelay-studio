@@ -1,3 +1,4 @@
+import { selectValue } from './select-test-helper';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({ listeners: new Set<(message: any) => void>(), command: vi.fn() }));
@@ -21,7 +22,7 @@ async function openMappingDraft() {
   render(<App />);
   await screen.findByRole('heading', { name: 'Your workspace', exact: true });
   fireEvent.click(screen.getByRole('button', { name: 'Controller', exact: true }));
-  fireEvent.change(screen.getByLabelText('What should it do?'), { target: { value: 'moving' } });
+  selectValue(screen.getByLabelText('What should it do?'), 'moving');
 }
 describe('workspace draft and capture visibility', () => {
   it('keeps an unsaved mapping through status updates and a cancelled navigation', async () => {
@@ -143,15 +144,13 @@ describe('semantic hardware and model announcements', () => {
       output: { state: 'trackingShot', lastConfidence: .95 }, notice: 'Measured calibration is ready for your review.' } } });
     expect(updates().textContent).not.toContain('trackingShot');
   });
-  it('delivers command errors inside the active dialog without duplicate visible alerts', async () => {
+  it('delivers hardware errors inside the active profile dialog without duplicate visible alerts', async () => {
     render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Help', exact: true }));
-    const dialog = screen.getByRole('dialog', { name: 'Find your way around' });
-    harness.command.mockRejectedValueOnce(new Error('Output could not stop.'));
-    // jsdom has no native inert implementation; a host action can still fail while
-    // a modal is open. The real browser test checks which region is accessible.
-    fireEvent.click(screen.getByRole('button', { name: 'Stop everything' }));
-    await waitFor(() => expect(within(dialog).getByRole('alert', { name: 'Studio errors' }).textContent).toBe('Output could not stop.'));
+    fireEvent.click(screen.getByRole('button', { name: 'Controller', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create controller profile' }));
+    const dialog = screen.getByRole('dialog', { name: 'Create controller profile' });
+    emit({ type: 'status', status: { voice: { error: 'Microphone disconnected.' } } });
+    await waitFor(() => expect(within(dialog).getByRole('alert', { name: 'Studio errors' }).textContent).toBe('Microphone disconnected.'));
     expect(screen.getAllByRole('alert').every(element => element.hasAttribute('data-status-announcer') || element.closest('[data-status-announcer]'))).toBe(true);
   });
 });

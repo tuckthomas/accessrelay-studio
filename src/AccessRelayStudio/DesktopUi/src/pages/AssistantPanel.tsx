@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Card, Field, Modal, Notice, Toggle } from '../ui';
+import { Select, SelectOption, Textarea, Badge, Button, Card, Field, Modal, Notice, Toggle } from '../ui';
 import { isDesignPreview } from '../api';
 
 export function AssistantPanel({ initial, command }: { initial: any; command: (action: string, args?: any) => Promise<any> }) {
@@ -31,15 +31,15 @@ export function AssistantPanel({ initial, command }: { initial: any; command: (a
       {!panel?.bridgeAvailable && <Notice tone="warning">Open the complete published app to include the assistant bridge and rehearsal worker.</Notice>}
       <Toggle label="Allow configuration drafts" description="Drafts can be rehearsed and proposed. You review and apply them here; the assistant cannot apply them." checked={drafts} onChange={setDrafts} />
       <Toggle label="Allow offline training workflows" description="Use only datasets and tools you explicitly register below. Jobs use CPU and keep new models observation-only." checked={offline} onChange={setOffline} />
-      <Field label="Access duration"><select value={minutes} onChange={event => setMinutes(Number(event.target.value))}>
-        {[15, 30, 60].map(value => <option key={value} value={value}>{value} minutes</option>)}</select></Field>
+      <Field label="Access duration"><Select value={minutes} onValueChange={selectionValue => setMinutes(Number(selectionValue))}>
+        {[15, 30, 60].map(value => <SelectOption key={value} value={value}>{value} minutes</SelectOption>)}</Select></Field>
       <div className="row"><Button variant="primary" disabled={!panel?.bridgeAvailable} busy={busy === 'assistantConfigure'}
         onClick={() => void run('assistantConfigure', { enabled: true, drafts, offline, minutes })}>{access?.enabled ? 'Renew assistant access' : 'Enable assistant access'}</Button>
         <Button variant="danger" disabled={!access?.enabled} onClick={() => void run('assistantConfigure', { enabled: false, minutes: 15 })}>Revoke assistant access</Button></div>
       {access?.enabled && <p role="status">Expires {access.expiresAtUtc ? new Date(access.expiresAtUtc).toLocaleTimeString() : 'soon'}. Draft permission: {access.drafts ? 'on' : 'off'}. Offline permission: {access.offline ? 'on' : 'off'}.</p>}
       <p className="subtle">Renewing access or changing permissions cancels pending drafts and jobs. Stop everything also revokes access. All local clients running as your Windows user share this access window.</p>
       <details><summary>Connect your assistant client</summary><div className="stack"><p>Open Studio, enable access, then add this stdio server configuration to your MCP-compatible client. No web server or API key is supplied by Studio.</p>
-        <textarea aria-label="MCP client configuration" readOnly rows={8} value={panel?.clientConfiguration || 'Available in the installed app.'} spellCheck={false} /></div></details>
+        <Textarea aria-label="MCP client configuration" readOnly rows={8} value={panel?.clientConfiguration || 'Available in the installed app.'} spellCheck={false} /></div></details>
       <div className="stack"><h3>Proposed changes</h3>
         {!panel?.drafts?.length && <p className="subtle">No pending drafts.</p>}
         {panel?.drafts?.map((draft: any) => <div className="detail-line" key={draft.id}><span>{draft.profileName} · {draft.changes.join(' ')}</span><div className="row">

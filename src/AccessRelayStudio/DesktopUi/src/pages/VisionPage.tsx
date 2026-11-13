@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { gameVisionWorkspace } from '../game-plugins/registry';
-import { Button, Card, DiscardDialog, Field, Icon, Notice, SectionHeader, hasUnsavedChanges, type PageProps } from '../ui';
+import { Select, SelectOption, Button, Card, DiscardDialog, Field, Icon, Notice, SectionHeader, hasUnsavedChanges, type PageProps } from '../ui';
 
 export function VisionPage({ state = {}, status, command }: PageProps) {
   const [busy, setBusy] = useState(''), [error, setError] = useState('');
@@ -19,18 +19,18 @@ export function VisionPage({ state = {}, status, command }: PageProps) {
   }
   const choosePlugin = (id: string) => { if (hasUnsavedChanges()) setPending(id); else void run('pluginSelect', { id }); };
   return <div className="page-stack remote-play-page">
-    <SectionHeader title="Remote Play" actions={<Field label="Game plugin"><select aria-label="Game plugin" disabled={locked || working}
-      value={pluginId} onChange={event => choosePlugin(event.target.value)}>
-      <option value="">None</option>{plugins.map((plugin: any) => <option key={plugin.id} value={plugin.id}>{plugin.name}</option>)}
-    </select></Field>} />
+    <SectionHeader title="Game Vision" description="Capture gameplay for training and live AI assistance." actions={<Field label="Game plugin"><Select aria-label="Game plugin" disabled={locked || working}
+      value={pluginId} onValueChange={selectionValue => choosePlugin(selectionValue)}>
+      <SelectOption value="">None</SelectOption>{plugins.map((plugin: any) => <SelectOption key={plugin.id} value={plugin.id}>{plugin.name}</SelectOption>)}
+    </Select></Field>} />
     {error && <Notice tone="danger">{error}</Notice>}
     {Plugin ? <Plugin key={pluginId} state={state} status={status} command={command} /> : <>
       <Card><div className="row remote-play-source"><Field label="Capture window" hint="A browser window captures its active tab.">
-        <select aria-label="Capture window" value={sourceId} disabled={locked || working}
+        <Select aria-label="Capture window" value={sourceId} disabled={locked || working}
           onFocus={() => { if (!locked && !working) command('sourceRefresh').catch(e => setError(e instanceof Error ? e.message : String(e))); }}
-          onChange={event => void run('sourceSelect', { id: event.target.value })}>
-          <option value="">Choose a window</option>{sources.map((source: any) => <option key={source.id} value={source.id}>{source.title}</option>)}
-        </select></Field><Button aria-label="Refresh capture windows" disabled={locked || working} onClick={() => void run('sourceRefresh')}><Icon name="refresh" size={18} /></Button>
+          onValueChange={selectionValue => void run('sourceSelect', { id: selectionValue })}>
+          <SelectOption value="">Choose a window</SelectOption>{sources.map((source: any) => <SelectOption key={source.id} value={source.id}>{source.title}</SelectOption>)}
+        </Select></Field><Button aria-label="Refresh capture windows" disabled={locked || working} onClick={() => void run('sourceRefresh')}><Icon name="refresh" size={18} /></Button>
       </div></Card>
       <Card className="remote-play-preview" title="Gameplay preview" actions={session.running || live.stopping
         ? <Button disabled={!!live.stopping} onClick={() => void run('stop')}><Icon name="stop" size={17} />Stop preview</Button>

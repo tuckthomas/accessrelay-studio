@@ -17,7 +17,7 @@ export function SettingsPage({ state, command }: PageProps) {
         </div>
       </Card>
       <Card title="Your saved work" description="Open the folders containing your local setups and voices.">
-        <div className="stack"><Button onClick={() => void run('openProfilesFolder')}><Icon name="folder" size={18} />Controller setup folder<Icon name="arrowUpRight" size={16} /></Button>
+        <div className="stack"><Button onClick={() => void run('openProfilesFolder')}><Icon name="folder" size={18} />Controller profile folder<Icon name="arrowUpRight" size={16} /></Button>
           <Button onClick={() => void run('openVoiceProfilesFolder')}><Icon name="folder" size={18} />Voice profile folder<Icon name="arrowUpRight" size={16} /></Button>
           <p className="subtle">Training clips are saved in the folder you choose when recording.</p></div>
       </Card>
@@ -28,7 +28,7 @@ export function SettingsPage({ state, command }: PageProps) {
         <div className="detail-line"><span>Platform</span><span>{state.platform || 'Windows x64'}</span></div>
         <div className="detail-line"><span>Interface</span><span>Local desktop interface</span></div></div>
       <details className="details-section"><summary>Storage and application details</summary><div className="detail-list">
-        <div className="detail-line"><span>Controller setups</span><code>{state.profileDirectory || state.controller?.profileDirectory || 'Not available'}</code></div>
+        <div className="detail-line"><span>Controller profiles</span><code>{state.profileDirectory || state.controller?.profileDirectory || 'Not available'}</code></div>
         <div className="detail-line"><span>Application folder</span><code>{state.appDirectory || 'Not available'}</code></div>
       </div></details>
     </Card>

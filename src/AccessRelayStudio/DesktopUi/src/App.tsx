@@ -7,15 +7,17 @@ import { ControllerPage } from './pages/ControllerPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VoicePage } from './pages/VoicePage';
 import { VisionPage } from './pages/VisionPage';
+import { MarketplacePage } from './pages/MarketplacePage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
 import { currentTheme, saveTheme, type Theme } from './theme';
 
-type Page = 'workspace' | 'controller' | 'vision' | 'voice' | 'settings';
+type Page = 'workspace' | 'controller' | 'vision' | 'voice' | 'marketplace' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
   { id: 'workspace', label: 'Workspace', icon: 'dashboard' },
   { id: 'controller', label: 'Controller', icon: 'gamepad' },
-  { id: 'vision', label: 'Remote Play', icon: 'camera' },
-  { id: 'voice', label: 'Voice', icon: 'audio' }
+  { id: 'vision', label: 'Game Vision', icon: 'camera' },
+  { id: 'voice', label: 'Voice', icon: 'audio' },
+  { id: 'marketplace', label: 'Marketplace', icon: 'store' }
 ];
 export function App() {
   const [theme, setTheme] = useState<Theme>(currentTheme);
@@ -61,6 +63,7 @@ export function App() {
   const visionCommand = useCallback((action: string, args?: any) => invoke('vision.' + action, args), [invoke]);
   const voiceCommand = useCallback((action: string, args?: any) => invoke('voice.' + action, args), [invoke]);
   const appCommand = useCallback((action: string, args?: any) => invoke('app.' + action, args), [invoke]);
+  const marketplaceCommand = useCallback((action: string, args?: any) => invoke('app.marketplace.' + action, args), [invoke]);
   const controllerStatus = status.controller || state?.controller?.status || {};
   const voiceStatus = status.voice || state?.voice?.status || {};
   const visionStatus = status.vision || state?.vision?.status || {};
@@ -75,14 +78,14 @@ export function App() {
     <LiveAnnouncements />
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand"><img src="./brand.png" alt="" /><div className="brand-name">AccessRelay<span>Studio</span></div></div>
-      <nav className="primary-nav">{navigation.map(item => <button type="button" key={item.id}
+      <nav className="primary-nav">{navigation.map(item => <Button variant="unstyled" type="button" key={item.id}
         className={'nav-item' + (page === item.id ? ' active' : '')} onClick={() => navigate(item.id)}
         aria-label={item.label} aria-current={page === item.id ? 'page' : undefined} title={item.label}>
         <Icon name={item.icon} size={21} /><span>{item.label}</span>{page === item.id && <span className="nav-active-mark" />}
-      </button>)}</nav>
+      </Button>)}</nav>
       <div className="sidebar-bottom">
-        <button type="button" className={'nav-item' + (page === 'settings' ? ' active' : '')} onClick={() => navigate('settings')}
-          aria-current={page === 'settings' ? 'page' : undefined} aria-label="Settings" title="Settings"><Icon name="settings" size={21} /><span>Settings</span></button>
+        <Button variant="unstyled" type="button" className={'nav-item' + (page === 'settings' ? ' active' : '')} onClick={() => navigate('settings')}
+          aria-current={page === 'settings' ? 'page' : undefined} aria-label="Settings" title="Settings"><Icon name="settings" size={21} /><span>Settings</span></Button>
       </div>
     </aside>
     <div className="app-content">
@@ -103,6 +106,7 @@ export function App() {
         {page === 'controller' && <ControllerPage state={state.controller || {}} status={controllerStatus} command={controllerCommand} />}
         {page === 'vision' && <VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} />}
         {page === 'voice' && <VoicePage state={state.voice || {}} status={voiceStatus} command={voiceCommand} />}
+        {page === 'marketplace' && <MarketplacePage state={state.marketplace || {}} command={marketplaceCommand} />}
         {page === 'settings' && <SettingsPage state={{ ...state.settings, version: state.version, controller: state.controller }}
           status={controllerStatus} command={appCommand} />}
       </div></main>

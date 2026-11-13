@@ -2,6 +2,12 @@ using EliteScriptStudio.Packs.Nba2K27;
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
+if (args is ["--marketplace", var marketplaceOutput])
+{
+    await MarketplaceVerification.RunAsync(marketplaceOutput);
+    return;
+}
+
 if (args is ["--game-plugin"])
 {
     Nba2K27ShotProfileVerification.Run();

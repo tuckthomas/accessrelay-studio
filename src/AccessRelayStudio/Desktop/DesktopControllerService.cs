@@ -44,6 +44,28 @@ internal sealed class DesktopControllerService : IDesktopModule
     internal StickDeadzone Deadzone => _deadzone;
     internal FeedbackSettings FeedbackSettings => _feedbackSettings;
     internal string ProfileDirectory => _store.DirectoryPath;
+    internal bool HasMarketplacePack(string id, string version, string hash) => _packs.Any(pack => pack.Manifest.Id == id && pack.Manifest.Version == version && pack.ManifestSha256.Equals(hash, StringComparison.OrdinalIgnoreCase));
+    internal async Task ImportMarketplacePackAsync(string path, CancellationToken cancellation)
+    {
+        RequireEditable();
+        if (_packOperation is not null) throw new InvalidOperationException("A game plugin is already being imported.");
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellation); _packOperation = operation;
+        int revision = _revision;
+        try
+        {
+            var pack = await Task.Run(() =>
+            {
+                var checkedPack = GamePackDefinition.Read(path);
+                foreach (var asset in checkedPack.Manifest.Assets.Where(asset => asset.Kind == GamePackAssetKind.VisionManifest))
+                    _ = EliteScriptStudio.Vision.VisionModelManifest.Read(checkedPack.ResourcePath(asset));
+                return _packLibrary.Import(path, operation.Token);
+            }, operation.Token);
+            CheckRevision(revision); operation.Token.ThrowIfCancellationRequested();
+            _packs = [.. _packs.Where(item => item.Manifest.Id != pack.Manifest.Id || item.Manifest.Version != pack.Manifest.Version), pack];
+            _notice = "Installed " + pack.Manifest.Name + ".";
+        }
+        finally { _packOperation = null; }
+    }
 
     internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll, Func<string, Task>? importPackModel = null, IReadOnlyList<IGameControllerPlugin>? gamePlugins = null)
     {

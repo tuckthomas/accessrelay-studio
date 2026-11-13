@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Field, Notice, Toggle, useUnsavedChanges, type PageProps } from './ui';
+import { Select, SelectOption, Button, Card, Field, Notice, Toggle, useUnsavedChanges, type PageProps } from './ui';
 
 const defaults = { enabled: false, primaryDeviceId: '', companionDeviceId: '', leftStick: 'primary', rightStick: 'companion', triggers: 'strongest', buttons: {} };
 export function CoPilotInput({ state, status, command }: PageProps) {
@@ -16,20 +16,20 @@ export function CoPilotInput({ state, status, command }: PageProps) {
     <div className="stack"><Toggle label="Enable co-pilot merging" checked={settings.enabled} disabled={locked} onChange={value => update('enabled', value)} />
       <p className="subtle">Shared buttons stay pressed while either participant holds them. Opposite D-pad directions cancel. A stick always comes from one participant; strongest wins by magnitude, with primary winning ties. Triggers use the larger value in strongest mode. Elite paddles, navigation and rumble belong to primary.</p>
       <div className="form-grid">{(['primary', 'companion'] as const).map(role => <Field key={role} label={role === 'primary' ? 'Primary controller' : 'Companion controller'}>
-        <select value={settings[role + 'DeviceId']} disabled={locked} onChange={event => update(role + 'DeviceId', event.target.value)}>
-          <option value="">Choose a physical controller</option>
-          {settings[role + 'DeviceId'] && !devices.some((device: any) => device.id === settings[role + 'DeviceId']) && <option value={settings[role + 'DeviceId']}>Saved controller unavailable</option>}
-          {devices.map((device: any) => <option key={device.id} value={device.id}>{device.name}</option>)}
-        </select></Field>)}
+        <Select value={settings[role + 'DeviceId']} disabled={locked} onValueChange={selectionValue => update(role + 'DeviceId', selectionValue)}>
+          <SelectOption value="">Choose a physical controller</SelectOption>
+          {settings[role + 'DeviceId'] && !devices.some((device: any) => device.id === settings[role + 'DeviceId']) && <SelectOption value={settings[role + 'DeviceId']}>Saved controller unavailable</SelectOption>}
+          {devices.map((device: any) => <SelectOption key={device.id} value={device.id}>{device.name}</SelectOption>)}
+        </Select></Field>)}
         {(['leftStick', 'rightStick', 'triggers'] as const).map(control => <Field key={control} label={control === 'leftStick' ? 'Left stick owner' : control === 'rightStick' ? 'Right stick owner' : 'Trigger owner'}>
-          <select value={settings[control]} disabled={locked} onChange={event => update(control, event.target.value)}>
-            <option value="primary">Primary</option><option value="companion">Companion</option><option value="strongest">Strongest</option>
-          </select></Field>)}
+          <Select value={settings[control]} disabled={locked} onValueChange={selectionValue => update(control, selectionValue)}>
+            <SelectOption value="primary">Primary</SelectOption><SelectOption value="companion">Companion</SelectOption><SelectOption value="strongest">Strongest</SelectOption>
+          </Select></Field>)}
       </div>
       <details><summary>Button ownership</summary><div className="form-grid">{(state.controls || []).filter((control: any) => !/^(small|large)/.test(control.id) && !/Trigger$/.test(control.id)).map((control: any) =>
-        <Field key={control.id} label={control.label + ' owner'}><select value={settings.buttons[control.id] || 'shared'} disabled={locked} onChange={event => {
-          const buttons = { ...settings.buttons }; if (event.target.value === 'shared') delete buttons[control.id]; else buttons[control.id] = event.target.value; update('buttons', buttons);
-        }}><option value="shared">Shared</option><option value="primary">Primary</option><option value="companion">Companion</option></select></Field>)}</div></details>
+        <Field key={control.id} label={control.label + ' owner'}><Select value={settings.buttons[control.id] || 'shared'} disabled={locked} onValueChange={selectionValue => {
+          const buttons = { ...settings.buttons }; if (selectionValue === 'shared') delete buttons[control.id]; else buttons[control.id] = selectionValue; update('buttons', buttons);
+        }}><SelectOption value="shared">Shared</SelectOption><SelectOption value="primary">Primary</SelectOption><SelectOption value="companion">Companion</SelectOption></Select></Field>)}</div></details>
       {status.coPilot?.enabled && <Notice announce={false}>Primary: {status.coPilot.primaryConnected ? 'connected' : 'unavailable'}. Companion: {status.coPilot.companionConnected ? 'connected' : 'unavailable'}.</Notice>}
       <p className="subtle">Saving pauses sequences, disarms vision and requires neutral controls. Disconnecting a participant clears synthetic holds and sequences; the other's physical holds continue under the chosen ownership rules. Recordings capture merged physical input. Stop everything disconnects output; release all controls before reconnecting.</p>
       {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}

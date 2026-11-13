@@ -31,6 +31,7 @@ public sealed partial class DesktopWindow : Window
     private DesktopVisionService? _vision;
     private DesktopVoiceService? _voice;
     private DesktopAssistantService? _assistant;
+    private DesktopMarketplaceService? _marketplace;
     private readonly SystemPerformanceMonitor _performance = new();
     private readonly DesktopPreferenceStore _preferences = new(DesktopEnvironment.DataDirectory("Preferences"));
     private bool _resourceMonitoringEnabled;
@@ -102,6 +103,7 @@ public sealed partial class DesktopWindow : Window
                 }
                 catch (Exception error) { _startupError = "Controller monitoring is unavailable: " + error.Message; }
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
+                _marketplace ??= new DesktopMarketplaceService(_controller);
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync(),
                     gamePlugins);
                 _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
@@ -224,6 +226,8 @@ public sealed partial class DesktopWindow : Window
 
     private async Task<object?> AppCommandAsync(string method, JsonElement args)
     {
+        if (method.StartsWith("app.marketplace.", StringComparison.Ordinal))
+            return await (_marketplace ?? throw new InvalidOperationException("Marketplace is unavailable.")).InvokeAsync(method[16..], args);
         if (method.StartsWith("app.assistant", StringComparison.Ordinal))
             return await (_assistant ?? throw new InvalidOperationException("The assistant adapter is unavailable.")).InvokeAsync(method[4..], args);
         switch (method)
@@ -232,7 +236,7 @@ public sealed partial class DesktopWindow : Window
                 _ready = true; DesktopLoading.Visibility = Visibility.Collapsed; UpdatePresentation(); return Snapshot();
             case "app.page":
                 string page = args.Text("page", "workspace");
-                if (page is not ("workspace" or "controller" or "vision" or "voice" or "settings")) throw new InvalidDataException("Choose an available workspace.");
+                if (page is not ("workspace" or "controller" or "vision" or "voice" or "marketplace" or "settings")) throw new InvalidDataException("Choose an available workspace.");
                 _page = page; _clientVisible = args.Flag("visible", true); UpdatePresentation(); return null;
             case "app.draftState": _hasUnsavedChanges = args.Flag("dirty"); return null;
             case "app.themeSet":
@@ -282,7 +286,7 @@ public sealed partial class DesktopWindow : Window
 
     private object Snapshot() => new
     {
-        version = BuildInfo.Version, controller = _controller!.GetState(), vision = _vision!.GetState(), voice = _voice!.GetState(),
+        version = BuildInfo.Version, controller = _controller!.GetState(), vision = _vision!.GetState(), voice = _voice!.GetState(), marketplace = _marketplace!.GetState(),
         settings = new { driverAvailable = VirtualMicDriver.IsAvailable, buildFolder = AppContext.BaseDirectory, appDirectory = AppContext.BaseDirectory,
             profileDirectory = _controller!.ProfileDirectory,
             engine = "C# / .NET", interfaceTechnology = "React / WebView2 · local bundled files", platform = "Windows x64",
@@ -381,6 +385,7 @@ public sealed partial class DesktopWindow : Window
         try
         {
             _assistant?.Stop();
+            _marketplace?.Dispose();
             Cleanup(() => _controller?.StopOutput()); Cleanup(() => _controller?.Dispose());
             Cleanup(() => _vision?.Dispose()); Cleanup(() => _voice?.Dispose());
             if (_assistant is not null) await _assistant.DisposeAsync();

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-test('nonvisual feedback stays opt-in and persists independently of controller setup selection', async ({ page }) => {
+test('nonvisual feedback stays opt-in and persists independently of controller profile selection', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Controller', exact: true }).click();
   await page.getByRole('tab', { name: 'Accessibility' }).click();
@@ -67,13 +67,13 @@ test('task navigation remains usable at desktop widths without horizontal overfl
 test('setup dialog works with keyboard and keeps the UI local in preview', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Controller', exact: true }).click();
-  await page.getByRole('button', { name: 'Create a controller setup' }).click();
+  await page.getByRole('button', { name: 'Create a controller profile' }).click();
   const dialog = page.getByRole('dialog', { name: 'A setup of your own' });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel('Setup name').fill('Keyboard setup');
-  await dialog.getByLabel('Setup name').press('Enter');
+  await dialog.getByLabel('Profile name').fill('Keyboard setup');
+  await dialog.getByLabel('Profile name').press('Enter');
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByLabel('Controller setup', { exact: true })).toHaveValue(/.+/);
+  await expect(page.getByLabel('Controller profile', { exact: true })).toHaveValue(/.+/);
   await page.getByRole('tab', { name: 'Lua scripts 0' }).click();
   await expect(page.getByRole('heading', { name: 'Your script editor' })).toBeVisible();
 });

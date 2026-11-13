@@ -3,7 +3,7 @@ import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react';
 import { VoiceCommands } from '../VoiceCommands';
 import { VoiceEffectsPanel } from '../VoiceEffectsPanel';
 import { useLiveVoiceSettings } from '../useLiveVoiceSettings';
-import { ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, hasUnsavedChanges, useUnsavedChanges, type PageProps } from '../ui';
+import { Select, SelectOption, Input, Slider, ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, hasUnsavedChanges, useUnsavedChanges, type PageProps } from '../ui';
 
 const presets = [{ id: 'clean', label: 'Natural', detail: 'Uncolored and clear' }, { id: 'warm', label: 'Warm', detail: 'Soft and rounded' },
   { id: 'bright', label: 'Bright', detail: 'Crisp and present' }, { id: 'deep', label: 'Deep', detail: 'A fuller tone' }, { id: 'radio', label: 'Radio', detail: 'Focused and compact' }];
@@ -110,20 +110,20 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
       <div className="voice-workbench">
         <Card className="voice-route-card">
           <div className="voice-card-title"><span className="voice-step-number">1</span><div><h2>Your microphone</h2><p className="muted">The voice coming in.</p></div></div>
-          <Field label="Microphone"><select aria-label="Voice input microphone" value={route.microphoneId} disabled={routeLocked}
-            onChange={event => setRoute({ ...route, microphoneId: event.target.value })}>
-            {!microphones.length && <option value="">No microphone found</option>}
-            {microphones.map(device => <option key={device.id} value={device.id}>{device.name}{device.isDefault ? ' · Default' : ''}</option>)}
-          </select></Field>
+          <Field label="Microphone"><Select aria-label="Voice input microphone" value={route.microphoneId} disabled={routeLocked}
+            onValueChange={selectionValue => setRoute({ ...route, microphoneId: selectionValue })}>
+            {!microphones.length && <SelectOption value="">No microphone found</SelectOption>}
+            {microphones.map(device => <SelectOption key={device.id} value={device.id}>{device.name}{device.isDefault ? ' · Default' : ''}</SelectOption>)}
+          </Select></Field>
           <div className="voice-path" aria-hidden="true"><Icon name="mic" /><span /><Icon name="arrowRight" /></div>
           <div className="voice-card-title"><span className="voice-step-number">2</span><div><h2>The voice you want</h2><p className="muted">Natural effects or a reference voice.</p></div></div>
-          <Field label="Saved voice"><select aria-label="Saved voice profile" value={state.selectedProfileId || ''} disabled={blocked}
-            onChange={event => { const id = event.target.value; transition(() => { void run(id ? 'profileSelect' : 'profileClear', id ? { id } : {}); }, ['effects']); }}>
-            <option value="">Custom built-in effects</option>{profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}{profile.kind === 'reference' ? ' · Reference' : ''}</option>)}
-          </select></Field>
+          <Field label="Saved voice"><Select aria-label="Saved voice profile" value={state.selectedProfileId || ''} disabled={blocked}
+            onValueChange={selectionValue => { const id = selectionValue; transition(() => { void run(id ? 'profileSelect' : 'profileClear', id ? { id } : {}); }, ['effects']); }}>
+            <SelectOption value="">Custom built-in effects</SelectOption>{profiles.map(profile => <SelectOption key={profile.id} value={profile.id}>{profile.name}{profile.kind === 'reference' ? ' · Reference' : ''}</SelectOption>)}
+          </Select></Field>
           <Button variant="ghost" onClick={() => changeTab('library')}><Icon name="audio" size={17} />Browse your voice library</Button>
-          {neural && <Field label="Reference model" hint={model.description}><select aria-label="Reference voice model" value={state.selectedModelId || ''} disabled={routeLocked}
-            onChange={event => { const id = event.target.value; transition(() => { void run('modelSelect', { id }); }, ['effects']); }}>{models.filter(item => item.usesReference).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>}
+          {neural && <Field label="Reference model" hint={model.description}><Select aria-label="Reference voice model" value={state.selectedModelId || ''} disabled={routeLocked}
+            onValueChange={selectionValue => { const id = selectionValue; transition(() => { void run('modelSelect', { id }); }, ['effects']); }}>{models.filter(item => item.usesReference).map(item => <SelectOption key={item.id} value={item.id}>{item.name}</SelectOption>)}</Select></Field>}
         </Card>
 
         <Card className="voice-output-card">
@@ -134,15 +134,15 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
           <div className="voice-meter-pair"><Meter label="Microphone input" value={level(status.inputPeak)} /><Meter label="Processed output" value={level(status.outputPeak)} /></div>
           <div className="voice-destination-title"><span className="voice-step-number">3</span><h3>Where should it go?</h3></div>
           <div className="voice-destinations" role="group" aria-label="Voice destination">
-            <button type="button" className={'voice-destination ' + (route.destination === 'headphones' ? 'selected' : '')} disabled={routeLocked}
-              onClick={() => setRoute({ ...route, destination: 'headphones' })}><Icon name="headphones" /><span><strong>Headphones</strong><small>Hear a live preview</small></span>{route.destination === 'headphones' && <Icon name="check" size={17} />}</button>
-            <button type="button" className={'voice-destination ' + (route.destination === 'virtual' ? 'selected' : '')} disabled={routeLocked}
-              onClick={() => setRoute({ ...route, destination: 'virtual' })}><Icon name="mic" /><span><strong>Virtual microphone</strong><small>Use in other apps</small></span>{route.destination === 'virtual' && <Icon name="check" size={17} />}</button>
+            <Button variant="unstyled" type="button" className={'voice-destination ' + (route.destination === 'headphones' ? 'selected' : '')} disabled={routeLocked}
+              onClick={() => setRoute({ ...route, destination: 'headphones' })}><Icon name="headphones" /><span><strong>Headphones</strong><small>Hear a live preview</small></span>{route.destination === 'headphones' && <Icon name="check" size={17} />}</Button>
+            <Button variant="unstyled" type="button" className={'voice-destination ' + (route.destination === 'virtual' ? 'selected' : '')} disabled={routeLocked}
+              onClick={() => setRoute({ ...route, destination: 'virtual' })}><Icon name="mic" /><span><strong>Virtual microphone</strong><small>Use in other apps</small></span>{route.destination === 'virtual' && <Icon name="check" size={17} />}</Button>
           </div>
           {route.destination === 'headphones' ? <>
-            <Field label="Playback device"><select aria-label="Voice preview playback device" value={route.outputId} disabled={routeLocked}
-              onChange={event => setRoute({ ...route, outputId: event.target.value })}>{!outputs.length && <option value="">No playback device found</option>}
-              {outputs.map(device => <option key={device.id} value={device.id}>{device.name}{device.isDefault ? ' · Default' : ''}</option>)}</select></Field>
+            <Field label="Playback device"><Select aria-label="Voice preview playback device" value={route.outputId} disabled={routeLocked}
+              onValueChange={selectionValue => setRoute({ ...route, outputId: selectionValue })}>{!outputs.length && <SelectOption value="">No playback device found</SelectOption>}
+              {outputs.map(device => <SelectOption key={device.id} value={device.id}>{device.name}{device.isDefault ? ' · Default' : ''}</SelectOption>)}</Select></Field>
           </> : <p className="field-hint">After starting, select <strong>AccessRelay Virtual Microphone</strong> in Xbox, Discord or another Windows app.</p>}
           {route.destination === 'virtual' && state.virtualMicIssue && <Notice tone="warning">{state.virtualMicIssue} Check Settings for virtual-device setup.</Notice>}
           <div className="voice-start-row">
@@ -186,13 +186,13 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
       footer={<><Button onClick={closeEffects} disabled={blocked}>Cancel</Button><Button variant="primary" busy={busy === 'profileSaveEffects'} disabled={blocked || !effectsName.trim()} onClick={() => void execute('profileSaveEffects', async () => {
         await command('profileSaveEffects', { name: effectsName, settings: { ...settings, muted: state.settings?.muted === true }, ...(replaceEffects && selected?.kind === 'effects' ? { id: selected.id } : {}) }); setEffectsOpen(false);
       })}>{replaceEffects ? 'Save changes' : 'Save voice'}</Button></>}>
-      <Field label="Voice name"><input aria-label="Effects voice name" value={effectsName} maxLength={80} onChange={event => setEffectsName(event.target.value)} /></Field>
+      <Field label="Voice name"><Input aria-label="Effects voice name" value={effectsName} maxLength={80} onChange={event => setEffectsName(event.target.value)} /></Field>
       {selected?.kind === 'effects' && <Toggle label={'Update “' + selected.name + '”'} description="Turn off to save a separate voice." checked={replaceEffects} onChange={setReplaceEffects} />}
     </Modal>
     <Modal open={!!nameAction} onClose={closeName} title={nameAction?.action === 'profileDuplicate' ? 'Duplicate voice' : 'Rename voice'}
       footer={<><Button onClick={closeName} disabled={blocked}>Cancel</Button><Button variant="primary" disabled={blocked || !nameAction?.name.trim()} onClick={() => void execute(nameAction!.action, async () => {
         await command(nameAction!.action, { id: nameAction!.id, name: nameAction!.name }); setNameAction(null);
-      })}>Save</Button></>}><Field label="Voice name"><input aria-label="Voice profile name" value={nameAction?.name || ''} maxLength={80}
+      })}>Save</Button></>}><Field label="Voice name"><Input aria-label="Voice profile name" value={nameAction?.name || ''} maxLength={80}
         onChange={event => setNameAction(action => action ? { ...action, name: event.target.value } : null)} /></Field></Modal>
     <ConfirmDialog open={!!deleteProfile} title="Delete this voice?" description={`“${deleteProfile?.name || ''}” will be removed from the local voice library. The original imported file is kept.`}
       onClose={closeDelete} onConfirm={async () => { await command('profileDelete', { id: deleteProfile.id }); }} />
@@ -210,13 +210,13 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
             <Button variant="ghost" disabled={blocked} onClick={() => transition(() => { void run('clipClear'); }, ['clip'])}>Clear editor</Button></div></div>
         <VoiceWaveform bins={clip.waveform || []} durationMs={clipDuration} startMs={trim.startMs} endMs={trim.endMs} positionMs={status.clipPositionMs || trim.startMs}
           disabled={blocked} onChange={setTrim} />
-        <div className="voice-trim-fields"><Field label="Start (seconds)"><input aria-label="Reference clip start in seconds" type="number" min={0} max={clipDuration / 1000} step="0.001" value={trim.startMs / 1000}
+        <div className="voice-trim-fields"><Field label="Start (seconds)"><Input aria-label="Reference clip start in seconds" type="number" min={0} max={clipDuration / 1000} step="0.001" value={trim.startMs / 1000}
           disabled={blocked} onChange={event => setTrim({ ...trim, startMs: Math.max(0, Math.round(Number(event.target.value) * 1000)) })} /></Field>
-          <Field label="End (seconds)"><input aria-label="Reference clip end in seconds" type="number" min={0} max={clipDuration / 1000} step="0.001" value={trim.endMs / 1000}
+          <Field label="End (seconds)"><Input aria-label="Reference clip end in seconds" type="number" min={0} max={clipDuration / 1000} step="0.001" value={trim.endMs / 1000}
             disabled={blocked} onChange={event => setTrim({ ...trim, endMs: Math.min(clipDuration, Math.round(Number(event.target.value) * 1000)) })} /></Field>
           <div className="voice-selection-length"><strong>{(selectionMs / 1000).toFixed(3)} s</strong><span className="muted">selected · 1–30 s to save</span></div></div>
         <Field label="Audition position" hint={status.clipPlaying ? 'Pause to choose another starting point.' : 'Choose a starting point within the selection.'}>
-          <input aria-label="Reference audition position" type="range" min={trim.startMs} max={Math.max(trim.startMs, trim.endMs)} step={10}
+          <Slider aria-label="Reference audition position" type="range" min={trim.startMs} max={Math.max(trim.startMs, trim.endMs)} step={10}
             disabled={blocked || status.clipPlaying} value={status.clipPlaying ? Math.max(trim.startMs, Math.min(trim.endMs, status.clipPositionMs || trim.startMs)) : Math.max(trim.startMs, Math.min(trim.endMs, playhead))}
             onChange={event => setPlayhead(Number(event.target.value))} />
         </Field>
@@ -233,7 +233,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
           {!state.musicRemovalAvailable && <p className="field-hint">The dialogue-separation model is not installed in this build.</p>}
           {clip.hasCleaned && <Toggle label="Use cleaned speech" description="Applies to audition and the saved reference clip." checked={clip.useCleaned === true}
             disabled={blocked} onChange={enabled => void run('clipUseCleaned', { enabled })} />}</details>
-        <Field label="Voice name" hint="Your trimmed reference is saved locally. The original audio or video stays unchanged."><input aria-label="Reference voice name" value={editorName} maxLength={80} disabled={blocked}
+        <Field label="Voice name" hint="Your trimmed reference is saved locally. The original audio or video stays unchanged."><Input aria-label="Reference voice name" value={editorName} maxLength={80} disabled={blocked}
           onChange={event => setEditorName(event.target.value)} /></Field>
         {(selectionMs < 1000 || selectionMs > 30_000) && <Notice tone="warning">Select between 1 and 30 seconds to save a reference voice. Longer selections, up to five minutes, can be auditioned or cleaned first.</Notice>}
       </div>}
@@ -296,14 +296,14 @@ function VoiceWaveform({ bins, durationMs, startMs, endMs, positionMs, disabled,
           onChange({ startMs: start, endMs: start + drag.end - drag.start });
         }} onPointerUp={event => { selectionDrag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
         onPointerCancel={() => { selectionDrag.current = null; }} />
-      {(['start', 'end'] as const).map(which => <button key={which} type="button" className={'voice-wave-handle voice-wave-' + which} role="slider"
+      {(['start', 'end'] as const).map(which => <Button variant="unstyled" key={which} type="button" className={'voice-wave-handle voice-wave-' + which} role="slider"
         aria-label={'Reference selection ' + which} aria-valuemin={0} aria-valuemax={durationMs / 1000} aria-valuenow={(which === 'start' ? startMs : endMs) / 1000}
         aria-valuetext={seconds(which === 'start' ? startMs : endMs) + ' seconds'} disabled={disabled} style={{ left: left(which === 'start' ? startMs : endMs) + '%' } as CSSProperties}
         onKeyDown={event => key(event, which)} onPointerDown={event => { if (!disabled) { event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault(); } }}
-        onPointerMove={event => drag(event, which)} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}><span>{which === 'start' ? 'Start' : 'End'}</span></button>)}
+        onPointerMove={event => drag(event, which)} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}><span>{which === 'start' ? 'Start' : 'End'}</span></Button>)}
       {positionMs >= viewStart && positionMs <= viewStart + span && <div className="voice-wave-playhead" style={{ left: left(positionMs) + '%' }} />}
     </div><div className="voice-wave-ruler"><span>{seconds(viewStart)} s</span><span>{seconds(viewStart + span)} s</span></div>
-    {zoom && durationMs > span && <Field label="Move waveform view"><input type="range" aria-label="Waveform view position" min={0} max={durationMs - span}
+    {zoom && durationMs > span && <Field label="Move waveform view"><Slider type="range" aria-label="Waveform view position" min={0} max={durationMs - span}
       step={100} value={viewStart} disabled={disabled} onChange={event => setViewOffset(Number(event.target.value))} /></Field>}
   </div>;
 }

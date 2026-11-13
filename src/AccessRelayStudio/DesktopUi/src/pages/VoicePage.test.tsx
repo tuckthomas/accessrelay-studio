@@ -1,3 +1,4 @@
+import { selectValue } from '../select-test-helper';
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -125,7 +126,7 @@ describe('voice workflows', () => {
     render(<VoicePage state={state} status={state.status} command={command} />);
     fireEvent.change(screen.getByRole('slider', { name: 'Voice output gain in decibels' }), { target: { value: '5' } });
     await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Saved voice profile' }), { target: { value: 'saved-voice' } });
+    selectValue(screen.getByRole('combobox', { name: 'Saved voice profile' }), 'saved-voice');
     expect(command).not.toHaveBeenCalledWith('profileSelect', expect.anything());
     finish();
     await waitFor(() => expect(command).toHaveBeenCalledWith('profileSelect', { id: 'saved-voice' }));

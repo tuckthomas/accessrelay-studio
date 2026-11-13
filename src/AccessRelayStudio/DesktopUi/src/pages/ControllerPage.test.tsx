@@ -1,3 +1,4 @@
+import { selectValue } from '../select-test-helper';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControllerPage, TrajectoryChart } from './ControllerPage';
@@ -87,7 +88,7 @@ describe('controller workflows', () => {
   it('protects unsaved mapping text while selecting another control or controller tab', () => {
     const state = setup(), command = vi.fn();
     render(<ControllerPage state={state} status={state.status} command={command} />);
-    fireEvent.change(screen.getByLabelText('What should it do?'), { target: { value: 'moving' } });
+    selectValue(screen.getByLabelText('What should it do?'), 'moving');
     fireEvent.click(screen.getByRole('tab', { name: /Sequences/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect((screen.getByLabelText('What should it do?') as HTMLSelectElement).value).toBe('moving');
@@ -107,7 +108,7 @@ describe('controller workflows', () => {
   it('saves the selected mapping using the native command shape', async () => {
     const state = setup(), command = vi.fn().mockResolvedValue(null);
     render(<ControllerPage state={state} status={{ ...state.status, connected: true }} command={command} />);
-    fireEvent.change(screen.getByLabelText('What should it do?'), { target: { value: 'moving' } });
+    selectValue(screen.getByLabelText('What should it do?'), 'moving');
     fireEvent.click(screen.getByRole('button', { name: 'Save mapping' }));
     await waitFor(() => expect(command).toHaveBeenCalledWith('bindingSave', expect.objectContaining({ control: 'largeRight', script: 'moving', enabled: true })));
     expect(await screen.findByText('Mapping saved.')).toBeTruthy();
@@ -115,7 +116,7 @@ describe('controller workflows', () => {
   it('keeps an unsaved mapping through background status updates and preserves it after a native error', async () => {
     const state = setup(), command = vi.fn().mockRejectedValue(new Error('Finish training first'));
     const view = render(<ControllerPage state={state} status={{ ...state.status, connected: true }} command={command} />);
-    fireEvent.change(screen.getByLabelText('What should it do?'), { target: { value: 'stepback' } });
+    selectValue(screen.getByLabelText('What should it do?'), 'stepback');
     view.rerender(<ControllerPage state={structuredClone(state)} status={{ ...state.status, connected: true, meanPollMs: 4.1 }} command={command} />);
     expect((screen.getByLabelText('What should it do?') as HTMLSelectElement).value).toBe('stepback');
     fireEvent.click(screen.getByRole('button', { name: 'Save mapping' }));
@@ -136,7 +137,7 @@ describe('controller workflows', () => {
   it('keeps setup deletion deliberate and disables deleting the last setup', () => {
     const state = setup(), command = vi.fn();
     render(<ControllerPage state={state} status={state.status} command={command} />);
-    expect((screen.getByRole('button', { name: 'Delete setup', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Delete profile', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
     expect(command).not.toHaveBeenCalled();
   });
   it('draws full normalized trajectory amplitude and does not amplify tiny int16 recording values', () => {
@@ -145,7 +146,7 @@ describe('controller workflows', () => {
     view.rerender(<TrajectoryChart recording={{ durationMs: 100, frames: [{ timeMs: 0, state: { rightY: 1 } }, { timeMs: 100, state: { rightY: -1 } }] }} />);
     expect(view.container.querySelector('path[stroke="var(--accent)"]')?.getAttribute('d')).toBe('M20.0,90.0 L880.0,90.0');
   });
-  it('keeps NBA feedback controls out of an ordinary controller setup', async () => {
+  it('keeps NBA feedback controls out of an ordinary controller profile', async () => {
     const state = setup(), command = vi.fn().mockResolvedValue(null);
     render(<ControllerPage state={state} status={state.status} command={command} />);
     fireEvent.click(screen.getByRole('tab', { name: /^Sequences/ }));
@@ -172,7 +173,7 @@ describe('controller workflows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     await screen.findByLabelText('Sequence name');
     fireEvent.click(screen.getByText('NBA 2K27 feedback tuning'));
-    fireEvent.change(screen.getByLabelText('Timing feedback'), { target: { value: 'slightlyEarly' } });
+    selectValue(screen.getByLabelText('Timing feedback'), 'slightlyEarly');
     fireEvent.click(screen.getByRole('button', { name: 'Apply feedback adjustment' }));
     await waitFor(() => expect(command.mock.calls.filter(([action]) => action === 'recordGet')).toHaveLength(2));
     fireEvent.change(screen.getByLabelText('Sequence name'), { target: { value: 'Renamed sequence' } });

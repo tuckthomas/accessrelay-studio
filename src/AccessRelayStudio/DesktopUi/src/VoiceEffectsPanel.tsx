@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Button, Field, Toggle } from './ui';
+import { Slider, Select, SelectOption, Button, Field, Toggle } from './ui';
 import { defaultEffects, defaultSettings, type VoiceEffects, type VoiceSettings } from './useLiveVoiceSettings';
 
 type Props = { settings: VoiceSettings; disabled: boolean; update: (change: (current: VoiceSettings) => VoiceSettings) => void };
@@ -24,7 +24,7 @@ export function VoiceEffectsPanel({ settings, disabled, update }: Props) {
   function slider(key: keyof VoiceEffects, label: string, min = 0, max = 1, step = .01, unit = '%') {
     const value = Number(fx[key]);
     const display = unit === '%' ? Math.round(value * 100) + '%' : value.toFixed(step < 1 ? 1 : 0) + (unit ? ` ${unit}` : '');
-    return <Field label={<span>{label} <strong>{display}</strong></span>}><input type="range" aria-label={label} disabled={disabled}
+    return <Field label={<span>{label} <strong>{display}</strong></span>}><Slider type="range" aria-label={label} disabled={disabled}
       min={min} max={max} step={step} value={value} onChange={event => set(key, Number(event.target.value))} /></Field>;
   }
   function effect(key: keyof VoiceEffects, label: string, initial: number, children?: ReactNode) {
@@ -34,27 +34,27 @@ export function VoiceEffectsPanel({ settings, disabled, update }: Props) {
       {enabled && <div className="voice-effect-controls">{slider(key, `${label} amount`)}{children}</div>}</details>;
   }
   return <div className="voice-effects-panel">
-    <div className="voice-effects-toolbar"><Field label="Voice preset"><select aria-label="Voice preset" value="" disabled={disabled} onChange={event => {
-      const recipe = recipes[Number(event.target.value)]; if (!recipe) return;
+    <div className="voice-effects-toolbar"><Field label="Voice preset"><Select aria-label="Voice preset" value="" disabled={disabled} onValueChange={selectionValue => {
+      const recipe = recipes[Number(selectionValue)]; if (!recipe) return;
       update(current => ({ ...defaultSettings, preset: recipe.preset || 'clean', pitchSemitones: recipe.pitch || 0,
         gainDb: current.gainDb, muted: current.muted, effects: { ...defaultEffects, ...recipe.effects } }));
-    }}><option value="" disabled>Choose a starting voice</option>{recipes.map((recipe, index) => <option value={index} key={recipe.name}>{recipe.name}</option>)}</select></Field>
+    }}><SelectOption value="" disabled>Choose a starting voice</SelectOption>{recipes.map((recipe, index) => <SelectOption value={index} key={recipe.name}>{recipe.name}</SelectOption>)}</Select></Field>
       <Button disabled={disabled} onClick={() => update(current => ({ ...defaultSettings, gainDb: current.gainDb, muted: current.muted }))}>Reset effects</Button>
       <Toggle label="Bypass effects" checked={fx.bypass} onChange={value => set('bypass', value)} disabled={disabled} /></div>
     <div className="voice-tuning">
-      <Field label={<span>Pitch <strong>{settings.pitchSemitones.toFixed(1)} semitones</strong></span>}><input aria-label="Voice pitch in semitones" type="range" min="-12" max="12" step="0.1" value={settings.pitchSemitones} disabled={disabled}
+      <Field label={<span>Pitch <strong>{settings.pitchSemitones.toFixed(1)} semitones</strong></span>}><Slider aria-label="Voice pitch in semitones" type="range" min="-12" max="12" step="0.1" value={settings.pitchSemitones} disabled={disabled}
         onChange={event => update(current => ({ ...current, pitchSemitones: Number(event.target.value) }))} /></Field>
       {slider('formantSemitones', 'Timbre', -12, 12, .1, 'semitones')}
       {slider('formantStrength', 'Timbre strength')}
       {slider('mix', 'Effects mix')}
-      <Field label={<span>Output gain <strong>{settings.gainDb.toFixed(1)} dB</strong></span>}><input aria-label="Voice output gain in decibels" type="range" min="-18" max="12" step="0.5" value={settings.gainDb} disabled={disabled}
+      <Field label={<span>Output gain <strong>{settings.gainDb.toFixed(1)} dB</strong></span>}><Slider aria-label="Voice output gain in decibels" type="range" min="-18" max="12" step="0.5" value={settings.gainDb} disabled={disabled}
         onChange={event => update(current => ({ ...current, gainDb: Number(event.target.value) }))} /></Field>
     </div>
     <details className="voice-effect-group"><summary>Equalizer</summary>
       {(['preEqDb', 'postEqDb'] as const).map(key => <div key={key}><div className="voice-eq-heading"><h3>{key === 'preEqDb' ? 'Before pitch and timbre' : 'After voice effects'}</h3>
         <Button variant="ghost" disabled={disabled} onClick={() => set(key, Array(10).fill(0))}>Reset {key === 'preEqDb' ? 'pre' : 'post'} EQ</Button></div>
         <div className="voice-equalizer">{['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'].map((band, index) => <Field key={band} label={`${band} Hz · ${fx[key][index]} dB`}>
-          <input type="range" min="-20" max="20" step="1" value={fx[key][index]} disabled={disabled} aria-label={`${key === 'preEqDb' ? 'Pre' : 'Post'} EQ ${band} Hz`}
+          <Slider type="range" min="-20" max="20" step="1" value={fx[key][index]} disabled={disabled} aria-label={`${key === 'preEqDb' ? 'Pre' : 'Post'} EQ ${band} Hz`}
             onChange={event => { const value = Number(event.target.value); update(current => ({ ...current, effects: { ...current.effects, [key]: current.effects[key].map((old, at) => at === index ? value : old) } })); }} /></Field>)}</div></div>)}
     </details>
     <details className="voice-effect-group"><summary>Microphone cleanup</summary><div className="voice-effect-grid">
@@ -65,8 +65,8 @@ export function VoiceEffectsPanel({ settings, disabled, update }: Props) {
       {effect('noiseReduction', 'Noise reduction', .5)}{effect('deEsser', 'De-esser', .5)}
       <div className="voice-effect-controls"><Toggle label="Low cut" checked={fx.lowCutHz > 0} disabled={disabled} onChange={on => set('lowCutHz', on ? 80 : 0)} />
         {fx.lowCutHz > 0 && slider('lowCutHz', 'Low cut frequency', 20, 400, 1, 'Hz')}</div>
-      <Field label="Hum reduction"><select aria-label="Hum reduction" value={fx.humHz} disabled={disabled} onChange={event => set('humHz', Number(event.target.value))}>
-        <option value="0">Off</option><option value="50">50 Hz</option><option value="60">60 Hz</option></select></Field>
+      <Field label="Hum reduction"><Select aria-label="Hum reduction" value={fx.humHz} disabled={disabled} onValueChange={selectionValue => set('humHz', Number(selectionValue))}>
+        <SelectOption value="0">Off</SelectOption><SelectOption value="50">50 Hz</SelectOption><SelectOption value="60">60 Hz</SelectOption></Select></Field>
     </div></details>
     <details className="voice-effect-group"><summary>Character and modulation</summary><div className="voice-effect-grid">
       {effect('robot', 'Robot', .8, slider('robotHz', 'Robot frequency', 20, 400, 1, 'Hz'))}

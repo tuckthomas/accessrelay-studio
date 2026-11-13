@@ -1,3 +1,4 @@
+import { selectOption } from './select-control';
 import { test, expect } from '@playwright/test';
 
 test('co-pilot requires different participants, preserves owners and stays off by default', async ({ page }) => {
@@ -14,13 +15,13 @@ test('co-pilot requires different participants, preserves owners and stays off b
   await enabled.click();
   const save = page.getByRole('button', { name: 'Save co-pilot preferences', exact: true });
   await expect(save).toBeDisabled();
-  await page.getByLabel('Primary controller', { exact: true }).selectOption('physical-a');
-  await page.getByLabel('Companion controller', { exact: true }).selectOption('physical-a');
+  await selectOption(page.getByLabel('Primary controller', { exact: true }), 'physical-a');
+  await selectOption(page.getByLabel('Companion controller', { exact: true }), 'physical-a');
   await expect(save).toBeDisabled();
-  await page.getByLabel('Companion controller', { exact: true }).selectOption('physical-b');
-  await page.getByLabel('Left stick owner', { exact: true }).selectOption('strongest');
+  await selectOption(page.getByLabel('Companion controller', { exact: true }), 'physical-b');
+  await selectOption(page.getByLabel('Left stick owner', { exact: true }), 'strongest');
   await page.getByText('Button ownership', { exact: true }).click();
-  await page.getByLabel('A button owner', { exact: true }).selectOption('companion');
+  await selectOption(page.getByLabel('A button owner', { exact: true }), 'companion');
   await save.click();
   await expect(page.getByText('Co-pilot saved. Release controls before continuing.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Voice', exact: true }).click();

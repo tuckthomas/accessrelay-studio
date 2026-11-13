@@ -28,8 +28,8 @@ export function WorkspacePage({ state, status, command, navigate }: {
   const unavailable = {
     controller: controller.training ? 'Finish the training clip before connecting output.'
       : !controller.connected ? 'Connect a gamepad in Controller.' : !state.controller?.driverAvailable ? 'Install the output driver in Settings.' : '',
-    vision: vision.stopping || savingClip ? 'Waiting for capture and clip saving to finish.' : vision.busy ? 'Remote Play setup is busy.'
-      : !state.vision?.selectedProfile || !sourceId ? 'Choose a shot profile and window in Remote Play.' : '',
+    vision: vision.stopping || savingClip ? 'Waiting for capture and clip saving to finish.' : vision.busy ? 'Game Vision setup is busy.'
+      : !sourceId ? 'Choose a gameplay window in Game Vision.' : '',
     voice: voice.busy && !voice.isStarting ? 'Finish the current Voice operation.' : !microphoneReady ? 'Choose a microphone in Voice.'
       : voiceModel?.isAvailable === false ? 'Choose an installed voice model in Voice.'
       : voiceModel?.usesReference && !state.voice?.selectedProfileId ? 'Choose a reference voice in Voice.'
@@ -59,7 +59,7 @@ export function WorkspacePage({ state, status, command, navigate }: {
   const rows: { id: Feature; label: string; icon: string; detail: string }[] = [
     { id: 'controller', label: 'Controller output', icon: 'gamepad', detail: controller.outputActive
       ? controller.deviceName || 'Virtual controller connected' : active.controller ? 'Connecting output…' : unavailable.controller || 'Output is off' },
-    { id: 'vision', label: 'Remote Play', icon: 'camera', detail: recording ? 'Recording a training clip'
+    { id: 'vision', label: 'Game Vision', icon: 'camera', detail: recording ? 'Recording a training clip'
       : visionRunning ? 'Capture is running' : active.vision ? 'Starting capture…' : unavailable.vision || 'Capture is off' },
     { id: 'voice', label: 'Voice', icon: 'mic', detail: voice.isRunning ? (voice.destination === 'headphones' ? 'Headphone preview' : 'Virtual microphone')
       : commandListening ? 'Voice commands are listening' : active.voice ? 'Starting voice…' : unavailable.voice || 'Voice processing is off' },
@@ -75,7 +75,7 @@ export function WorkspacePage({ state, status, command, navigate }: {
       </section>
       <Card title="Controls"><div className="session-list">{rows.map(row => <div className="session-item" key={row.id}>
         <span className="session-item-icon"><Icon name={row.icon} /></span><div className="session-item-copy"><strong>{row.label}</strong><p id={'dashboard-' + row.id + '-detail'}>{row.detail}</p></div>
-        <Button className="session-power" variant={active[row.id] ? 'primary' : 'secondary'} aria-label={row.id === 'vision' ? 'Remote Play capture' : row.id === 'voice' ? 'Voice processing' : row.label}
+        <Button className="session-power" variant={active[row.id] ? 'primary' : 'secondary'} aria-label={row.id === 'vision' ? 'Game Vision capture' : row.id === 'voice' ? 'Voice processing' : row.label}
           aria-pressed={active[row.id]} aria-describedby={'dashboard-' + row.id + '-detail'}
           disabled={pending[row.id] === 'stop' || (!active[row.id] && !!unavailable[row.id])} onClick={() => void toggle(row.id)}>
           <Icon name={pending[row.id] ? 'loader' : 'power'} size={16} className={pending[row.id] ? 'spin' : ''} />
@@ -85,21 +85,21 @@ export function WorkspacePage({ state, status, command, navigate }: {
     </div>
     <h2>Pick up where you need to</h2>
     <div className="workspace-tools">
-      <button type="button" className="tool-card" onClick={() => navigate('controller')}>
+      <Button variant="unstyled" type="button" className="tool-card" onClick={() => navigate('controller')}>
         <div className="tool-card-top"><span className="tool-card-icon"><Icon name="sliders" size={24} /></span><Icon name="arrowUpRight" size={20} /></div>
         <div><h3>Make the controls yours</h3><p>Map a button, refine a sequence, or record a movement you want to keep.</p></div>
-        <span className="tool-card-link">{profile?.name ? profile.name + ' setup' : 'Open your controller setup'}</span>
-      </button>
-      <button type="button" className="tool-card" onClick={() => navigate('vision')}>
+        <span className="tool-card-link">{profile?.name || 'Open controller profiles'}</span>
+      </Button>
+      <Button variant="unstyled" type="button" className="tool-card" onClick={() => navigate('vision')}>
         <div className="tool-card-top"><span className="tool-card-icon"><Icon name="camera" size={24} /></span><Icon name="arrowUpRight" size={20} /></div>
-        <div><h3>Bring gameplay into view</h3><p>Set up Remote Play capture and save the evidence for your shot profiles.</p></div>
-        <span className="tool-card-link">Open Remote Play</span>
-      </button>
-      <button type="button" className="tool-card" onClick={() => navigate('voice')}>
+        <div><h3>Bring gameplay into view</h3><p>Set up Game Vision capture and save the evidence for your shot profiles.</p></div>
+        <span className="tool-card-link">Open Game Vision</span>
+      </Button>
+      <Button variant="unstyled" type="button" className="tool-card" onClick={() => navigate('voice')}>
         <div className="tool-card-top"><span className="tool-card-icon"><Icon name="audio" size={24} /></span><Icon name="arrowUpRight" size={20} /></div>
         <div><h3>Find your sound</h3><p>Shape your microphone, try a saved voice, or create a voice from a clip.</p></div>
         <span className="tool-card-link">Open your voice workspace</span>
-      </button>
+      </Button>
     </div>
     <ResourceUse metrics={status.system || state.system || {}} enabled={monitorEnabled} busy={monitorBusy} onToggle={() => void toggleMonitor()} />
   </div>;

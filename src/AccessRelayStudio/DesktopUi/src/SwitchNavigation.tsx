@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Field, Modal, Notice, activeModal } from './ui';
+import { Select, SelectOption, Input, Button, Field, Modal, Notice, activeModal } from './ui';
 import { SwitchScanner, navigationEvents, type NavigationCursor, type NavigationSnapshot } from './switch-scanner';
 
 type Settings = { mode: 'automatic' | 'step'; source: 'keyboard' | 'controller'; intervalMs: number; debounceMs: number;
@@ -135,17 +135,17 @@ export function SwitchNavigation({ controller, status, command }: { controller: 
     <Button variant="ghost" onClick={() => setOpen(true)} aria-label="Switch navigation">Switch navigation</Button>
     <Modal open={open} onClose={() => { if (!busy) setOpen(false); }} title="Switch navigation" description="Use one switch to select as focus moves, or two switches to step and select. F8 starts or stops; Escape stops scanning."
       footer={<><Button disabled={busy} onClick={() => setOpen(false)}>Close</Button>{active ? <Button onClick={() => stop()}>Stop scanning</Button> : <Button variant="primary" busy={busy} onClick={() => void start()}>Start scanning</Button>}</>}>
-      <Field label="Scan mode"><select disabled={active || busy} value={settings.mode} onChange={event => setSettings(value => ({ ...value, mode: event.target.value as Settings['mode'] }))}>
-        <option value="automatic">One switch · automatic scanning</option><option value="step">Two switches · step and select</option></select></Field>
-      <Field label="Switch source"><select disabled={active || busy} value={settings.source} onChange={event => setSettings(value => ({ ...value, source: event.target.value as Settings['source'] }))}>
-        <option value="keyboard">Keyboard switches</option><option value="controller">Primary physical controller</option></select></Field>
+      <Field label="Scan mode"><Select disabled={active || busy} value={settings.mode} onValueChange={selectionValue => setSettings(value => ({ ...value, mode: selectionValue as Settings['mode'] }))}>
+        <SelectOption value="automatic">One switch · automatic scanning</SelectOption><SelectOption value="step">Two switches · step and select</SelectOption></Select></Field>
+      <Field label="Switch source"><Select disabled={active || busy} value={settings.source} onValueChange={selectionValue => setSettings(value => ({ ...value, source: selectionValue as Settings['source'] }))}>
+        <SelectOption value="keyboard">Keyboard switches</SelectOption><SelectOption value="controller">Primary physical controller</SelectOption></Select></Field>
       {settings.source === 'controller' ? <><Notice>Controller navigation pauses gameplay output and sequences. Release controls before returning to the game. Scanning stops when Studio loses focus.</Notice>
-        {(['step', 'activate'] as const).map(key => <Field key={key} label={key === 'step' ? 'Controller step switch' : 'Controller select switch'}><select disabled={active || busy} value={settings[key]} onChange={event => setSettings(value => ({ ...value, [key]: event.target.value }))}>
-          {(controller.controls || []).map((control: any) => <option key={control.id} value={control.id}>{control.label}</option>)}</select></Field>)}</>
-        : (['stepKey', 'activateKey'] as const).map(key => <Field key={key} label={key === 'stepKey' ? 'Step key' : 'Select key'}><select disabled={active || busy} value={settings[key]} onChange={event => setSettings(value => ({ ...value, [key]: event.target.value }))}>
-          {keys.map(code => <option key={code} value={code}>{code}</option>)}</select></Field>)}
-      <Field label="Scan interval (ms)"><input type="number" min={300} max={5000} step={100} disabled={active || busy} value={settings.intervalMs} onChange={event => setSettings(value => ({ ...value, intervalMs: Math.max(300, Math.min(5000, Number(event.target.value) || 300)) }))} /></Field>
-      <Field label="Switch debounce (ms)"><input type="number" min={50} max={1000} step={10} disabled={active || busy} value={settings.debounceMs} onChange={event => setSettings(value => ({ ...value, debounceMs: Math.max(50, Math.min(1000, Number(event.target.value) || 50)) }))} /></Field>
+        {(['step', 'activate'] as const).map(key => <Field key={key} label={key === 'step' ? 'Controller step switch' : 'Controller select switch'}><Select disabled={active || busy} value={settings[key]} onValueChange={selectionValue => setSettings(value => ({ ...value, [key]: selectionValue }))}>
+          {(controller.controls || []).map((control: any) => <SelectOption key={control.id} value={control.id}>{control.label}</SelectOption>)}</Select></Field>)}</>
+        : (['stepKey', 'activateKey'] as const).map(key => <Field key={key} label={key === 'stepKey' ? 'Step key' : 'Select key'}><Select disabled={active || busy} value={settings[key]} onValueChange={selectionValue => setSettings(value => ({ ...value, [key]: selectionValue }))}>
+          {keys.map(code => <SelectOption key={code} value={code}>{code}</SelectOption>)}</Select></Field>)}
+      <Field label="Scan interval (ms)"><Input type="number" min={300} max={5000} step={100} disabled={active || busy} value={settings.intervalMs} onChange={event => setSettings(value => ({ ...value, intervalMs: Math.max(300, Math.min(5000, Number(event.target.value) || 300)) }))} /></Field>
+      <Field label="Switch debounce (ms)"><Input type="number" min={50} max={1000} step={10} disabled={active || busy} value={settings.debounceMs} onChange={event => setSettings(value => ({ ...value, debounceMs: Math.max(50, Math.min(1000, Number(event.target.value) || 50)) }))} /></Field>
       <p className="subtle">For sliders and choices, select the field, scan to decrease/previous or increase/next, then choose Finish editing. Text fields still need a text-entry device or the Windows on-screen keyboard.</p>
       {message && <Notice>{message}</Notice>}{error && <Notice tone="danger">{error}</Notice>}
     </Modal>
