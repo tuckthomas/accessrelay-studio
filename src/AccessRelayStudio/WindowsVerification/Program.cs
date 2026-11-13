@@ -42,6 +42,11 @@ if (args.Contains("--capture-only", StringComparer.Ordinal))
     CaptureCheck();
     return;
 }
+if (args.Contains("--gpu-capture-only", StringComparer.Ordinal))
+{
+    CaptureCheck(gpu: true);
+    return;
+}
 if (!args.Contains("--buffer-only", StringComparer.Ordinal))
 {
     DatasetChecks.Run();
@@ -94,7 +99,7 @@ static void BufferCheck()
     finally { Marshal.FreeHGlobal(mapped); }
 }
 
-static void CaptureCheck()
+static void CaptureCheck(bool gpu = false)
 {
     int apartment = Native.RoInitialize(1);
     Marshal.ThrowExceptionForHR(apartment);
@@ -128,11 +133,13 @@ static void CaptureCheck()
         Native.UpdateWindow(window);
         Native.SetTimer(window, 1, 16, 0);
         using var capture = new RemotePlayCapture();
-        capture.Start(window);
+        nint adapter = gpu ? CudaD3D11Interop.FindAdapter() : 0;
+        try { capture.Start(window, gpu, adapter); }
+        finally { if (adapter != 0) Marshal.Release(adapter); }
         using var first = WaitFrame(capture);
         long age = Stopwatch.GetTimestamp() - first.CaptureTicks;
         Check(age >= 0 && age < 5 * Stopwatch.Frequency, "Capture timestamp is not on the QPC timeline.");
-        Check(first.CompositorTicks > 0 && first.CaptureReadbackMs >= 0, "Capture lost original compositor metadata or readback timing.");
+        Check(first.CompositorTicks > 0 && (gpu ? first.CaptureReadbackMs is null : first.CaptureReadbackMs >= 0), "Capture lost original compositor metadata or readback timing.");
         Check(first.Width > 100 && first.Height > 100 && first.Pixels.Span.AnyNonzero(), "Captured pixels were empty.");
         int initialWidth = first.Width;
         long initialGeneration = first.SourceGeneration;
@@ -157,7 +164,7 @@ static void CaptureCheck()
         window = 0;
         Pump();
         Check(!capture.Status.IsRunning, "Closed window remained running.");
-        Console.WriteLine($"SUCCESS: WGC synthetic-window BGRA capture, QPC timestamps, resize, minimize/restore, close. Initial frame {initialWidth}x{first.Height}.");
+        Console.WriteLine($"SUCCESS: WGC {(gpu ? "NVIDIA GPU" : "CPU")} synthetic-window BGRA capture, QPC timestamps, resize, minimize/restore, close. Initial frame {initialWidth}x{first.Height}.");
         GC.KeepAlive(callback);
     }
     finally

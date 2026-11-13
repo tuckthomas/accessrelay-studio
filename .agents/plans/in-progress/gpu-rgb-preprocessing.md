@@ -74,7 +74,7 @@ Final tested code: `d9dd7fb958ef9ab3147d1f868411d95b77388270`.
       native lease/lifetime tests and existing Windows runtime regression checks.
 - [x] Provide an executable CUDA integration/parity probe and a concrete local
       hardware procedure, with explicit unavailable-device results rather than a pass.
-- [ ] On the intended NVIDIA Windows setup, verify D3D11/CUDA registration, actual
+- [x] On the intended NVIDIA Windows setup, verify D3D11/CUDA registration, actual
       device-bound inference parity, resize/Stop/source changes and bounded cleanup.
 - [ ] Measure matched CPU/GPU preprocessing runs, p95/p99 frame-to-decision time,
       transfers, preview/recording overhead and resource use. Retain CPU as the
@@ -197,3 +197,48 @@ Focused native verification passed: WGC capture/resize/minimize/restore/close an
 receipt/compositor separation; GPU leases including metadata reuse, shader parity,
 freeze handling and release. Live matched runs and live GPU lifecycle acceptance
 remain pending until measured with this correction.
+
+### First matched live observations — beta.16, 2026-11-13
+
+Source/app commit: `5d8059dc7d4e255e16da2618eeae8bd02b04ea16`. Both runs used
+the same untrained 160×160, four-frame fixture, CUDA inference, full-window crop,
+profile/settings fingerprint and windowed Chrome source at 1906×1025. Foreground
+fullscreen Chrome changed its captured height by one pixel on focus changes;
+those reset/short windows are retained separately and excluded from this pair.
+
+| Preparation | Total model decisions in stable context | Retained decision samples | Receipt → decision p95 | p99 |
+| --- | ---: | ---: | ---: | ---: |
+| CPU | 3,325 | 2,048 | 4.9171 ms | 5.4285 ms |
+| D3D11/CUDA | 4,554 | 2,048 | 2.9345 ms | 3.3442 ms |
+
+Both had zero excluded timing samples and no Gen0/1/2 collections in the retained
+window. Preview/recording image downloads were zero there. GPU freshness metadata
+was 32,768 bytes (16 per sample); GPU capture readback is unavailable, not a zero
+duration sample. CPU preparation p95/p99 was 0.6288/0.8040 ms; GPU preparation
+also includes synchronization and metadata readback and must not be interpreted
+as isolated shader time. Exact stages and resources are in the raw JSON.
+
+Native process CPU time over roughly 45-second resource samples was 10.375 CPU
+seconds with CPU preparation and 6.984375 with GPU preparation. Final working sets
+were about 1,086/1,120 MiB; private bytes about 1,339/1,391 MiB. These sequential
+samples include app activity and resource instrumentation. GPU utilization/memory
+from nvidia-smi is system-wide; it is not Studio-only usage.
+
+Evidence under `artifacts/GpuHardwareEvidence/`: `cpu-windowed-diagnostics.json`,
+`gpu-windowed-diagnostics.json`, their `*-resources.json` files, and
+`matched-live-summary.json`. Model manifest hash:
+`e9a67cde4aff4a78ca08e3aff34e346f60a68af3424424325adbc170709f8404`;
+settings fingerprint:
+`a700e3aba124771bf863744ba2098c3c6aba97415f3890738d71576b536eab5e`.
+
+The actual NVIDIA WGC capture lifecycle check passed bounded CPU/GPU lease metadata,
+resize (306×233 → 366×273), generation invalidation, minimize/restore and source
+close. The integration probe separately established actual CUDA tensor/inference
+parity. The installed app successfully started and stopped the real GPU path.
+
+This is one descriptive live pair, not repeated controlled trials, shooting accuracy,
+or Xbox render/input latency acceptance. Preview-on and recording overhead remain
+open, along with repeated runs on the eventual trained model. CPU remains default;
+GPU remains observation-only. The temporary benchmark model was deselected after
+measurement and is not a gameplay model. Training still requires actual footage,
+reviewed labels and independent validation.
