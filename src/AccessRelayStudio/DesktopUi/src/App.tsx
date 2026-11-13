@@ -11,6 +11,7 @@ import { TrainingJobsPanel } from './pages/TrainingJobsPanel';
 import { MarketplacePage } from './pages/MarketplacePage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
 import { currentTheme, saveTheme, type Theme } from './theme';
+import { SwitchNavigation } from './SwitchNavigation';
 
 type Page = 'workspace' | 'controller' | 'vision' | 'training' | 'voice' | 'marketplace' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
@@ -22,6 +23,7 @@ const navigation: { id: Page; label: string; icon: string }[] = [
   { id: 'marketplace', label: 'Marketplace', icon: 'store' }
 ];
 export function App() {
+  const [navigationRequest, setNavigationRequest] = useState(0);
   const [theme, setTheme] = useState<Theme>(currentTheme);
   useEffect(() => { void desktop.command('app.themeSet', { theme }).catch(() => {}); }, [theme]);
   const [page, setPage] = useState<Page>('workspace');
@@ -117,9 +119,11 @@ export function App() {
           navigate('training');
         }} />}
         {page === 'settings' && <SettingsPage state={{ ...state.settings, version: state.version, controller: state.controller }}
-          status={controllerStatus} command={appCommand} />}
+          status={controllerStatus} command={appCommand} openSwitchNavigation={() => setNavigationRequest(value => value + 1)} />}
       </div></main>
     </div>
+    <SwitchNavigation controller={state.controller || {}} status={controllerStatus} command={controllerCommand}
+      showLauncher={false} openRequest={navigationRequest} />
     {error && <div className="toast"><Notice tone="danger" announce={false}><div className="row"><span>{error}</span>
       <Button variant="ghost" className="icon-button" aria-label="Dismiss message" onClick={() => setError('')}><Icon name="x" size={16} /></Button></div></Notice></div>}
     <DiscardDialog open={pendingPage !== null} onKeep={() => setPendingPage(null)} onDiscard={() => { if (pendingPage) setPage(pendingPage); setPendingPage(null); }} />

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Select, SelectOption, Input, Button, Field, Modal, Notice, activeModal } from './ui';
-import { SwitchScanner, navigationEvents, type NavigationCursor, type NavigationSnapshot } from './switch-scanner';
+import { SwitchScanner, navigationEvents, type NavigationCursor, type NavigationSnapshot, type ScanEditable } from './switch-scanner';
 
 type Settings = { mode: 'automatic' | 'step'; source: 'keyboard' | 'controller'; intervalMs: number; debounceMs: number;
   stepKey: string; activateKey: string; step: string; activate: string };
@@ -20,14 +20,17 @@ function load(): Settings {
   return defaults;
 }
 
-export function SwitchNavigation({ controller, status, command }: { controller: any; status: any; command: (action: string, args?: any) => Promise<any> }) {
+export function SwitchNavigation({ controller, status, command, showLauncher = true, openRequest = 0 }: {
+  controller: any; status: any; command: (action: string, args?: any) => Promise<any>; showLauncher?: boolean; openRequest?: number;
+}) {
   const [settings, setSettings] = useState<Settings>(load), [open, setOpen] = useState(false), [active, setActive] = useState(false);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
-  const [editing, setEditing] = useState<HTMLInputElement | HTMLSelectElement | null>(null);
+  const [editing, setEditing] = useState<ScanEditable | null>(null);
   const [container, setContainer] = useState<Element>(document.body);
   const scanner = useRef<SwitchScanner | null>(null), nativeActive = useRef(false), mounted = useRef(true);
   const cursor = useRef<NavigationCursor>({ generation: -1, sequence: 0 });
   const anchor = useRef({ native: 0, browser: 0 });
+  useEffect(() => { if (openRequest > 0) setOpen(true); }, [openRequest]);
   const settingsRef = useRef(settings); settingsRef.current = settings;
   const args = (enabled: boolean) => ({ enabled, step: settingsRef.current.step, activate: settingsRef.current.activate, debounceMs: settingsRef.current.debounceMs });
   const stop = useCallback((reason = 'Switch navigation stopped.') => {
@@ -132,7 +135,7 @@ export function SwitchNavigation({ controller, status, command }: { controller: 
         <Button onClick={() => stop()}>Stop scanning</Button></>}
   </div>;
   return <>
-    <Button variant="ghost" onClick={() => setOpen(true)} aria-label="Switch navigation">Switch navigation</Button>
+    {showLauncher && <Button variant="ghost" onClick={() => setOpen(true)} aria-label="Switch navigation">Switch navigation</Button>}
     <Modal open={open} onClose={() => { if (!busy) setOpen(false); }} title="Switch navigation" description="Use one switch to select as focus moves, or two switches to step and select. F8 starts or stops; Escape stops scanning."
       footer={<><Button disabled={busy} onClick={() => setOpen(false)}>Close</Button>{active ? <Button onClick={() => stop()}>Stop scanning</Button> : <Button variant="primary" busy={busy} onClick={() => void start()}>Start scanning</Button>}</>}>
       <Field label="Scan mode"><Select disabled={active || busy} value={settings.mode} onValueChange={selectionValue => setSettings(value => ({ ...value, mode: selectionValue as Settings['mode'] }))}>

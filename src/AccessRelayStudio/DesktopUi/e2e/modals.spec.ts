@@ -2,14 +2,15 @@ import { expect, test } from '@playwright/test';
 
 test('modal wraps focus, blocks background focus and restores its opener', async ({ page }) => {
   await page.goto('/');
-  const opener = page.getByRole('button', { name: 'Help', exact: true });
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  const opener = page.getByRole('button', { name: 'Create controller profile', exact: true });
   await opener.click();
-  const dialog = page.getByRole('dialog', { name: 'Find your way around' });
+  const dialog = page.getByRole('dialog', { name: 'Create controller profile' });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toHaveAccessibleDescription('A few starting points for your workspace.');
+  await expect(dialog).toHaveAccessibleDescription('Give it a name you will recognize when you come back.');
   const first = dialog.getByRole('button', { name: 'Close dialog' });
-  const last = dialog.getByRole('button', { name: 'Got it' });
-  await expect(first).toBeFocused();
+  const last = dialog.getByRole('button', { name: 'Cancel' });
+  await first.focus();
   await page.keyboard.press('Shift+Tab');
   await expect(last).toBeFocused();
   await page.keyboard.press('Tab');
@@ -21,14 +22,15 @@ test('modal wraps focus, blocks background focus and restores its opener', async
   await expect(dialog).not.toBeVisible();
   await expect(opener).toBeFocused();
   await page.getByRole('button', { name: 'Controller', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Make the controls yours', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Controller', exact: true })).toBeVisible();
 });
 
 test('nested native request isolates the lower dialog and returns focus on dismissal', async ({ page }) => {
   await page.goto('/');
-  const opener = page.getByRole('button', { name: 'Help', exact: true });
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  const opener = page.getByRole('button', { name: 'Create controller profile', exact: true });
   await opener.click();
-  const help = page.getByRole('dialog', { name: 'Find your way around' });
+  const help = page.getByRole('dialog', { name: 'Create controller profile' });
   await expect(help.getByRole('button', { name: 'Close dialog' })).toBeFocused();
   // Simulate a host Close request while an existing dialog is open.
   await page.evaluate(async () => {
@@ -47,7 +49,7 @@ test('nested native request isolates the lower dialog and returns focus on dismi
   const close = page.getByRole('dialog', { name: 'Close Studio and discard unsaved work?' });
   await expect(close).toBeVisible();
   await expect(close.getByRole('button', { name: 'Close dialog' })).toBeFocused();
-  await page.locator('dialog').filter({ hasText: 'Find your way around' }).getByRole('button', { name: 'Got it', includeHidden: true }).evaluate(element => element.focus());
+  await page.locator('dialog').filter({ hasText: 'Create controller profile' }).getByRole('button', { name: 'Cancel', includeHidden: true }).evaluate(element => element.focus());
   await expect(close.getByRole('button', { name: 'Close dialog' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(close).not.toBeVisible();

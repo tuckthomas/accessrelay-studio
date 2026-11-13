@@ -9,8 +9,9 @@ test('hardware alerts remain accessible inside an isolating modal without replay
     await desktop.command('app.page', { page: 'workspace' });
   });
   await expect(page.getByRole('status', { name: 'Studio status updates' })).toHaveText('Controller connected.');
-  await page.getByRole('button', { name: 'Help', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Find your way around' });
+  await page.getByRole('button', { name: 'Controller', exact: true }).click();
+  await page.getByRole('button', { name: 'Create controller profile', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create controller profile' });
   await expect(dialog.getByRole('status', { name: 'Studio status updates' })).toBeEmpty();
   await page.evaluate(async () => {
     const { previewState, desktop } = await import('/src/api.ts');

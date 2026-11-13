@@ -55,7 +55,7 @@ test('task navigation remains usable at desktop widths without horizontal overfl
   await expect(page.getByText('Design preview — no hardware, capture or audio sessions are connected.')).toBeVisible();
   for (const width of [1100, 1440, 1700]) {
     await page.setViewportSize({ width, height: 930 });
-    for (const name of ['Workspace', 'Controller', 'Remote Play', 'Voice', 'Settings']) {
+    for (const name of ['Workspace', 'Controller', 'Live Gameplay', 'Model Training', 'Voice', 'Marketplace', 'Settings']) {
       await page.getByRole('complementary', { name: 'Main navigation' }).getByRole('button', { name, exact: true }).click();
       await expect(page.locator('main h1')).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
@@ -67,13 +67,13 @@ test('task navigation remains usable at desktop widths without horizontal overfl
 test('setup dialog works with keyboard and keeps the UI local in preview', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Controller', exact: true }).click();
-  await page.getByRole('button', { name: 'Create a controller profile' }).click();
-  const dialog = page.getByRole('dialog', { name: 'A setup of your own' });
+  await page.getByRole('button', { name: 'Create controller profile' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create controller profile' });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel('Profile name').fill('Keyboard setup');
   await dialog.getByLabel('Profile name').press('Enter');
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByLabel('Controller profile', { exact: true })).toHaveValue(/.+/);
+  await expect(page.getByRole('combobox', { name: 'Controller profile', exact: true })).toHaveAttribute('value', /.+/);
   await page.getByRole('tab', { name: 'Lua scripts 0' }).click();
   await expect(page.getByRole('heading', { name: 'Your script editor' })).toBeVisible();
 });
@@ -82,6 +82,6 @@ test('mapping primary action stays visible on a desktop window', async ({ page }
   await page.goto('/');
   await page.getByRole('button', { name: 'Controller', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Save mapping' })).toBeInViewport();
-  await expect(page.getByText('Use the sequence timing saved in this setup.')).toBeVisible();
+  await expect(page.getByText('Use the sequence timing saved in this profile.')).toBeVisible();
   await page.screenshot({ path: 'D:/AccessRelayStudio/DesignReview/controller-final.png', fullPage: false });
 });

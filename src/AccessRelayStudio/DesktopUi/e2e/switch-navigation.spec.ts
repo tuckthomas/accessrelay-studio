@@ -24,9 +24,9 @@ test('two-switch navigation opens pages, scopes to a modal, and exits without ac
   await press(page, 'F8');
   await expect(page.locator('.scan-target')).toHaveCount(1);
   await stepTo(page, 'Controller'); await press(page, 'Space');
-  await expect(page.getByRole('heading', { name: 'Make the controls yours' })).toBeVisible();
-  await stepTo(page, 'Help'); await press(page, 'Space');
-  const dialog = page.getByRole('dialog', { name: 'Find your way around' });
+  await expect(page.getByRole('heading', { name: 'Controller' })).toBeVisible();
+  await stepTo(page, 'Create controller profile'); await press(page, 'Space');
+  const dialog = page.getByRole('dialog', { name: 'Create controller profile' });
   await expect(dialog.locator('.scan-target')).toHaveCount(1);
   for (let count = 0; count < 5; count++) {
     await press(page, 'Enter'); await expect(dialog.locator('.scan-target')).toHaveCount(1);
@@ -58,13 +58,15 @@ test('switch scanning edits a slider and a choice without native popup or mouse 
   await expect(page.locator('[data-scan-editor]')).toHaveCount(0);
   await stepTo(page, 'Save smoothing'); await press(page, 'Space');
   await expect(page.getByText('Stick smoothing saved.', { exact: true })).toBeVisible();
-  const choice = page.getByLabel('Controller profile', { exact: true });
+  const choice = page.getByRole('combobox', { name: 'Controller profile', exact: true });
   for (let count = 0; count < 100 && !(await choice.evaluate(element => element.classList.contains('scan-target'))); count++) await press(page, 'Enter');
   await expect(choice).toHaveClass(/scan-target/); await press(page, 'Space');
   await stepTo(page, 'Increase / next'); await press(page, 'Space');
-  await expect(choice).toHaveValue('second-preview-setup');
-  await stepTo(page, 'Finish editing'); await press(page, 'Space');
-  await stepTo(page, 'Stop everything'); await press(page, 'Space');
+  await expect(choice).toHaveAttribute('value', 'second-preview-setup');
+  // Profile selection temporarily disables the picker while native state changes;
+  // that ends editing of the old context while the scanning ring remains usable.
+  await expect(page.locator('[data-scan-editor]')).toHaveCount(0);
+  await stepTo(page, 'Stop scanning'); await press(page, 'Space');
   await expect(page.locator('.scan-target')).toHaveCount(0);
 });
 
@@ -121,6 +123,7 @@ test('controller bridge preserves event order, ignores pre-activation snapshots 
     })));
     (window as any).navigationSend({ enabled: false, generation: 0, nowMs: 0, events: [] });
   });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Switch navigation', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Switch navigation' });
   await selectOption(dialog.getByLabel('Switch source'), 'controller');
@@ -135,7 +138,7 @@ test('controller bridge preserves event order, ignores pre-activation snapshots 
   await expect(page.locator('.scan-target')).toHaveCount(1);
   await page.evaluate(event => (window as any).navigationSend({ enabled: true, generation: 1, nowMs: 140,
     events: [event, { sequence: 2, timestampMs: 135, action: 'activate' }] }), step);
-  await expect(page.getByRole('heading', { name: 'Make the controls yours' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Controller' })).toBeVisible();
   await page.evaluate(() => (window as any).navigationSend({ enabled: true, generation: 1, nowMs: 180,
     events: [{ sequence: 4, timestampMs: 175, action: 'activate' }] }));
   await expect(page.locator('.scan-target')).toHaveCount(0);

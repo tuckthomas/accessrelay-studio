@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Badge, Button, Card, Icon, Notice, SectionHeader, type PageProps } from '../ui';
 import { AssistantPanel } from './AssistantPanel';
 
-export function SettingsPage({ state, command }: PageProps) {
+export function SettingsPage({ state, command, openSwitchNavigation }: PageProps & { openSwitchNavigation?: () => void }) {
   const [result, setResult] = useState(''); const [busy, setBusy] = useState('');
   const run = async (action: string) => { setBusy(action); setResult(''); try { const value = await command(action); setResult(typeof value === 'string' ? value : value?.message || 'Done.'); } catch {} finally { setBusy(''); } };
   const driver = state.driverAvailable ?? state.controller?.driverAvailable;
@@ -23,6 +23,9 @@ export function SettingsPage({ state, command }: PageProps) {
       </Card>
     </div>
     <AssistantPanel initial={state.assistant} command={command} />
+    <Card title="Switch and controller navigation" description="Navigate Studio with one or two switches. F8 starts or stops scanning; Escape stops it.">
+      <Button onClick={openSwitchNavigation}>Switch navigation</Button>
+    </Card>
     <Card title="About this Studio" description="A local workspace for controller input, gameplay capture and voice.">
       <div className="detail-list"><div className="detail-line"><span>Installed build</span><strong>{state.version || 'Local build'}</strong></div>
         <div className="detail-line"><span>Platform</span><span>{state.platform || 'Windows x64'}</span></div>

@@ -28,8 +28,8 @@ test('co-pilot requires different participants, preserves owners and stays off b
   await page.getByRole('button', { name: 'Controller', exact: true }).click();
   await page.getByRole('tab', { name: 'Accessibility', exact: true }).click();
   await expect(enabled).toBeChecked();
-  await expect(page.getByLabel('Left stick owner', { exact: true })).toHaveValue('strongest');
+  await expect(page.getByLabel('Left stick owner', { exact: true })).toHaveAttribute('value', 'strongest');
   await enabled.click(); await save.click();
   await expect(page.getByText('Co-pilot disabled.', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Primary controller', { exact: true })).toHaveValue('physical-a');
+  await expect(page.getByLabel('Primary controller', { exact: true })).toHaveAttribute('value', 'physical-a');
 });

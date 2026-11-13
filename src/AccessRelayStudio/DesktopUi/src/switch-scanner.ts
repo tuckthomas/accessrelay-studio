@@ -33,11 +33,12 @@ function available(element: HTMLElement) {
 
 /** DOM focus is the single scanning cursor; changes to a dialog or controls are
  * resolved before every step/activation so detached controls cannot be clicked. */
+export type ScanEditable = HTMLInputElement | HTMLSelectElement | HTMLButtonElement;
 export class SwitchScanner {
   private target: HTMLElement | null = null;
-  private editing: HTMLInputElement | HTMLSelectElement | null = null;
+  private editing: ScanEditable | null = null;
   private observer: MutationObserver;
-  constructor(private scope: () => Element, private onEdit: (field: HTMLInputElement | HTMLSelectElement | null) => void) {
+  constructor(private scope: () => Element, private onEdit: (field: ScanEditable | null) => void) {
     this.observer = new MutationObserver(() => this.refresh());
     this.observer.observe(document.body, { childList: true, subtree: true, attributes: true,
       attributeFilter: ['disabled', 'hidden', 'open', 'inert', 'aria-hidden', 'aria-disabled', 'class', 'style'] });
@@ -68,21 +69,24 @@ export class SwitchScanner {
     const targets = this.targets();
     if (!this.target || !targets.includes(this.target)) { this.refresh(); return; }
     const target = this.target;
-    if (target instanceof HTMLSelectElement || (target instanceof HTMLInputElement && ['range', 'number'].includes(target.type))) {
-      this.editing = target; this.onEdit(target); return;
+    if (target instanceof HTMLSelectElement || target.matches('[data-scan-choice]') || (target instanceof HTMLInputElement && ['range', 'number'].includes(target.type))) {
+      this.editing = target as ScanEditable; this.onEdit(this.editing); return;
     }
     target.click();
   }
   adjust(direction: -1 | 1) {
     const field = this.editing;
     if (!field || !available(field) || !this.scope().contains(field)) { this.finishEditing(); return; }
+    if (field instanceof HTMLButtonElement && field.matches('[data-scan-choice]')) {
+      field.dispatchEvent(new CustomEvent('accessrelay-select-adjust', { detail: direction })); return;
+    }
     if (field instanceof HTMLSelectElement) {
       const options = [...field.options].filter(option => !option.disabled && !option.hidden && !option.closest('optgroup:disabled'));
       if (!options.length) return;
       const current = options.findIndex(option => option.value === field.value);
       const next = options[(current + direction + options.length) % options.length];
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(field, next.value);
-    } else {
+    } else if (field instanceof HTMLInputElement) {
       const step = Number(field.step) > 0 ? Number(field.step) : 1;
       const min = field.min === '' ? 0 : Number(field.min), max = field.max === '' ? 100 : Number(field.max);
       const next = Math.min(max, Math.max(min, (Number(field.value) || 0) + direction * step));
