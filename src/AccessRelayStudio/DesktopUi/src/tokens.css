@@ -1,6 +1,7 @@
 :root {
   color-scheme: light;
-  --navy: #173b54;
+  --brand-navy: #173b54;
+  --navy: var(--brand-navy);
   --mint: #98f9c3;
   --ivory: #fbf7ee;
   --ink: #213441;
@@ -14,7 +15,8 @@
   --line-strong: #80929e;
   --accent: #276c55;
   --on-accent: #ffffff;
-  --button-secondary-bg: #173b54;
+  --button-secondary-bg: var(--brand-navy);
+  --button-secondary-border: var(--brand-navy);
   --button-secondary-hover: #244f67;
   --button-secondary-text: #ffffff;
   --button-subtle-bg: #d4f2e2;
@@ -32,7 +34,7 @@
   --nav-active: #173b54;
   --nav-active-text: #fbf7ee;
   --icon-bg: #dfeae6;
-  --state-off-bg: #173b54;
+  --state-off-bg: var(--brand-navy);
   --state-off-text: #ffffff;
   --state-off-border: #173b54;
   --state-off-hover: #244f67;
@@ -72,9 +74,10 @@
   --line-strong: #788d9c;
   --accent: #87dfb8;
   --on-accent: #122c24;
-  --button-secondary-bg: #b8d7e8;
-  --button-secondary-hover: #d4e7f2;
-  --button-secondary-text: #173b54;
+  --button-secondary-bg: var(--brand-navy);
+  --button-secondary-border: var(--line-strong);
+  --button-secondary-hover: #244f67;
+  --button-secondary-text: #ffffff;
   --button-subtle-bg: #25483e;
   --button-subtle-hover: #315d50;
   --button-subtle-border: #75ba99;
@@ -89,10 +92,10 @@
   --selected-border: #7bd0a7;
   --nav-active: #244f67;
   --icon-bg: #2b413c;
-  --state-off-bg: #254f6a;
-  --state-off-text: #e8f3fa;
-  --state-off-border: #6a98b7;
-  --state-off-hover: #2f607e;
+  --state-off-bg: var(--brand-navy);
+  --state-off-text: #ffffff;
+  --state-off-border: var(--line-strong);
+  --state-off-hover: #244f67;
   --switch-off: var(--state-off-bg);
   --switch-knob: #11171d;
   --neutral-bg: #334451;
