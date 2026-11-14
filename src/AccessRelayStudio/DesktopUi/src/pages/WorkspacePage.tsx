@@ -41,9 +41,9 @@ export function WorkspacePage({ state, status, command, navigate }: {
     const start = !active[feature], operation = ++operations.current[feature];
     setPending(value => ({ ...value, [feature]: start ? 'start' : 'stop' }));
     try {
-      const method = feature === 'controller' ? 'controller.' + (start ? 'outputStart' : 'outputStop')
+      const method = feature === 'controller' ? 'controller.' + (start ? 'scriptsSet' : 'outputStop')
         : feature + '.' + (start ? 'start' : 'stop');
-      await command(method, feature === 'vision' && start ? { loadModel: !!state.vision?.selectedModelId } : undefined);
+      await command(method, feature === 'controller' && start ? { enabled: true } : feature === 'vision' && start ? { loadModel: !!state.vision?.selectedModelId } : undefined);
     } catch { /* The shared command handler presents the native error. */ }
     finally {
       if (operations.current[feature] === operation) setPending(value => ({ ...value, [feature]: null }));

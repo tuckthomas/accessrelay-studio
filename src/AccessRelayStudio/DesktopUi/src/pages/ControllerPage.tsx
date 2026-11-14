@@ -34,6 +34,7 @@ export function ControllerPage({ state, status, command }: PageProps) {
   const [nextAction, setNextAction] = useState<(() => void) | null>(null);
   const transition = (action: () => void) => { if (hasUnsavedChanges()) setNextAction(() => action); else action(); };
   const profile = state.activeProfile || {}, live = status || state.status || {}, devices = live.devices || state.devices || [];
+  const connectingOutput = !live.outputActive && (!!live.isStarting || busy === 'scriptsSet');
   const act = async (action: string, args?: any) => { setBusy(action); setError(''); try { return await command(action, args); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); throw e; } finally { setBusy(''); } };
   const perform = (action: string, args?: any) => { void act(action, args).catch(() => {}); };
@@ -50,9 +51,9 @@ export function ControllerPage({ state, status, command }: PageProps) {
         <SelectOption value="">Choose a controller</SelectOption>{live.coPilot?.enabled && !devices.some((device: any) => device.id === live.selectedDeviceId) && <SelectOption value={live.selectedDeviceId}>Primary controller unavailable</SelectOption>}{devices.map((device: any) => <SelectOption key={device.id} value={device.id}>{device.name}</SelectOption>)}</Select>
       <Button variant="ghost" className="icon-button" busy={busy === 'deviceRefresh'} title="Refresh controllers" aria-label="Refresh controllers" onClick={() => perform('deviceRefresh')}><Icon name="refresh" size={18} /></Button></div>
       <Badge tone={live.connected ? 'success' : 'neutral'}>{live.connected ? 'Input connected' : 'No input'}</Badge><div className="split-divider" />
-      <Toggle label="Sequences" checked={!!live.scriptsEnabled} disabled={!live.connected || !!live.training || !!live.recording?.isRecording} onChange={enabled => perform('scriptsSet', { enabled })} />
-      <Button variant={live.outputActive ? 'secondary' : 'primary'} busy={busy === 'outputStart' || !!live.isStarting} disabled={!live.outputActive && !live.connected}
-        onClick={() => perform(live.outputActive ? 'outputStop' : 'outputStart')}><Icon name="power" size={17} />{live.outputActive ? 'Disconnect output' : 'Connect output'}</Button>
+      {live.outputActive && <Toggle label="Run scripts" checked={!!live.scriptsEnabled} disabled={!!busy || !live.connected || !!live.training || !!live.recording?.isRecording} onChange={enabled => perform('scriptsSet', { enabled })} />}
+      <Button variant={live.outputActive || connectingOutput ? 'secondary' : 'primary'} aria-busy={connectingOutput || undefined} disabled={!live.outputActive && !connectingOutput && (!!busy || !live.connected || !!live.training || !!live.recording?.isRecording)}
+        onClick={() => live.outputActive || connectingOutput ? perform('outputStop') : perform('scriptsSet', { enabled: true })}><Icon name="power" size={17} />{live.outputActive ? 'Stop controller' : connectingOutput ? 'Cancel connection' : 'Start controller'}</Button>
     </div>
     {!state.driverAvailable && <Notice tone="warning" title="One-time device setup">Open Settings to install the virtual device driver before connecting output.</Notice>}
     {live.training && <Notice tone="warning">Gameplay training is recording manual input. Finish that clip before changing controller profiles or sequences.</Notice>}
@@ -191,7 +192,7 @@ function MappingEditor({ state, status, command, openSequences }: PageProps & { 
         {!!profile.luaScripts?.length && <optgroup label="Your Lua scripts">{profile.luaScripts.map((item: any) => <SelectOption key={item.id} value={'lua:' + item.id}>{item.name}</SelectOption>)}</optgroup>}</Select></Field>
       <Toggle label="Use this mapping" checked={draft.enabled !== false} disabled={status.training} onChange={enabled => setDraft({ ...draft, enabled })} />
       {!/^(small|large)/.test(selected) && draft.script !== 'passthrough' && <Toggle label="Replace the physical press" description="Run the sequence without also passing this button press to the game." checked={!!draft.consume} disabled={status.training} onChange={consume => setDraft({ ...draft, consume })} />}
-      {draft.script !== 'passthrough' && <p className="subtle">Runs with <strong>Sequences</strong> enabled and controller output connected.</p>}
+      {draft.script !== 'passthrough' && <p className="subtle">{!status.outputActive ? 'Start controller to use this mapping.' : !status.scriptsEnabled ? 'Scripts are paused. Turn on Run scripts to use this mapping.' : 'Runs when you press this control.'}</p>}
       {draft.script !== 'passthrough' && <Button variant="ghost" onClick={openSequences}><Icon name="sliders" size={17} />Edit sequence timing<Icon name="arrowRight" size={16} /></Button>}
       {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
       <div className="editor-actions"><span className="saved-note">{saved ? 'All changes saved' : 'Unsaved changes'}</span><Button disabled={saved || busy} onClick={() => setDraft(binding)}>Reset</Button>

@@ -103,7 +103,20 @@ describe('controller workflows', () => {
     render(<ControllerPage state={state} status={state.status} command={command} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Input & response' }));
     expect(command).not.toHaveBeenCalled();
-    expect((screen.getByRole('button', { name: /Connect output/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Start controller' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+  it('starts output and mapped scripts with one action, and keeps pausing scripts separate from stopping the controller', async () => {
+    const state = setup(), command = vi.fn().mockResolvedValue(null);
+    const { rerender } = render(<ControllerPage state={state} status={{ ...state.status, connected: true, outputActive: false }} command={command} />);
+    expect(screen.queryByLabelText('Run scripts')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Start controller' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('scriptsSet', { enabled: true }));
+    expect(command.mock.calls.some(([action]) => action === 'outputStart')).toBe(false);
+    rerender(<ControllerPage state={state} status={{ ...state.status, connected: true, outputActive: true, scriptsEnabled: true }} command={command} />);
+    fireEvent.click(screen.getByLabelText('Run scripts'));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('scriptsSet', { enabled: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop controller' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('outputStop', undefined));
   });
   it('saves the selected mapping using the native command shape', async () => {
     const state = setup(), command = vi.fn().mockResolvedValue(null);

@@ -273,10 +273,10 @@ internal sealed class DesktopControllerService : IDesktopModule
                     await StartOutputAsync();
                     ObjectDisposedException.ThrowIf(_disposed, this);
                     RequireNoTraining();
-                    if (!Runtime.HasOutput) throw new InvalidOperationException("Connect controller output before enabling sequences.");
+                    if (!Runtime.HasOutput) throw new InvalidOperationException("Controller output could not connect. Scripts remain paused.");
                 }
                 Runtime.SetScriptsEnabled(args.Flag("enabled"));
-                _notice = args.Flag("enabled") ? "Controller sequences are enabled." : "Controller sequences are paused.";
+                _notice = args.Flag("enabled") ? "Controller output is connected and mapped scripts are enabled." : "Scripts are paused. Manual controller input still passes through.";
                 break;
             case "profileSelect":
                 RequireEditable(); SelectProfile(_store.Load(args.Id())); break;

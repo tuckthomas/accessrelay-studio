@@ -20,15 +20,15 @@ describe('dashboard controls and resource use', () => {
     expect(screen.queryByText('Everything has its own space.')).toBeNull();
     expect(screen.queryByText('Your PC is the workspace.')).toBeNull();
   });
-  it('starts the chosen feature with saved settings and never arms vision or enables scripts', async () => {
+  it('starts the chosen feature, includes mapped scripts for the controller, and never arms vision', async () => {
     const props = fixture(); render(<WorkspacePage {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Controller output', exact: true }));
-    await waitFor(() => expect(props.command).toHaveBeenCalledWith('controller.outputStart', undefined));
+    await waitFor(() => expect(props.command).toHaveBeenCalledWith('controller.scriptsSet', { enabled: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Live Gameplay capture', exact: true }));
     await waitFor(() => expect(props.command).toHaveBeenCalledWith('vision.start', { loadModel: false }));
     fireEvent.click(screen.getByRole('button', { name: 'Voice processing', exact: true }));
     await waitFor(() => expect(props.command).toHaveBeenCalledWith('voice.start', undefined));
-    expect(props.command.mock.calls.map(([method]) => method).sort()).toEqual(['controller.outputStart', 'vision.start', 'voice.start']);
+    expect(props.command.mock.calls.map(([method]) => method).sort()).toEqual(['controller.scriptsSet', 'vision.start', 'voice.start']);
   });
   it('stops live features even if their original devices and source are unavailable', async () => {
     const props = fixture(); props.status.controller = { ...props.status.controller, connected: false, outputActive: true };
