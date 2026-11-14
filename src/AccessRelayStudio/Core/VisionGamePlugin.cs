@@ -11,6 +11,12 @@ public interface IVisionCaptureProfile : ITrainingCaptureProfile
     string ConfigurationFingerprint { get; }
     string AnimationProfile { get; }
     string AnalysisPolicy => "plugin-regions-v1";
+    IVisionLivePredictor? CreateLivePredictor(VisionSettings settings) => null;
+    void ValidateLiveAssistance(VisionSettings settings) { }
+    object? DescribeLiveAssistance(VisionSettings settings) => null;
+    JsonElement ConfigureLiveAssistance(VisionSettings current, JsonElement proposed) => proposed.Clone();
+    JsonElement ApplyLiveCalibration(VisionSettings settings, JsonElement feedback,
+        VisionActionReceipt receipt, VisionSignalObservation observation) => throw new NotSupportedException("This plugin has no live calibration workflow.");
     object ExportProfile();
     void ValidateCapture(VisionTrainingCaptureSettings settings);
     IReadOnlyList<VisionEvidenceRegion> EvidenceRegions(VisionSettings settings);

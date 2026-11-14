@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json.Serialization;
+using System.Text.Json;
 
 namespace EliteScriptStudio.Core;
 
@@ -24,6 +25,8 @@ public sealed record VisionSettings
     public string ModelManifestPath { get; init; } = "";
     public string AnimationProfile { get; init; } = "Default";
     public string CameraView { get; init; } = "";
+    public JsonElement? PluginAssistance { get; init; }
+    public string CaptureSourceKey { get; init; } = "";
     public VisionExecutionProvider ExecutionProvider { get; init; } = VisionExecutionProvider.Cuda;
     public VisionPreprocessingBackend PreprocessingBackend { get; init; } = VisionPreprocessingBackend.Cpu;
     [JsonIgnore]
@@ -55,6 +58,10 @@ public sealed record VisionSettings
         Crop.Validate();
         if (TrainingCapture is null) throw new InvalidDataException("Training capture settings are missing.");
         TrainingCapture.Validate();
+        if (CaptureSourceKey is null || CaptureSourceKey.Length > 128 || CaptureSourceKey.Any(char.IsControl))
+            throw new InvalidDataException("The capture source identity is invalid.");
+        if (PluginAssistance is { } configuration && (configuration.ValueKind != JsonValueKind.Object || configuration.GetRawText().Length > 65536))
+            throw new InvalidDataException("Plugin assistance settings must be an object of at most 64 KiB.");
         if (!Enum.IsDefined(ExecutionProvider))
             throw new InvalidDataException("Choose CPU or CUDA as the inference backend.");
         if (!Enum.IsDefined(PreprocessingBackend) || (PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda && ExecutionProvider != VisionExecutionProvider.Cuda))

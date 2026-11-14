@@ -11,7 +11,7 @@ namespace EliteScriptStudio.Desktop;
 /// <summary>Desktop presentation adapter. Capture, inference and controller arbitration remain in their native workers.</summary>
 internal sealed class DesktopVisionService : IDesktopModule
 {
-    private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt, long SourceCaptureTicks, VisionRegionObservation? Tracking);
+    private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt, long SourceCaptureTicks, VisionRegionObservation? Tracking, VisionSignalObservation? Signal = null);
     private sealed record FrozenImage(string Token, PreviewImage Image, string SourceId, Guid ProfileId, string Fingerprint, VisionSettings Settings, VisionSettings? PreviousSettings = null, VisionSettings? AutomaticProposal = null);
     private Task? _areaDetection;
     private sealed record CalibrationProposal(string Token, VisionCalibrationImport Import, VisionCalibrationEstimate Estimate,
@@ -83,6 +83,7 @@ internal sealed class DesktopVisionService : IDesktopModule
             selectedProfile = _profile?.ExportProfile(), selectedFingerprint = _profile?.ConfigurationFingerprint,
             sources = _sources.Select(s => new { id = SourceId(s), s.Title, s.ProcessId }), selectedSourceId = _selectedSourceId,
             settings = _settings, cameraViews = _plugin?.CameraViews ?? [],
+            assistance = _profile?.DescribeLiveAssistance(_settings),
             models = _models.Select(m => new { id = ModelId(m), name = m.DisplayName, version = m.ModelVersion,
                 compatible = m.IsCompatible, evidenceAccepted = m.EvidenceAccepted, m.Status }),
             selectedModelId = selectedModel is null ? "" : ModelId(selectedModel), modelScanComplete = _modelScanComplete,
@@ -112,10 +113,11 @@ internal sealed class DesktopVisionService : IDesktopModule
             stopping = _session?.IsStopping == true, output = _runtime()?.VisionStatus,
             training = _session?.TrainingSnapshot, performance = _performance, comparison,
             tracking = preview?.Tracking ?? _session?.Tracking,
+            signal = _session?.Signal, lastAction = _runtime()?.LastVisionAction,
             captureProposal = AutomaticProposal(),
             trainingJob = _trainingJob.Snapshot,
             preview = preview is null ? null : new { url = "https://media.accessrelay.test/vision/preview?v=" + preview.Sequence,
-                sequence = preview.Sequence, sourceWidth = preview.SourceWidth, sourceHeight = preview.SourceHeight }
+                sequence = preview.Sequence, sourceWidth = preview.SourceWidth, sourceHeight = preview.SourceHeight, signal = preview.Signal }
         };
     }
 
@@ -241,6 +243,34 @@ internal sealed class DesktopVisionService : IDesktopModule
                     _settings = edited; _calibration = null; SaveSettings(); _version++;
                     await RefreshModelsAsync(); _notice = "Vision settings saved."; return null;
                 case "settingsExport": return await ExportSettingsAsync();
+                case "signalConfigure":
+                {
+                    RequireStopped();
+                    var candidate = _settings with { PluginAssistance = (_profile ?? throw new InvalidOperationException("Choose a saved game profile first."))
+                            .ConfigureLiveAssistance(_settings, args.GetProperty("configuration")),
+                        PreprocessingBackend = VisionPreprocessingBackend.Cpu,
+                        EstimatedVideoDelayMs = args.GetProperty("videoDelayMs").GetDouble(),
+                        EstimatedInputDelayMs = args.GetProperty("inputDelayMs").GetDouble(),
+                        CorrectionMs = args.GetProperty("correctionMs").GetDouble(),
+                        MinimumConfidence = args.GetProperty("minimumConfidence").GetDouble(),
+                        MaximumUncertaintyMs = args.GetProperty("maximumUncertaintyMs").GetDouble(),
+                        ShootButton = args.GetProperty("shootButton").Read<ControlId>() };
+                    candidate.Validate();
+                    (_profile ?? throw new InvalidOperationException("Choose a saved game profile first.")).ValidateLiveAssistance(candidate);
+                    _settings = candidate; SaveSettings(); _version++; _notice = "Assistance configuration saved. Output remains disarmed."; return null;
+                }
+                case "signalFeedback":
+                {
+                    if (_runtime()?.VisionStatus.Armed == true) throw new InvalidOperationException("Disable assistance before saving calibration feedback.");
+                    var receipt = _runtime()?.LastVisionAction ?? throw new InvalidOperationException("Complete a calibration action first.");
+                    var signal = _session?.Signal ?? throw new InvalidOperationException("No capture observation is available.");
+                    var configuration = (_profile ?? throw new InvalidOperationException("Choose a saved game profile first."))
+                        .ApplyLiveCalibration(_settings, args.GetProperty("feedback"), receipt, signal);
+                    _settings = _settings with { PluginAssistance = configuration }; _settings.Validate();
+                    // Persist the result without reconfiguring an active session. Its immutable predictor
+                    // changes on the next explicit Start; saving feedback never starts or arms output.
+                    _settingsStore.Save(_settingsProfile, _settings); _notice = "Calibration feedback saved."; return null;
+                }
                 case "settingsImport": return await ImportSettingsAsync(version, cancellation);
                 case "modelRefresh": await RefreshModelsAsync(); return null;
                 case "modelImport":
@@ -267,7 +297,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                 case "armedSet":
                     bool armed = args.Flag("armed");
                     if (armed && _session?.Status.CanArm != true)
-                        throw new InvalidOperationException("A compatible model with accepted accuracy and hardware evidence must be running before assistance can be armed.");
+                        throw new InvalidOperationException("Start a calibrated predictor, explicit calibration trial, or validated model before enabling assistance.");
                     if (_runtime()?.SetVisionArmed(armed) != true && armed)
                         throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
                     return null;
@@ -376,7 +406,13 @@ internal sealed class DesktopVisionService : IDesktopModule
     {
         if (_trainingJob.Running) throw new InvalidOperationException("Stop the offline training job before starting gameplay capture.");
         RequireStopped(); RefreshSources(); var source = SelectedSource();
-        if (loadModel)
+        string process;
+        try { using var owner = Process.GetProcessById(checked((int)source.ProcessId)); process = owner.ProcessName; }
+        catch { process = source.ProcessId.ToString(); }
+        _settings = _settings with { CaptureSourceKey = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(process + "\n" + source.Title))) };
+        var predictor = _profile?.CreateLivePredictor(_settings);
+        if (loadModel && predictor is null)
         {
             var plugin = RequirePlugin();
             if (_settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst)
@@ -396,8 +432,11 @@ internal sealed class DesktopVisionService : IDesktopModule
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
         var captureProvider = _settings.ExecutionProvider;
-        _session.Start(source.Hwnd, _settings, loadModel, _profile?.CreateRegionTracker(_settings, models => new VisionAnalysisModels(models, captureProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id)))); _lastObservedSourceId = _selectedSourceId;
-        _notice = loadModel && _settings.ModelManifestPath.Length != 0
+        try { _session.Start(source.Hwnd, _settings, loadModel, predictor is null ? _profile?.CreateRegionTracker(_settings,
+            models => new VisionAnalysisModels(models, captureProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id))) : null, predictor); }
+        catch { predictor?.Dispose(); throw; }
+        _lastObservedSourceId = _selectedSourceId;
+        _notice = loadModel && (predictor is not null || _settings.ModelManifestPath.Length != 0)
             ? "Preparing live analysis. Assistance remains disarmed until you arm it."
             : "Preview is live. Frames are not being saved.";
     }
@@ -416,7 +455,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                     var media = DesktopVisionBitmap.Encode(preview.Pixels, preview.Width, preview.Height, preview.Stride);
                     lock (_mediaGate)
                         if (!_disposed && version == _version)
-                            Volatile.Write(ref _preview, new(media, preview.Sequence, preview.Width, preview.Height, Stopwatch.GetTimestamp(), preview.CaptureTicks, preview.Tracking));
+                            Volatile.Write(ref _preview, new(media, preview.Sequence, preview.Width, preview.Height, Stopwatch.GetTimestamp(), preview.CaptureTicks, preview.Tracking, preview.Signal));
                 }
                 finally { Interlocked.Exchange(ref _encodingPreview, 0); }
             }

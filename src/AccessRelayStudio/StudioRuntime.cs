@@ -154,11 +154,14 @@ internal sealed class StudioRuntime : IDisposable
         }
     }
 
-    public void ConfigureVision(VisionSettings settings)
+    public void ConfigureVision(VisionSettings settings, VisionControllerAction? action = null)
     {
-        lock (_sync) { _feedback?.Stop(); _vision.Configure(settings); }
+        lock (_sync) { _feedback?.Stop(); _vision.Configure(settings, action); }
         _releaseScheduler.Signal();
     }
+
+    public VisionActionReceipt? LastVisionAction { get { lock (_sync) return _vision.LastAction; } }
+    public long LatestInputTimestamp => Volatile.Read(ref _latestInputSampleTicks);
 
     public long BeginVisionSession()
     {
@@ -418,6 +421,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void DisconnectOutput(string status = "Virtual output off")
     {
+        _vision.ClearActionReceipt();
         _inputNeedsNeutral |= _input.CoPilotSettings.Enabled;
         _lastReleaseFeedback = _vision.Status.AutomatedReleases;
         if (_navigation.Enabled) { _navigation.Stop(); _navigationNeedsNeutral = true; }
@@ -585,6 +589,9 @@ internal sealed class StudioRuntime : IDisposable
     private bool VisionMacroConflict()
     {
         if (_navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral || _voiceCommands.Enabled) return true;
+        // Right-axis input does not activate an idle digital-button binding. Any
+        // running sequence still suspends the vision owner before output composition.
+        if (_vision.Action.Kind == VisionActionKind.RightStickStroke) return _engine.Status.IsActive;
         if (_visionProfile.StickyControls.Contains(_vision.Settings.ShootButton)) return true;
         if (!_engine.ScriptsEnabled) return false;
         var binding = _visionProfile.GetBinding(_vision.Settings.ShootButton);

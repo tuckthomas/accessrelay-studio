@@ -17,7 +17,7 @@ internal sealed class InstalledGamePlugins(string directory, Func<string, string
         id = item.Vision.Id, packageId = item.Pack.Manifest.Id, version = item.Pack.Manifest.Version,
         uiModule = BaseUrl(item.Pack) + item.Pack.Manifest.Runtime!.UiEntry
     }).ToArray();
-    internal static bool Supports(GamePackManifest manifest) => manifest is { SchemaVersion: 2, ApiVersion: 2, Runtime.ContractVersion: 1 };
+    internal static bool Supports(GamePackManifest manifest) => manifest is { SchemaVersion: 2, ApiVersion: 2, Runtime.ContractVersion: >= 1 and <= 2 };
     private static string BaseUrl(GamePackDefinition pack) => "https://plugins.accessrelay.test/plugins/" + pack.Manifest.Id + "/" + pack.ManifestSha256 + "/";
 
     internal void Reload()

@@ -4,6 +4,8 @@ using System.Text.Json;
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Vision;
 
+if (args is ["--meter-scheduler"]) { MeterSchedulingChecks.Run(); return; }
+
 if (args is ["--import-observation-model", var importManifest, var importSettings])
 {
     var manifest = VisionModelManifest.Read(importManifest).Manifest;
