@@ -1,0 +1,28 @@
+AccessRelay Studio capture model notices
+
+These unmodified pretrained model artifacts are redistributed under the
+Apache License, Version 2.0. A copy is included as LICENSE.txt.
+
+pose.onnx
+  RTMO-t, body7, 416x416, OpenMMLab/MMPose.
+  Copyright 2018-2020 Open-MMLab. All rights reserved.
+  Source: https://github.com/open-mmlab/mmpose/tree/main/projects/rtmo
+  License: https://github.com/open-mmlab/mmpose/blob/main/LICENSE
+  Official ONNX archive: rtmo-t_8xb32-600e_body7-416x416-f48f75cb_20231219.zip
+  Distributed archive entry: end2end.onnx, renamed pose.onnx without alteration.
+
+text-det.onnx and text-rec.onnx
+  English PP-OCRv3 mobile detector and PP-OCRv4 mobile recognizer.
+  Upstream PaddleOCR model weights: Baidu and the PaddleOCR rights holders.
+  Copyright (c) 2021 RapidAI. All rights reserved.
+  PaddleOCR source: https://github.com/PaddlePaddle/PaddleOCR
+  PaddleOCR license: https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE
+  ONNX distribution: https://github.com/RapidAI/RapidOCR
+  Model redistribution terms: https://github.com/RapidAI/RapidOCR#license
+  RapidOCR license: https://github.com/RapidAI/RapidOCR/blob/main/LICENSE
+  Pinned distribution revision: RapidAI/RapidOCR on ModelScope, v3.10.0.
+  Files are renamed without alteration. Exact source URLs and SHA-256 hashes
+  are included in models.json and scripts/Install-NbaCaptureModels.ps1.
+
+AccessRelay Studio does not claim authorship or ownership of these weights.
+They supply generic person/pose and text detection, not a trained NBA shot model.

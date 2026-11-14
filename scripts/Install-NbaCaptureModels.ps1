@@ -4,6 +4,7 @@ param(
     [string]$CacheDirectory = (Join-Path $PSScriptRoot '../artifacts/AutoCaptureModels')
 )
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 $cacheRoot = [IO.Path]::GetFullPath($CacheDirectory)
 $modelRoot = Join-Path ([IO.Path]::GetFullPath($InstallDirectory)) 'CaptureModels/nba2k27-automatic-v1'
 New-Item -ItemType Directory -Force -Path $cacheRoot,$modelRoot | Out-Null
@@ -14,7 +15,12 @@ $assets = @(
 )
 foreach ($asset in $assets) {
     $file = Join-Path $cacheRoot $asset.Name
-    if (-not (Test-Path -LiteralPath $file)) { Invoke-WebRequest -Uri $asset.Url -OutFile $file }
+    if (-not (Test-Path -LiteralPath $file)) {
+        $download = $file + '.' + [guid]::NewGuid().ToString('N') + '.download'
+        Invoke-WebRequest -Uri $asset.Url -OutFile $download
+        if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $asset.Hash) { throw "Capture download hash mismatch: $($asset.Name)" }
+        Move-Item -LiteralPath $download -Destination $file -Force
+    }
     if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $asset.Hash) { throw "Capture asset hash mismatch: $($asset.Name)" }
 }
 $archive = [IO.Compression.ZipFile]::OpenRead((Join-Path $cacheRoot 'rtmo-t.zip'))
@@ -31,4 +37,16 @@ if ((Get-FileHash -LiteralPath (Join-Path $cacheRoot 'pose.onnx')).Hash -ne '20a
 foreach ($name in @('pose.onnx','text-det.onnx','text-rec.onnx')) { Copy-Item -LiteralPath (Join-Path $cacheRoot $name) -Destination (Join-Path $modelRoot $name) -Force }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../docs/capture-models.md') -Destination (Join-Path $modelRoot 'NOTICE.md') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../docs/third-party/capture-models-APACHE-2.0.txt') -Destination (Join-Path $modelRoot 'LICENSE.txt') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../docs/third-party/capture-models-NOTICE.txt') -Destination (Join-Path $modelRoot 'THIRD-PARTY-NOTICES.txt') -Force
+$manifest = @{
+    schemaVersion = 1
+    modelSet = 'nba2k27-automatic-v1'
+    license = 'Apache-2.0'
+    files = @(
+        @{ name = 'pose.onnx'; source = $assets[0].Url; archiveEntry = 'end2end.onnx'; sha256 = '20aad6e2e42359cac1c5b4a0b2da00e29bfe91a72a782fdcf287d273a04c1b24' },
+        @{ name = 'text-det.onnx'; source = $assets[1].Url; sha256 = $assets[1].Hash },
+        @{ name = 'text-rec.onnx'; source = $assets[2].Url; sha256 = $assets[2].Hash }
+    )
+}
+[IO.File]::WriteAllText((Join-Path $modelRoot 'models.json'), ($manifest | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 Write-Output "SUCCESS: verified pose/OCR assets installed in $modelRoot"

@@ -278,3 +278,18 @@ proposal, not movement/occlusion or multi-camera court acceptance. The user's
 exact game build/patch is pending before saving the capture profile. Artifacts:
 `artifacts/AutoCaptureModels/live22-reviewed-regions.json` and
 `AccessRelayStudio-Beta/TrainingResults/acquisition-20261114-021524-e8f690a3`.
+
+## Bundled models and numbered game revision
+
+The user rejected substituting a dated "latest online update" label for a game
+version. No such label was saved. The official NBA 2K27 Steam announcement lists
+patch v2.0 for Xbox Series X|S; its source is retained separately from the console's
+installed package version, which must be read from File info. Published patch and
+observed package build must not be silently treated as the same measurement.
+
+Beta.23 makes normal `dotnet publish` include the existing, hash-pinned RTMO-t and
+English PP-OCRv3/v4 ONNX weights, approximately 35.7 MiB. The app distribution also
+includes the Apache-2.0 license, model-specific notices and a source/hash manifest.
+The publishing machine uses the existing M: cache; end users receive the models
+inside the application. These remain generic acquisition models and are not a
+trained NBA release model. No game-specific controls move into the global shell.

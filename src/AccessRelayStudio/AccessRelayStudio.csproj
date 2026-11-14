@@ -10,7 +10,7 @@
     <AssemblyTitle>AccessRelay Studio Beta</AssemblyTitle>
     <Description>Assistive controller input and voice access for Windows</Description>
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
-    <Version>1.9.0-beta.22</Version>
+    <Version>1.9.0-beta.23</Version>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -82,6 +82,11 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
+  <Target Name="BundleCaptureModels" AfterTargets="Publish">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Install-NbaCaptureModels.ps1&quot; -InstallDirectory &quot;$([System.IO.Path]::GetFullPath('$(PublishDir).'))&quot; -CacheDirectory &quot;$(MSBuildProjectDirectory)\..\..\artifacts\AutoCaptureModels&quot;" />
+    <Error Condition="!Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\pose.onnx') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\text-det.onnx') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\text-rec.onnx') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\LICENSE.txt') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\THIRD-PARTY-NOTICES.txt') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\models.json')"
+           Text="Published capture models or redistribution notices are missing." />
+  </Target>
   <Target Name="PublishAssistantBridge" AfterTargets="Publish">
     <MSBuild Projects="../AccessRelayStudio.Mcp/AccessRelayStudio.Mcp.csproj" Targets="Restore;Publish"
              Properties="Configuration=$(Configuration);TargetFramework=net10.0;RuntimeIdentifier=win-x64;SelfContained=true;PublishDir=$([MSBuild]::EnsureTrailingSlash('$(PublishDir)'))Mcp/" />
