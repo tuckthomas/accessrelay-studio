@@ -111,6 +111,9 @@ internal sealed class DesktopVisionService : IDesktopModule
             sources = _sources.Select(source => new { id = SourceId(source), source.Title, source.ProcessId }),
             selectedSourceId = _selectedSourceId, captureLayoutConfirmed = _settings.TrainingCapture.Configured,
             stopping = _session?.IsStopping == true, output = _runtime()?.VisionStatus,
+            controllerConnection = new { connected = _runtime()?.HasOutput == true,
+                inputConnected = _runtime()?.Latest?.Input.IsConnected == true,
+                message = _runtime()?.Latest?.OutputStatus ?? "Controller output is off." },
             training = _session?.TrainingSnapshot, performance = _performance, comparison,
             tracking = preview?.Tracking ?? _session?.Tracking,
             signal = _session?.Signal, lastAction = _runtime()?.LastVisionAction,
@@ -245,7 +248,8 @@ internal sealed class DesktopVisionService : IDesktopModule
                 case "settingsExport": return await ExportSettingsAsync();
                 case "signalConfigure":
                 {
-                    RequireStopped();
+                    bool resume = args.Flag("restart") && _session?.Status.Running == true;
+                    if (!resume) RequireStopped();
                     var candidate = _settings with { PluginAssistance = (_profile ?? throw new InvalidOperationException("Choose a saved game profile first."))
                             .ConfigureLiveAssistance(_settings, args.GetProperty("configuration")),
                         PreprocessingBackend = VisionPreprocessingBackend.Cpu,
@@ -257,12 +261,23 @@ internal sealed class DesktopVisionService : IDesktopModule
                         ShootButton = args.GetProperty("shootButton").Read<ControlId>() };
                     candidate.Validate();
                     (_profile ?? throw new InvalidOperationException("Choose a saved game profile first.")).ValidateLiveAssistance(candidate);
-                    _settings = candidate; SaveSettings(); _version++; _notice = "Assistance configuration saved. Output remains disarmed."; return null;
+                    if (resume)
+                    {
+                        if (_session?.IsRecordingTraining == true) throw new InvalidOperationException("Finish the recording before changing assistance settings.");
+                        _session?.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
+                    }
+                    RequireStopped();
+                    _settings = candidate; SaveSettings(); _version++;
+                    if (resume) Start(loadModel: true);
+                    _notice = "Assistance configuration saved. Output remains disarmed."; return null;
                 }
                 case "signalFeedback":
                 {
                     if (_runtime()?.VisionStatus.Armed == true) throw new InvalidOperationException("Disable assistance before saving calibration feedback.");
                     var receipt = _runtime()?.LastVisionAction ?? throw new InvalidOperationException("Complete a calibration action first.");
+                    if ((args.TryGetProperty("receiptId", out var expectedId) && expectedId.GetInt64() != receipt.Id)
+                        || (args.TryGetProperty("runId", out var expectedRun) && expectedRun.GetString() != receipt.RunId))
+                        throw new InvalidOperationException("A newer shot completed. Enter feedback for the latest shot.");
                     var signal = _session?.Signal ?? throw new InvalidOperationException("No capture observation is available.");
                     var configuration = (_profile ?? throw new InvalidOperationException("Choose a saved game profile first."))
                         .ApplyLiveCalibration(_settings, args.GetProperty("feedback"), receipt, signal);
@@ -293,7 +308,11 @@ internal sealed class DesktopVisionService : IDesktopModule
                     SaveSettings(); _calibration = null; return null;
                 }
                 case "start": Start(args.Flag("loadModel", true)); return null;
-                case "connectOutput": await _connectOutput(); return null;
+                case "connectOutput":
+                    await _connectOutput();
+                    if (_runtime()?.HasOutput != true) throw new InvalidOperationException("Controller output did not connect. Check the controller page for the device error.");
+                    _notice = "Controller output is connected.";
+                    return new { connected = true, message = _notice };
                 case "armedSet":
                     bool armed = args.Flag("armed");
                     if (armed && _session?.Status.CanArm != true)
