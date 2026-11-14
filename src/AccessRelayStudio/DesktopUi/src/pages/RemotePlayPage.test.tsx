@@ -46,7 +46,7 @@ it('does not require an installed game plugin and locks selection during capture
 it('keeps training and assistance on separate plugin surfaces', () => {
   const command = vi.fn().mockResolvedValue(null);
   const view = render(<VisionPage state={{ ...state, selectedPluginId: 'nba2k27' }} status={{}} command={command} mode="training" />);
-  expect(screen.getByRole('heading', { name: 'AI Model Training' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Model Training' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Record training clip' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: 'Live analysis' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Detach' })).toBeNull();

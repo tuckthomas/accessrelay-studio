@@ -16,6 +16,6 @@
   activity lights, navigation switches, slogans or emergency action buttons there.
 - Marketplace catalog/packages belong in the separate `accessrelay-marketplace`
   repository. The app consumes that catalog and validates the existing pack API.
-- Live Gameplay hosts capture and live assistance; AI Model Training hosts recording,
+- Live Gameplay hosts capture and live assistance; Model Training hosts recording,
   clip review and offline jobs. Keep game-specific UI in plugins. Detachment reuses
   the native session; do not start another capture or inference worker for a preview.

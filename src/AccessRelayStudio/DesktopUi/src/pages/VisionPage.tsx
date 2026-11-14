@@ -23,7 +23,7 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
   }
   const choose = (action: string, id: string) => { if (hasUnsavedChanges()) setPending({ action, id }); else void run(action, { id }); };
   return <div className="page-stack remote-play-page">
-    <SectionHeader title={mode === 'training' ? 'AI Model Training' : 'Live Gameplay'} actions={<Field label={mode === 'training' ? 'Training plugin' : 'Game plugin'}><Select aria-label={mode === 'training' ? 'Training plugin' : 'Game plugin'} disabled={locked || working}
+    <SectionHeader title={mode === 'training' ? 'Model Training' : 'Live Gameplay'} actions={<Field label={mode === 'training' ? 'Training plugin' : 'Game plugin'}><Select aria-label={mode === 'training' ? 'Training plugin' : 'Game plugin'} disabled={locked || working}
       value={pluginId} onValueChange={selectionValue => choose('pluginSelect', selectionValue)}>
       <SelectOption value="">None</SelectOption>{plugins.map((plugin: any) => <SelectOption key={plugin.id} value={plugin.id}>{plugin.name}</SelectOption>)}
     </Select></Field>} />

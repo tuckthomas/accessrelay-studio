@@ -3,7 +3,7 @@
 Delivered in 1.9.0-beta.13 (2026-11-12).
 
 - Live Gameplay: window selection, live preview, model selection, assistance and timing diagnostics.
-- AI Model Training: training-clip recording, capture areas, clip review and offline dataset/job management.
+- Model Training: training-clip recording, capture areas, clip review and offline dataset/job management.
 - NBA-specific profiles, HUD regions and release controls remain in the bundled NBA plugin adapter. The platform live page can capture other games without that plugin.
 - Detach opens one independent native window, movable between monitors. Bring back or closing that window returns the preview to the main app without stopping the session.
 - Both windows share the existing capture/inference service and WebView2 environment. The inline image is hidden while detached; no second capture or model worker starts.

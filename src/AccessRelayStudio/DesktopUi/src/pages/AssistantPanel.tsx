@@ -30,7 +30,7 @@ export function AssistantPanel({ initial, command }: { initial: any; command: (a
       <p className="subtle">Access starts off each time Studio opens. Your assistant client can share returned information with its own AI provider. This connection exposes no raw audio or screenshots and cannot activate controllers, capture, speech or models.</p>
       {!panel?.bridgeAvailable && <Notice tone="warning">Open the complete published app to include the assistant bridge and rehearsal worker.</Notice>}
       <Toggle label="Allow configuration drafts" description="Drafts can be rehearsed and proposed. You review and apply them here; the assistant cannot apply them." checked={drafts} onChange={setDrafts} />
-      <Toggle label="Allow offline training workflows" description="Use only datasets and tools you register in AI Model Training. Jobs use CPU and keep new models observation-only." checked={offline} onChange={setOffline} />
+      <Toggle label="Allow offline training workflows" description="Use only datasets and tools you register in Model Training. Jobs use CPU and keep new models observation-only." checked={offline} onChange={setOffline} />
       <Field label="Access duration"><Select value={minutes} onValueChange={selectionValue => setMinutes(Number(selectionValue))}>
         {[15, 30, 60].map(value => <SelectOption key={value} value={value}>{value} minutes</SelectOption>)}</Select></Field>
       <div className="row"><Button variant="primary" disabled={!panel?.bridgeAvailable} busy={busy === 'assistantConfigure'}
