@@ -70,3 +70,20 @@ seeded update reproducibility, controlled position-preservation and ONNX CPU num
 parity. A six-job synthetic training/export/evaluation smoke run and actual C# CPU
 inference also passed. Those synthetic results establish tooling/contract operation,
 not an architecture winner, gameplay accuracy or hardware latency improvement.
+
+## Recorded-window native probe
+
+`tools/vision/Verification` also accepts
+`--recorded-window <manifest> <float32-tensor> <cpu|cuda> <installed-runtime-root>`.
+The runtime root explicitly selects the installed app's ONNX DLL rather than a
+Windows/system copy. The tensor must exactly match the manifest's fixed input
+shape. This observation-only probe loads the C# adapter, checks arming remains
+blocked and measures 100 native calls after 10 warmups with reusable tensors.
+Its JSON binds the model/input hashes and reports median/p95/p99 with host
+transfers. Capture, tracking, preprocessing, stream latency and controller delivery
+are excluded; this is not hardware acceptance.
+
+`--import-observation-model <manifest> <saved-vision-settings>` uses the same
+bounded, hash-checked model-library importer as the desktop app. It requires a
+matching saved profile/camera and a manifest without release-validation evidence.
+It does not select a live source, start inference or arm controller output.

@@ -292,7 +292,8 @@ new game-specific inference tasks still require a compatible typed adapter.
       integrity-bound reviews; never remove markers to bypass compatibility checks.
 - [ ] Verify actual meter exclusion/label quality and held-out independence on reviewed gameplay.
 - [x] Test conversion and rejection paths with synthetic fixtures and the actual CLI.
-- [ ] Exercise real reviewed clips before claiming usable gameplay training.
+- [x] Exercise real reviewed clips through conversion, training, ONNX export and
+      validation; usable gameplay timing remains a separate unpassed acceptance.
 - [ ] Push independent improvements and record section commit SHAs here.
 
 Implementation commits: provenance guard `26866553388b539a973c541c91d4307f76f1b04f`;
@@ -316,6 +317,14 @@ The trainer and evaluator record/check RGB frame/window hashes independently of
 session IDs and reject reused configuration-reference footage. These exact checks
 cannot detect every transformation and do not replace source review. Prerequisites: reviewed
 source clips for functional training validation.
+
+2026-11-14 real-footage checkpoint: three provisional Push-phase training shots,
+separate meter-off reference/validation, two RTX 2070 training runs and an imported
+observation-only candidate. The candidate runs in the C# CPU/CUDA adapters but
+its 56.53 ms validation MAE fails release-timing acceptance. Exact target labels,
+untouched held-out accuracy, varied gameplay and controller latency remain open.
+See `training-plugin-and-player-tracking.md` and the
+[plugin-owned results](https://github.com/tuckthomas/accessrelay-marketplace/blob/main/docs/nba2k27-first-candidate.md).
 
 ## 11. Measured model experiments
 

@@ -508,10 +508,10 @@ Next steps:
       and review. This is planned, not implemented or accuracy-validated. It
       avoids feeding meter pixels into the candidate when the full player
       rectangle overlaps the HUD; preserve the existing RGB workflow separately.
-- [ ] Obtain two distinct meter-off clips with the original `Stretch Big`
+- [x] Obtain two distinct meter-off clips with the original `Stretch Big`
       profile, unchanged animation/camera and feedback enabled: configuration
       reference and separate validation. The user will do this next session.
-- [ ] Review target game-phase labels and shot coverage, then train/export the
+- [x] Review target game-phase estimates and shot coverage, then train/export the
       first observation-only candidate. Keep training/validation footage separate;
       held-out accuracy and actual controller timing remain separate acceptance.
 - [ ] Investigate occasional capture-consumer stalls using the new stage timings.
@@ -544,3 +544,62 @@ Evidence is under `artifacts/CourtBoundary/`: `before.json`, `after.json`,
 `focused-check.log` and the native build logs. Beta.27 publication/installation
 receipts will be stored there. The Marketplace package contract is unchanged;
 this is an implementation fix in its reviewed NBA adapter.
+
+### First trained observation candidate — 2026-11-14
+
+The two required meter-off takes are saved: `take-20261114-141849-a4255d2b`
+is the separate configuration reference; `take-20261114-143025-77aebd12`
+is validation. The reference is excluded from training/evaluation. The validation
+take has 597 source frames and zero writer/sequence drops; its prepared viewer
+retains 542 player frames. The reference has 21 writer drops and is not used as
+timing validation. Preserve originals and incomplete tails.
+
+Visual review marked three meter-on Push-phase estimates and one independent
+meter-off estimate, with matching negative intervals. These are provisional
+animation labels with a 40 ms annotation allowance, not established green-window
+centers. Some geometrically accepted crops visibly included the meter; those
+frames were excluded. Converted inputs are limited to reviewed intervals and
+temporal history cannot cross interval boundaries. Original source data remains
+hash-bound and unchanged. The planned pose-input model above remains unimplemented;
+this first candidate uses reviewed clean RGB crops with the existing native contract.
+
+Two actual RTX 2070 training runs completed. The second uses 4 frames at nominal
+16.67 ms spacing, 160×160 RGB, an ordered head, 80 epochs, 37 training windows
+from three shots and 23 validation windows from one separate shot. A training-only
+timing prior and revised loss scale improved descriptive validation MAE from
+94.28 to 56.53 ms; p95 is 98.04 ms. Zero predictions meet the release limits.
+Overlapping windows are not independent trials; validation was reused for a
+diagnostic adjustment and no untouched held-out set exists.
+
+The actual exported weights loaded through the C# CPU and CUDA adapters with
+`CanArm=false`. On the same recorded preprocessed window, 100 repetitions after
+10 warmups measured CPU median/p95 1.223/1.478 ms and CUDA 0.547/0.685 ms. These
+exclude capture, pose/OCR, preprocessing, Remote Play and controller delivery.
+Model accuracy is the limiting result here, not the measured ONNX execution cost.
+
+Candidate `Stretch Big - Push phase pilot 2` is imported into the model library
+and matches the saved meter-off profile and camera. The running UI still has its
+unfinished draft open; it was retained rather than discarded. Refresh/reopen the
+model list after resolving that draft. No automatic release or new gameplay
+recording was started by this work. Application beta.28 remains installed.
+
+Local job and evidence:
+`AccessRelayStudio-Beta/TrainingResults/push-phase-calibrated-20261114-150905/`.
+The folder name describes an offline training adjustment, not physical latency
+calibration. It contains annotation review, hash-bound conversion proof, training
+logs, original and named manifests, validation reports, recorded input provenance,
+CPU/CUDA receipts and model-library import receipt. Raw footage, custom weights
+and per-user labels stay local. Public implementation/results belong to
+[the separate plugin repository](https://github.com/tuckthomas/accessrelay-marketplace/blob/main/docs/nba2k27-first-candidate.md).
+
+Plugin implementation/results/package 1.1.1 are pushed in Marketplace commit
+`fe9bec2d82b8e33bcaaf1c928e602a0b99c41914`. This publishes the training fixes;
+the running app's loaded plugin was not replaced during its open unsaved review.
+
+Remaining acceptance:
+- [ ] Establish verified ideal target phases/label precision rather than treating
+      an approximate visual Push transition as the hidden green-window center.
+- [ ] Add enough varied, independent shots and negatives for useful timing accuracy;
+      retain a genuinely untouched held-out group before evaluating it.
+- [ ] Validate side-facing/crowded player association, movement categories, contests,
+      hardware delays and controller timing before considering automatic release.

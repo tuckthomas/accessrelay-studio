@@ -4,6 +4,24 @@ using System.Text.Json;
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Vision;
 
+if (args is ["--import-observation-model", var importManifest, var importSettings])
+{
+    var manifest = VisionModelManifest.Read(importManifest).Manifest;
+    if (manifest.Validation is not null) throw new InvalidDataException("This import command only accepts observation-only models.");
+    var settings = new VisionSettingsStore().Import(importSettings);
+    if (settings.AnimationProfile != manifest.AnimationProfile || settings.CameraView != manifest.CameraConfiguration)
+        throw new InvalidDataException("The saved profile and camera must match this model before importing.");
+    var imported = new VisionModelLibrary().Import(importManifest, settings);
+    Console.WriteLine(JsonSerializer.Serialize(imported, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+    return;
+}
+
+if (args is ["--recorded-window", var windowManifest, var windowTensor, var windowProvider, var windowRuntime])
+{
+    RecordedWindowProbe.Run(windowManifest, windowTensor, windowProvider, windowRuntime);
+    return;
+}
+
 if (args is ["--gpu-fixture", var manifestPath])
 {
     GpuFixture(manifestPath);
