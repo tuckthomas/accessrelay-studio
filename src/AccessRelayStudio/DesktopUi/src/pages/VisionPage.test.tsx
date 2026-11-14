@@ -15,8 +15,8 @@ function fixture(overrides: any = {}) {
     sources: [{ id: 'window-one', title: 'Xbox Remote Play', processId: 100 }, { id: 'window-two', title: 'Another Remote Play window', processId: 200 }],
     selectedSourceId: 'window-one', models: [], modelScanComplete: true,
     settings: { executionProvider: 'cuda', shootButton: 'x', minimumConfidence: .9, crop: all, trainingCapture: {
-      configured: false, evidenceMode: 'sceneFirst', sourceWidth: 1920, sourceHeight: 1080, gameplayRegion: all, meterRegion: { left: .1, top: .1, width: .1, height: .3 },
-      feedbackRegion: { left: .1, top: .1, width: .4, height: .1 }, purpose: 'meterSupervisedTraining', hudName: 'Prior HUD', gameBuild: '', shotCategory: 'Mixed / unclassified' } },
+      configured: false, evidenceMode: 'anchored', sourceWidth: 1920, sourceHeight: 1080, gameplayRegion: all, meterRegion: { left: .1, top: .1, width: .1, height: .3 },
+      feedbackRegion: { left: .1, top: .1, width: .4, height: .1 }, pluginConfiguration: { player: { left: .4, top: .3, width: .2, height: .5 }, meter: { left: .1, top: .1, width: .1, height: .3 }, court: [{ x: .05, y: .4 }, { x: .95, y: .4 }, { x: .99, y: .99 }, { x: .01, y: .99 }] }, purpose: 'meterSupervisedTraining', hudName: 'Prior HUD', gameBuild: 'synthetic-build', shotCategory: 'Mixed / unclassified' } },
     status: { session: null, stopping: false, training: null, notice: 'Choose your source.' }, ...overrides };
 }
 
@@ -62,8 +62,8 @@ describe('vision workflows', () => {
     const record = screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement;
     expect(record.closest('.vision-preview-head')).toBeTruthy();
     expect(record.disabled).toBe(true);
-    expect(record.getAttribute('title')).toBe('Mark the gameplay scene and feedback panel before recording.');
-    expect(document.getElementById(record.getAttribute('aria-describedby')!)?.textContent).toBe('Mark the gameplay scene and feedback panel before recording.');
+    expect(record.getAttribute('title')).toBe('Configure the NBA capture anchors before recording.');
+    expect(document.getElementById(record.getAttribute('aria-describedby')!)?.textContent).toBe('Configure the NBA capture anchors before recording.');
     view.rerender(<VisionPage mode="training" state={state} status={{ session: { running: true }, busy: true,
       training: { hasTake: true, isRecording: true, isFinalized: false, storedFrames: 42 } }} command={command} />);
     const stop = screen.getByRole('button', { name: 'Stop training clip recording' }) as HTMLButtonElement;
@@ -80,7 +80,7 @@ describe('vision workflows', () => {
     view.rerender(<VisionPage mode="training" state={{ ...state, selectedSourceId: 'window-two', settings: { ...state.settings,
       trainingCapture: { ...state.settings.trainingCapture, configured: false } } }} status={state.status} command={command} />);
     expect((screen.getByRole('button', { name: 'Record a clip' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Mark capture areas' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Configure capture anchors' }) as HTMLButtonElement).disabled).toBe(false);
     expect(command.mock.calls.some(([action]) => ['start', 'recordStart', 'connectOutput', 'armedSet'].includes(action))).toBe(false);
   });
 
@@ -131,23 +131,30 @@ describe('vision workflows', () => {
       sourceHeight: 1440, player: all, layout: state.settings.trainingCapture };
     const command = vi.fn(async (action: string) => action === 'freeze' ? frozen : null);
     render(<VisionPage mode="training" state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Mark capture areas' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure capture anchors' }));
     const dialog = await screen.findByRole('dialog', { name: 'Choose what your clip keeps' });
     const save = within(dialog).getByRole('button', { name: 'Save capture areas' }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.click(within(dialog).getByText('Keyboard / precise coordinates'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Use these coordinates' }));
     expect(save.disabled).toBe(true);
-    expect(within(dialog).getByText('1 of 2 areas marked')).toBeTruthy();
-    expect(within(dialog).queryByRole('button', { name: 'Mark Player area' })).toBeNull();
-    expect(within(dialog).queryByRole('button', { name: 'Mark Shot meter area' })).toBeNull();
+    expect(within(dialog).getByText('1 of 5 areas marked')).toBeTruthy();
+    for (const area of ['Player anchor', 'Meter anchor']) {
+      fireEvent.click(within(dialog).getByRole('button', { name: `Mark ${area} area` }));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Use these coordinates' }));
+    }
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark Court anchor area' }));
+    fireEvent.click(within(dialog).getByText('Keyboard / court coordinates'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Use court corners' }));
+    expect(save.disabled).toBe(true);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Mark Shot feedback area' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Use these coordinates' }));
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
     await waitFor(() => expect(command).toHaveBeenCalledWith('layoutSave', expect.objectContaining({ token: 'frozen-frame',
-      layout: expect.objectContaining({ sourceWidth: 2560, sourceHeight: 1440, configured: true, evidenceMode: 'sceneFirst', meterRegion: null,
-        feedbackRegion: state.settings.trainingCapture.feedbackRegion }), player: all })));
+      layout: expect.objectContaining({ sourceWidth: 2560, sourceHeight: 1440, configured: true, evidenceMode: 'anchored', meterRegion: state.settings.trainingCapture.meterRegion,
+        pluginConfiguration: expect.objectContaining({ playerAnchor: 'torso-appearance-v1', meterAnchor: 'player-relative-region-v1', courtAnchor: 'floor-homography-v1', court: state.settings.trainingCapture.pluginConfiguration.court }),
+        feedbackRegion: state.settings.trainingCapture.feedbackRegion }), player: state.settings.trainingCapture.pluginConfiguration.player })));
   });
 
   it('preserves partially marked capture areas and HUD text when the user keeps editing', async () => {
@@ -155,18 +162,18 @@ describe('vision workflows', () => {
       sourceWidth: 2560, sourceHeight: 1440, player: all, layout: state.settings.trainingCapture };
     const command = vi.fn(async (action: string) => action === 'freeze' ? frozen : null);
     const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Mark capture areas' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Configure capture anchors' }));
     const editor = await screen.findByRole('dialog', { name: 'Choose what your clip keeps' });
     fireEvent.change(within(editor).getByRole('textbox', { name: 'HUD layout name' }), { target: { value: '  My unfinished HUD  ' } });
     fireEvent.click(within(editor).getByText('Keyboard / precise coordinates'));
     fireEvent.click(within(editor).getByRole('button', { name: 'Use these coordinates' }));
-    expect(within(editor).getByText('1 of 2 areas marked')).toBeTruthy();
+    expect(within(editor).getByText('1 of 5 areas marked')).toBeTruthy();
     fireEvent.click(within(editor).getByRole('button', { name: 'Cancel' }));
     expect(await screen.findByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     view.rerender(<VisionPage mode="training" state={{ ...state, settings: { ...state.settings } }} status={{ session: null, busy: false }} command={command} />);
     expect((within(editor).getByRole('textbox', { name: 'HUD layout name' }) as HTMLInputElement).value).toBe('  My unfinished HUD  ');
-    expect(within(editor).getByText('1 of 2 areas marked')).toBeTruthy();
+    expect(within(editor).getByText('1 of 5 areas marked')).toBeTruthy();
     expect(hasUnsavedChanges()).toBe(true);
     expect(command).toHaveBeenCalledTimes(1);
   });

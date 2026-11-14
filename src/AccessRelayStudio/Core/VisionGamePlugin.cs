@@ -13,6 +13,10 @@ internal interface IVisionCaptureProfile : ITrainingCaptureProfile
     object ExportProfile();
     void ValidateCapture(VisionTrainingCaptureSettings settings);
     IReadOnlyList<VisionEvidenceRegion> EvidenceRegions(VisionSettings settings);
+    IVisionRegionTracker? CreateRegionTracker(VisionSettings settings) => null;
+    VisionTrainingCaptureSettings ConfigureCapture(VisionTrainingCaptureSettings settings, ReadOnlySpan<byte> referenceBitmap) => settings;
+    bool ReferenceTriggered(ControllerState input) => false;
+    int ReferenceDelayMs => 0;
 }
 
 internal sealed record VisionEvidenceRegion(string Name, string File, int Width, int Height, VisionCrop Crop);
@@ -23,6 +27,7 @@ internal interface IVisionGamePlugin
     string Id { get; }
     string Name { get; }
     string OutputContract { get; }
+    string? TrainingWorkflowFile => null;
     IReadOnlyList<string> CameraViews { get; }
     IReadOnlyList<IVisionCaptureProfile> Profiles { get; }
     IVisionCaptureProfile? SelectedProfile { get; }

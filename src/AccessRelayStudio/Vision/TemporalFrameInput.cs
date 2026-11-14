@@ -28,11 +28,13 @@ internal sealed class CpuTemporalFrameInput(VisionModelManifest manifest, Vision
     {
         if (history.Length != checked(_frameLength * manifest.HistoryLength) || historyIndex < 0 || historyIndex >= manifest.HistoryLength)
             throw new InvalidDataException("The temporal RGB storage or write index is invalid.");
-        if (_plan is null || _plan.SourceWidth != frame.Width || _plan.SourceHeight != frame.Height)
+        if (frame.PlayerCrop is null && (_plan is null || _plan.SourceWidth != frame.Width || _plan.SourceHeight != frame.Height))
             _plan = new(frame.Width, frame.Height, settings.Crop, manifest.InputWidth, manifest.InputHeight, manifest.RgbMean, manifest.RgbStandardDeviation);
         if (shiftHistory) history.AsSpan(_frameLength).CopyTo(history);
         var current = history.AsSpan(historyIndex * _frameLength, _frameLength);
-        _plan.Fill(frame.Pixels.Span, frame.Stride, current);
+        if (frame.PlayerCrop is { } tracked)
+            FramePreprocessor.FillRgb(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride, tracked, manifest.InputWidth, manifest.InputHeight, manifest.RgbMean, manifest.RgbStandardDeviation, current);
+        else _plan!.Fill(frame.Pixels.Span, frame.Stride, current);
         bool changed = !_hasPrevious || !current.SequenceEqual(_previous);
         if (changed) { current.CopyTo(_previous); _hasPrevious = true; }
         return changed;

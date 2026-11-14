@@ -59,7 +59,53 @@ internal static class TrainingPluginChecks
         byte[] scene = File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "scene.bgra"));
         Check(scene[0] == 0 && scene[63 * 4] == 63 && scene[64 * 4] == 1 && scene[127 * 4] == 64,
             "Full scene or synchronized frame pixels were lost.");
+        AnchoredRoundTrip(root, profile);
         Console.WriteLine($"SUCCESS: installation gating, unsupported-adapter rejection, scene geometry, persistence and actual scene writer. Evidence: {root}");
+    }
+    private static void AnchoredRoundTrip(string root, Nba2K27ShotProfile profile)
+    {
+        var player = new VisionCrop(.2, .2, .2, .4);
+        var config = new Nba2K27CaptureConfiguration { Player = player, Meter = new(.7, .25, .1, .3),
+            Court = [new(.05, .4), new(.95, .4), new(.99, .99), new(.01, .99)],
+            ReferenceWidth = 256, ReferenceHeight = 256, ReferenceGray = new byte[65536] };
+        var settings = VisionSettings.Default with { Crop = player, TrainingCapture = new() { Configured = true,
+            SourceWidth = 64, SourceHeight = 64, EvidenceMode = VisionEvidenceMode.Anchored, GameBuild = "synthetic-build",
+            MeterRegion = config.Meter, FeedbackRegion = new(.5, .02, .3, .1),
+            PluginConfiguration = JsonSerializer.SerializeToElement(config, Nba2K27CaptureConfiguration.Json) } };
+        var store = new VisionSettingsStore(Path.Combine(root, "anchor-settings")); store.Save(profile.Id, settings);
+        Check(Nba2K27CaptureConfiguration.Read(store.Load(profile.Id).TrainingCapture.PluginConfiguration).ReferenceGray.Length == 65536,
+            "The saved visual reference failed to reload after exceeding the legacy 32 KiB settings bound.");
+        var pixels = new byte[64 * 64 * 4];
+        for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+        { int i = (y * 64 + x) * 4; pixels[i] = (byte)x; pixels[i + 1] = (byte)y; pixels[i + 3] = 255; }
+        using var recorder = new VisionTrainingRecorder(root, profile, settings, "Synthetic tracked scene");
+        for (int i = 0; i < 2; i++)
+        {
+            var region = player with { Left = player.Left + i * .2 };
+            using var frame = new CapturedVisionFrame(pixels, 64, 64, Stopwatch.GetTimestamp(), i + 1, 1, () => { }) { PlayerCrop = region };
+            var tracking = new VisionRegionObservation(i + 1, true, region, config.Meter, config.Court, .95, "Synthetic");
+            recorder.Capture(frame, default, tracking);
+            var manifest = new VisionModelManifest { InputWidth = 32, InputHeight = 32, HistoryLength = 2 };
+            var history = new float[2 * 3 * 32 * 32];
+            new CpuTemporalFrameInput(manifest, settings, history).PrepareFrame(frame, 0, false);
+            var expected = new float[3 * 32 * 32];
+            FramePreprocessor.FillRgb(pixels, 64, 64, 256, region, 32, 32, manifest.RgbMean, manifest.RgbStandardDeviation, expected);
+            Check(history.AsSpan(0, expected.Length).SequenceEqual(expected), "Live preprocessing ignored the tracked crop.");
+        }
+        using (var lost = new CapturedVisionFrame(pixels, 64, 64, Stopwatch.GetTimestamp(), 3, 1, () => { }))
+            recorder.Capture(lost, default, new(3, false, player, config.Meter, config.Court, 0, "Lost identity"));
+        recorder.Dispose();
+        Check(!recorder.Snapshot.IsComplete && recorder.Snapshot.StoredFrames == 2, "Lost tracking did not stop the take as incomplete.");
+        using var metadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(recorder.DirectoryPath, "session.json")));
+        var data = metadata.RootElement;
+        Check(data.GetProperty("captureEvidence").GetProperty("version").GetInt32() == 3
+            && data.GetProperty("frames")[1].GetProperty("tracking").GetProperty("player").GetProperty("left").GetDouble() == .4,
+            "Per-frame crop provenance was lost.");
+        var stored = File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "frames.bgra"));
+        Check(stored[0] == 12 && stored[VisionTrainingRecorder.FrameBytes] == 25, "Recorded pixels used the initial stationary crop.");
+        Check((new VisionModelManifest { InputRegionPolicy = "visual-anchors-v1" }).CheckArmingEvidence("unused", settings).Contains("anchor"),
+            "An unaccepted anchor pipeline could arm.");
+        Console.WriteLine("SUCCESS: tracked crop pixels/provenance, live preprocessing parity and recording stop on identity loss. Synthetic software check only.");
     }
     private static void Check(bool passed, string message) { if (!passed) throw new InvalidOperationException(message); }
 }

@@ -11,13 +11,14 @@ internal readonly record struct VisionSessionStatus(bool Running, bool ModelRead
     int CaptureWidth = 0, int CaptureHeight = 0, long ExcludedTimingFrames = 0,
     bool ModelLoadFailed = false, bool SourceStale = false, bool CaptureFailed = false);
 
-internal sealed class VisionPreview(byte[] pixels, int width, int height, int stride, long sequence) : IDisposable
+internal sealed class VisionPreview(byte[] pixels, int width, int height, int stride, long sequence, long captureTicks = 0) : IDisposable
 {
     public byte[] Pixels { get; } = pixels;
     public int Width { get; } = width;
     public int Height { get; } = height;
     public int Stride { get; } = stride;
     public long Sequence { get; } = sequence;
+    public long CaptureTicks { get; } = captureTicks;
     public int Length => checked(Stride * Height);
     public void Dispose() => ArrayPool<byte>.Shared.Return(Pixels);
 }
@@ -31,6 +32,8 @@ internal sealed class VisionSession : IDisposable
     private Thread? _worker;
     private VisionModel? _model;
     private VisionTrainingRecorder? _recorder;
+    private VisionRegionObservation? _tracking;
+    internal VisionRegionObservation? Tracking => Volatile.Read(ref _tracking);
     private VisionSettings? _activeSettings;
     private bool _trainingInhibited, _stopping;
     private string? _modelHash;
@@ -95,7 +98,7 @@ internal sealed class VisionSession : IDisposable
         }
     }
 
-    internal void Start(nint hwnd, VisionSettings settings, bool loadModel = true)
+    internal void Start(nint hwnd, VisionSettings settings, bool loadModel = true, IVisionRegionTracker? regionTracker = null)
     {
         settings.Validate();
         lock (_gate)
@@ -108,6 +111,7 @@ internal sealed class VisionSession : IDisposable
             var cancellation = _stop.Token;
             _runtime.ConfigureVision(settings);
             _activeSettings = settings;
+            Volatile.Write(ref _tracking, null);
             _runtime.InvalidateVisionSession("Preparing capture and model.");
             _status = new(true, false, false, "Starting window capture…", 0, 0, 0, 0, 0);
             _metricCount = _metricIndex = 0;
@@ -119,7 +123,7 @@ internal sealed class VisionSession : IDisposable
             _performanceMissBaseline = _runtime.VisionStatus.MissedDeadlines;
             _modelHash = null; _lastModelEvents = [];
             _preview?.Dispose(); _preview = null;
-            _worker = new Thread(() => Run(hwnd, settings, cancellation, loadModel))
+            _worker = new Thread(() => Run(hwnd, settings, cancellation, loadModel, regionTracker))
                 { IsBackground = true, Name = "AccessRelay vision" };
             try { _worker.Start(); }
             catch
@@ -131,7 +135,7 @@ internal sealed class VisionSession : IDisposable
         }
     }
 
-    private void Run(nint hwnd, VisionSettings settings, CancellationToken cancellation, bool loadModel)
+    private void Run(nint hwnd, VisionSettings settings, CancellationToken cancellation, bool loadModel, IVisionRegionTracker? regionTracker)
     {
         VisionModel? model = null;
         bool modelLoadFailed = false;
@@ -211,7 +215,10 @@ internal sealed class VisionSession : IDisposable
                         int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
                         VisionTrainingRecorder? recorder;
                         lock (_gate) recorder = _recorder;
-                        recorder?.Capture(frame, observedStatus);
+                        var regions = regionTracker?.Track(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.SourceGeneration);
+                        Volatile.Write(ref _tracking, regions);
+                        frame.PlayerCrop = regions is { Valid: true } ? regions.Player : null;
+                        recorder?.Capture(frame, observedStatus, regions);
                         if (sourceGeneration != frame.SourceGeneration)
                         {
                             _runtime.InvalidateVisionSession("Capture source changed. Reacquiring player.");
@@ -231,7 +238,7 @@ internal sealed class VisionSession : IDisposable
                             }
                         }
                         // Readiness invalidation from profile/controller/Stop all must never auto-rearm output.
-                        if (fresh && model?.CanArm == true && !sourceReady)
+                        if (fresh && model?.CanArm == true && regionTracker is null && !sourceReady)
                         {
                             _runtime.BeginVisionSession();
                             sourceReady = true;
@@ -239,7 +246,7 @@ internal sealed class VisionSession : IDisposable
                         }
                         bool accepted = false;
                         bool hasDecision = false;
-                        if (model is not null)
+                        if (model is not null && (regions is null || regions.Valid))
                         {
                             var prediction = model.PushFrame(frame, observedStatus);
                             if (prediction is { } observation && !cancellation.IsCancellationRequested)
@@ -250,6 +257,7 @@ internal sealed class VisionSession : IDisposable
                                     accepted = _runtime.SubmitVisionPrediction(observation);
                             }
                         }
+                        else if (regions is { Valid: false }) model?.ResetTracking();
                         long completed = Stopwatch.GetTimestamp();
                         double processingMs = Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
                         double? preprocessingMs = null, inferenceMs = null;
@@ -264,7 +272,7 @@ internal sealed class VisionSession : IDisposable
                             // UI/Stop state lock while materializing CPU pixels.
                             var copy = ArrayPool<byte>.Shared.Rent(checked(frame.Stride * frame.Height));
                             VisionPreview? nextPreview = null;
-                            try { frame.Pixels.Span.CopyTo(copy); nextPreview = new(copy, frame.Width, frame.Height, frame.Stride, frame.Sequence); }
+                            try { frame.Pixels.Span.CopyTo(copy); nextPreview = new(copy, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.CaptureTicks); }
                             catch { ArrayPool<byte>.Shared.Return(copy); throw; }
                             lock (_gate)
                             {
@@ -385,6 +393,8 @@ internal sealed class VisionSession : IDisposable
             if (_activeSettings.CameraView != profile.CameraView)
                 throw new InvalidOperationException("Restart observation using the selected camera view before recording.");
             profile.ValidateCapture(_activeSettings.TrainingCapture);
+            if (_activeSettings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored && Tracking is not { Valid: true })
+                throw new InvalidOperationException(Tracking?.Message ?? "Start preview and acquire the NBA capture anchors before recording.");
             if (_status.CaptureWidth != _activeSettings.TrainingCapture.SourceWidth ||
                 _status.CaptureHeight != _activeSettings.TrainingCapture.SourceHeight)
                 throw new InvalidOperationException("Wait for a fresh live preview and confirm training capture setup for the current window size.");

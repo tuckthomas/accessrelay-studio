@@ -14,7 +14,7 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
   const plugins = (state.plugins ?? []).filter((plugin: any) => gameVisionWorkspace(plugin.id));
   const pluginId = state.selectedPluginId ?? '', Plugin = plugins.some((plugin: any) => plugin.id === pluginId) ? gameVisionWorkspace(pluginId) : undefined;
   const saving = !!live.training?.hasTake && !live.training?.isFinalized;
-  const locked = !!session.running || !!live.stopping || saving, working = !!busy || !!live.busy;
+  const locked = !!session.running || !!live.stopping || saving, working = !!busy || !!live.busy || live.trainingJob?.state === 'running';
   async function run(action: string, args?: any) {
     setError(''); setBusy(action);
     try { await command(action, args); }
@@ -34,7 +34,7 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
           onValueChange={selectionValue => choose('sourceSelect', selectionValue)}>
           <SelectOption value="">Choose a window</SelectOption>{sources.map((source: any) => <SelectOption key={source.id} value={source.id}>{source.title}</SelectOption>)}
         </Select></Field><Button aria-label="Refresh capture windows" disabled={locked || working} onClick={() => void run('sourceRefresh')}><Icon name="refresh" size={18} /></Button>
-      </div></Card>
+      </div>{mode === 'training' && <div className="form-grid training-folder-settings">{[['dataset', 'Training data folder', state.trainingSetup?.datasetRoot], ['workspace', 'Model output folder', state.trainingSetup?.workspaceRoot]].map(([kind, label, path]) => <Field key={kind} label={label}><Button disabled={locked || working} onClick={() => void run('trainingConfigure', { kind })}>{path ? 'Change…' : kind === 'python' ? 'Choose interpreter…' : 'Choose folder…'}</Button>{path && <span className="subtle training-folder-path" title={path}>{path}</span>}</Field>)}</div>}{mode === 'training' && <details className="training-folder-settings"><summary>Training environment</summary><Field label="Python interpreter"><Button disabled={locked || working} onClick={() => void run('trainingConfigure', { kind: 'python' })}>{state.trainingSetup?.python ? 'Change interpreter…' : 'Choose interpreter…'}</Button>{state.trainingSetup?.python && <span className="subtle training-folder-path" title={state.trainingSetup.python}>{state.trainingSetup.python}</span>}</Field></details>}</Card>
     {Plugin ? <Plugin key={pluginId + mode + draftEpoch} state={state} status={status} command={command} mode={mode} captureWindow={captureWindow} /> : mode === 'training'
       ? <Card title={plugins.length ? 'Choose a training plugin' : 'No training plugins installed'}><p className="subtle">{plugins.length ? 'Select an installed plugin above.' : 'Install a model training plugin from Marketplace.'}</p>
         {openMarketplace && <Button onClick={openMarketplace}><Icon name="store" size={17} />Browse Marketplace</Button>}</Card> : <>

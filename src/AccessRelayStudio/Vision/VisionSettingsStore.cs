@@ -8,7 +8,7 @@ namespace EliteScriptStudio.Vision;
 internal sealed class VisionSettingsStore
 {
     private sealed record Document(int Version, Guid ProfileId, VisionSettings Settings);
-    private const int MaximumBytes = 32 * 1024;
+    private const int MaximumBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions Format = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -67,6 +67,7 @@ internal sealed class VisionSettingsStore
             using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 JsonSerializer.Serialize(stream, new Document(1, profileId, settings), Format);
+                if (stream.Length > MaximumBytes) throw new InvalidDataException("The vision settings file is too large.");
                 stream.Flush(flushToDisk: true);
             }
             File.Move(temporary, absolute, overwrite: true);

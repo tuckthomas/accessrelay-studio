@@ -1,3 +1,5 @@
+using EliteScriptStudio.Core;
+
 namespace EliteScriptStudio.Vision;
 
 internal interface ICapturedFrameSurface
@@ -53,6 +55,7 @@ internal sealed class CapturedVisionFrame : IDisposable
     internal long OptionalReadbackBytes => _surface?.CpuReadbackBytes ?? 0;
     internal double OptionalReadbackMs => _surface?.CpuReadbackMs ?? 0;
     internal int FreshnessReadbackBytes { get; set; }
+    internal VisionCrop? PlayerCrop { get; set; }
     public byte[] Buffer => Volatile.Read(ref _release) is not null ? _buffer ?? _surface!.ReadPixels()
         : throw new ObjectDisposedException(nameof(CapturedVisionFrame));
     public ReadOnlyMemory<byte> Pixels => Buffer.AsMemory(0, checked(Stride * Height));

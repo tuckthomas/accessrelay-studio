@@ -291,6 +291,8 @@ details[open] > summary { margin-bottom: 12px; }
 .remote-play-page > .section-header .field { min-width: 200px; }
 .remote-play-source { align-items: center; }
 .remote-play-source .field { flex: 1; }
+.training-folder-settings { margin-top:20px; }
+.training-folder-path { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
 .remote-play-preview .card-heading { align-items: center; }
 .remote-play-stage { display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 9; background: var(--surface-inset); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .remote-play-stage img { width: 100%; height: 100%; object-fit: contain; }

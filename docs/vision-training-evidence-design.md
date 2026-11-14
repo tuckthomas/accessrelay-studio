@@ -1,5 +1,16 @@
 # NBA 2K27 training evidence and capture design
 
+Current implementation (beta.18): the NBA plugin configures moving player/meter
+anchors, four court-floor points and fixed feedback. Version-3 evidence records
+per-frame tracked crops/provenance; tracking loss stops the take incomplete.
+The plugin's offline workflow can train/export/evaluate explicitly reviewed data.
+This is a calibrated appearance/floor-feature prototype, not a trained pose or
+meter-fill detector. Gameplay acquisition, user-model training and hardware
+acceptance remain open. See
+[the current implementation plan](../.agents/plans/in-progress/training-plugin-and-player-tracking.md).
+The original design notes below describe the earlier fixed-region acquisition stage.
+
+
 - Updated: 2026-11-11
 - Branch: `codex/remote-play-vision`
 - Scope: synchronized evidence acquisition; model training and gameplay validation remain pending

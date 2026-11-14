@@ -10,7 +10,7 @@ internal sealed class DesktopVisionDataset : IDisposable
 {
     internal sealed record RegionFrame(string Name, string File, long OffsetBytes, int ByteLength);
     internal sealed record Frame(long CaptureTicks, long OffsetBytes, int ByteLength, string File,
-        long Sequence = 0, RegionFrame[]? Evidence = null);
+        long Sequence = 0, RegionFrame[]? Evidence = null, VisionRegionObservation? Tracking = null);
     internal sealed record Region(string Name, string Label, string File, int Width, int Height)
     { internal int ByteLength => checked(Width * Height * 4); }
     private sealed record StreamInfo(string Name, string File, int Width, int Height, int Stride, string PixelFormat, VisionCrop Crop);
@@ -18,7 +18,7 @@ internal sealed class DesktopVisionDataset : IDisposable
     private sealed record SessionInfo(int SchemaVersion, string SessionId, bool Complete, long StopwatchFrequency,
         int StoredWidth, int StoredHeight, int StoredStride, string PixelFormat, Frame[] Frames, Evidence? CaptureEvidence = null);
     internal sealed record Shot(string ShotId, long StartTicks, long EndTicks, long? TargetReleaseTicks,
-        bool IsTargetShot, bool PlayerIdentityConfirmed, bool Reviewed);
+        bool IsTargetShot, bool PlayerIdentityConfirmed, bool Reviewed, bool PlayerRegionReviewed = false);
     internal sealed record LabelDocument(int SchemaVersion, string SessionId, string Split, Shot[] Shots,
         string LabelTimeBasis = "captured-target-game-phase");
     private readonly object _gate = new();
@@ -77,6 +77,7 @@ internal sealed class DesktopVisionDataset : IDisposable
             tracking = _session.CaptureEvidence?.Tracking,
             regions = Regions.Select(r => new { r.Name, r.Label, r.Width, r.Height }), labels = Labels,
             frames = _session.Frames.Select(f => new { ticks = f.CaptureTicks, sequence = f.Sequence,
+                tracking = f.Tracking,
                 timeMs = ((double)f.CaptureTicks - _session.Frames[0].CaptureTicks) * 1000 / _session.StopwatchFrequency })
         };
     }
@@ -128,6 +129,7 @@ internal sealed class DesktopVisionDataset : IDisposable
     private Region[] ValidateEvidence(long primaryLength)
     {
         bool sceneFirst = _session.CaptureEvidence?.Version == 2;
+        bool anchored = _session.CaptureEvidence?.Version == 3;
         var player = new Region("player", sceneFirst ? "Overview" : "Player", "frames.bgra", 256, 256);
         if (_session.CaptureEvidence is not { } evidence)
         {
@@ -135,13 +137,13 @@ internal sealed class DesktopVisionDataset : IDisposable
                 throw new InvalidDataException("Region frames have no matching evidence metadata.");
             return [player];
         }
-        if (evidence.Version is not (1 or 2) || evidence.Purpose is not ("meterSupervisedTraining" or "meterOffValidation")
-            || (sceneFirst && evidence.Tracking != "unannotated-scene"))
+        if (evidence.Version is not (1 or 2 or 3) || evidence.Purpose is not ("meterSupervisedTraining" or "meterOffValidation")
+            || (sceneFirst && evidence.Tracking != "unannotated-scene") || (anchored && evidence.Tracking != "visual-anchors-v1"))
             throw new InvalidDataException("This clip's evidence format is not supported.");
         var scene = evidence.Streams?.FirstOrDefault(s => s?.Name == "scene");
-        if (sceneFirst && (scene is null || scene.Width is < 1 or > 1280 || scene.Height is < 1 or > 1280))
+        if ((sceneFirst || anchored) && (scene is null || scene.Width is < 1 or > 1280 || scene.Height is < 1 or > 1280))
             throw new InvalidDataException("The gameplay scene exceeds its dimension limit.");
-        var expected = new List<Region> { player, new("scene", sceneFirst ? "Gameplay scene" : "Court", "scene.bgra", sceneFirst ? scene!.Width : 640, sceneFirst ? scene!.Height : 360) };
+        var expected = new List<Region> { player, new("scene", sceneFirst || anchored ? "Gameplay scene" : "Court", "scene.bgra", sceneFirst || anchored ? scene!.Width : 640, sceneFirst || anchored ? scene!.Height : 360) };
         if (!sceneFirst && evidence.Purpose == "meterSupervisedTraining") expected.Add(new("meter", "Meter", "meter.bgra", 256, 256));
         expected.Add(new("feedback", "Shot feedback", "feedback.bgra", 640, 192));
         if (evidence.Streams is null || evidence.Streams.Length != expected.Count)
@@ -161,11 +163,21 @@ internal sealed class DesktopVisionDataset : IDisposable
             if (length != (long)FrameCount * region.ByteLength) throw new InvalidDataException("The region data does not match its frame index.");
             total = checked(total + length);
         }
-        if (total > (sceneFirst ? 4L : 2L) * 1024 * 1024 * 1024) throw new InvalidDataException("The clip exceeds the evidence size limit.");
+        if (total > (sceneFirst || anchored ? 4L : 2L) * 1024 * 1024 * 1024) throw new InvalidDataException("The clip exceeds the evidence size limit.");
         long sequence = -1;
         for (int index = 0; index < FrameCount; index++)
         {
             var frame = _session.Frames[index];
+            if (anchored && (frame.Tracking is not { Valid: true } tracking || tracking.Sequence != frame.Sequence))
+                throw new InvalidDataException("An anchored clip contains an untracked frame.");
+            if (anchored && frame.Tracking is { } observation)
+            {
+                observation.Player.Validate(); observation.Meter?.Validate();
+                if (!double.IsFinite(observation.Confidence) || observation.Confidence is < 0 or > 1
+                    || observation.Court is not { Length: >= 3 and <= 64 }
+                    || observation.Court.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+                    throw new InvalidDataException("The clip contains malformed tracking geometry.");
+            }
             if (frame.Sequence < 0 || frame.Sequence <= sequence || frame.OffsetBytes != (long)index * player.ByteLength
                 || frame.Evidence is null || frame.Evidence.Length != expected.Count - 1)
                 throw new InvalidDataException("The evidence regions do not share a consistent frame sequence.");
@@ -185,7 +197,7 @@ internal sealed class DesktopVisionDataset : IDisposable
 
     private void ValidateLabels(LabelDocument labels)
     {
-        if (labels.SchemaVersion != 1 || labels.SessionId != _session.SessionId || labels.Split is not ("train" or "validation" or "held-out")
+        if (labels.SchemaVersion != 1 || labels.SessionId != _session.SessionId || labels.Split is not ("train" or "validation" or "held-out" or "reference")
             || labels.LabelTimeBasis != "captured-target-game-phase" || labels.Shots is null || labels.Shots.Length > 512)
             throw new InvalidDataException("Choose valid reviewed labels and one split for the entire clip.");
         var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -195,6 +207,8 @@ internal sealed class DesktopVisionDataset : IDisposable
             if (shot is null || string.IsNullOrWhiteSpace(shot.ShotId) || shot.ShotId.Length > 80 || shot.ShotId.Any(char.IsControl)
                 || !ids.Add(shot.ShotId) || !shot.Reviewed || shot.StartTicks < first || shot.EndTicks > last || shot.EndTicks <= shot.StartTicks)
                 throw new InvalidDataException("Each interval needs a unique name, reviewed confirmation and valid start/end frames.");
+            if (_session.CaptureEvidence?.Version == 3 && !shot.PlayerRegionReviewed)
+                throw new InvalidDataException("Review the complete player framing and overlay exclusion for this anchored interval.");
             if (shot.IsTargetShot && (!shot.PlayerIdentityConfirmed || shot.TargetReleaseTicks is not long target || target < shot.StartTicks || target > shot.EndTicks))
                 throw new InvalidDataException("A target shot needs confirmed player identity and a reviewed target phase inside the interval.");
             if (!shot.IsTargetShot && shot.TargetReleaseTicks.HasValue)

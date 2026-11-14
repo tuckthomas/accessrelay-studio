@@ -10,7 +10,7 @@ namespace EliteScriptStudio.Desktop;
 /// <summary>Desktop presentation adapter. Capture, inference and controller arbitration remain in their native workers.</summary>
 internal sealed class DesktopVisionService : IDesktopModule
 {
-    private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt);
+    private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt, long SourceCaptureTicks);
     private sealed record FrozenImage(string Token, PreviewImage Image, string SourceId, Guid ProfileId, string Fingerprint, VisionSettings Settings);
     private sealed record CalibrationProposal(string Token, VisionCalibrationImport Import, VisionCalibrationEstimate Estimate,
         VisionSettings Settings, string ManifestHash, VisionModelManifest Manifest, string SourceId, int Width, int Height);
@@ -24,6 +24,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     private readonly VisionSettingsStore _settingsStore = new(DesktopEnvironment.DataDirectory("Vision"));
     private readonly VisionModelLibrary _library = new(DesktopEnvironment.DataDirectory("VisionModels"));
     private readonly object _mediaGate = new();
+    private readonly DesktopTrainingJob _trainingJob = new();
     private VisionSettings _settings = VisionSettings.Default;
     private Guid _settingsProfile;
     private CaptureSource[] _sources = [];
@@ -43,7 +44,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     private long _sourcesRefreshedAt, _performanceRefreshedAt;
     private CancellationTokenSource _operation = new();
     internal bool HasActiveTrainingRecording => _session?.TrainingSnapshot.IsRecording == true;
-    internal bool AssistantBusy => Volatile.Read(ref _busy) != 0 || _session?.IsStopping == true;
+    internal bool AssistantBusy => Volatile.Read(ref _busy) != 0 || _session?.IsStopping == true || _trainingJob.Running;
     internal (bool Running, bool ModelReady, bool CanArm, bool SourceStale) AssistantFacts =>
         (_session?.Status.Running == true, _session?.Status.ModelReady == true, _session?.Status.CanArm == true, _session?.Status.SourceStale == true);
 
@@ -78,6 +79,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                 compatible = m.IsCompatible, evidenceAccepted = m.EvidenceAccepted, m.Status }),
             selectedModelId = selectedModel is null ? "" : ModelId(selectedModel), modelScanComplete = _modelScanComplete,
             modelErrors = _modelErrors, review = _review?.Snapshot(),
+            trainingSetup = _trainingJob.Configuration, trainingJob = _trainingJob.Snapshot,
             calibration = _calibration is { } c ? new { token = c.Token, estimate = c.Estimate, procedure = c.Import.ProcedureVersion } : null,
             baseline = _baseline is { } b ? new { b.Label, b.CreatedAtUtc, b.Snapshot.ExecutionProvider } : null,
             status = GetStatus()
@@ -101,6 +103,8 @@ internal sealed class DesktopVisionService : IDesktopModule
             selectedSourceId = _selectedSourceId, captureLayoutConfirmed = _settings.TrainingCapture.Configured,
             stopping = _session?.IsStopping == true, output = _runtime()?.VisionStatus,
             training = _session?.TrainingSnapshot, performance = _performance, comparison,
+            tracking = _session?.Tracking,
+            trainingJob = _trainingJob.Snapshot,
             preview = preview is null ? null : new { url = "https://media.accessrelay.test/vision/preview?v=" + preview.Sequence,
                 sequence = preview.Sequence, sourceWidth = preview.SourceWidth, sourceHeight = preview.SourceHeight }
         };
@@ -115,6 +119,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     public async Task<object?> InvokeAsync(string action, JsonElement args)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (action == "trainingCancel") { _trainingJob.Cancel(); return null; }
         // Stop never waits behind model import, native pickers or startup waits.
         if (action is "stop" or "recordStop")
         {
@@ -131,6 +136,44 @@ internal sealed class DesktopVisionService : IDesktopModule
         {
             switch (action)
             {
+                case "trainingConfigure":
+                {
+                    RequireStopped(); string kind = args.Text("kind"), path;
+                    if (kind is "dataset" or "workspace") path = (await new FolderPicker(_owner).PickSingleFolderAsync())?.Path ?? "";
+                    else if (kind == "python") { var picker = new FileOpenPicker(_owner); picker.FileTypeFilter.Add(".exe"); path = (await picker.PickSingleFileAsync())?.Path ?? ""; }
+                    else throw new InvalidDataException("Choose a training data folder, output folder or Python interpreter.");
+                    CheckOperation(version, cancellation); if (path.Length != 0) _trainingJob.Configure(kind, path); return null;
+                }
+                case "trainingStart":
+                {
+                    RequireStopped(); var plugin = RequirePlugin(); var profile = _profile ?? throw new InvalidOperationException("Choose the shot profile to train.");
+                    int epochs = args.Number("epochs", 20); string device = args.Text("device", "cpu");
+                    if (epochs is < 1 or > 200 || device is not ("cpu" or "cuda")) throw new InvalidDataException("Choose CPU/CUDA and 1–200 epochs.");
+                    _trainingJob.Start(plugin.TrainingWorkflowFile ?? throw new InvalidOperationException("This plugin has no training workflow."),
+                        JsonSerializer.SerializeToElement(new { epochs, device, profile = profile.ExportProfile(), targetProvider = _settings.ExecutionProviderName,
+                            _settings.MinimumConfidence, _settings.MaximumUncertaintyMs, _settings.MaximumFrameAgeMs }, DesktopJson.Options));
+                    return null;
+                }
+                case "trainingOpenFolder":
+                {
+                    using var snapshot = JsonDocument.Parse(JsonSerializer.Serialize(_trainingJob.Snapshot, DesktopJson.Options));
+                    string directory = snapshot.RootElement.GetProperty("directory").GetString() ?? "";
+                    if (directory.Length != 0 && Directory.Exists(directory)) await Windows.System.Launcher.LaunchFolderPathAsync(directory); return null;
+                }
+                case "trainingImport":
+                {
+                    RequireStopped(); string path = _trainingJob.CandidateManifest;
+                    if (_trainingJob.Running || !File.Exists(path)) throw new InvalidOperationException("Finish training before importing its candidate.");
+                    var (manifest, _) = VisionModelManifest.Read(path);
+                    var matching = RequirePlugin().Profiles.FirstOrDefault(profile => profile.AnimationProfile == manifest.AnimationProfile);
+                    if (matching is null) throw new InvalidOperationException("Save the matching meter-off shot profile before importing this candidate.");
+                    SelectProfile(matching.Id);
+                    int importVersion = _version;
+                    var candidate = await Task.Run(() => _library.Import(path, _settings, cancellation), cancellation);
+                    CheckOperation(importVersion, cancellation); await RefreshModelsAsync();
+                    _settings = _settings with { ModelManifestPath = candidate.ManifestPath, CorrectionMs = 0 }; SaveSettings();
+                    _notice = "Trained candidate imported for observation. Hardware and release acceptance remain unverified."; return null;
+                }
                 case "pluginSelect":
                 {
                     RequireStopped(); string pluginId = args.Text("id");
@@ -219,8 +262,8 @@ internal sealed class DesktopVisionService : IDesktopModule
                     if (_runtime()?.SetVisionArmed(armed) != true && armed)
                         throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
                     return null;
-                case "freeze": return await FreezeAsync(version, cancellation);
-                case "layoutSave": return SaveLayout(args);
+                case "freeze": return await FreezeAsync(version, cancellation, args.Flag("nextShot"));
+                case "layoutSave": SaveLayout(args); await RefreshModelsAsync(); return null;
                 case "recordStart": return await RecordAsync(version, cancellation);
                 case "reviewOpen": return await ReviewOpenAsync(args, version, cancellation);
                 case "reviewSave":
@@ -305,6 +348,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     }
     private void Start(bool loadModel)
     {
+        if (_trainingJob.Running) throw new InvalidOperationException("Stop the offline training job before starting gameplay capture.");
         RequireStopped(); RefreshSources(); var source = SelectedSource();
         if (loadModel)
         {
@@ -314,19 +358,24 @@ internal sealed class DesktopVisionService : IDesktopModule
             if (_profile is null) throw new InvalidOperationException("Choose a game plugin profile before starting analysis.");
             if (_settings.ModelManifestPath.Length == 0) throw new InvalidOperationException("Choose a model before starting analysis.");
             var (manifest, _) = VisionModelManifest.Read(_settings.ModelManifestPath);
+            bool anchored = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored;
+            if (anchored != (manifest.InputRegionPolicy == "visual-anchors-v1")) throw new InvalidDataException("The model's input-region policy differs from the configured capture anchors.");
+            if (anchored && !_settings.TrainingCapture.Configured) throw new InvalidOperationException("Acquire the capture anchors before starting the tracked model.");
+            if (anchored && _settings.PreprocessingBackend != VisionPreprocessingBackend.Cpu)
+                throw new InvalidOperationException("Tracked crops currently require CPU image preparation. CUDA model inference remains available.");
             if (manifest.OutputContract != plugin.OutputContract) throw new InvalidDataException("The model does not match this game plugin's vision contract.");
         }
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
-        _session.Start(source.Hwnd, _settings, loadModel); _lastObservedSourceId = _selectedSourceId;
+        _session.Start(source.Hwnd, _settings, loadModel, _profile?.CreateRegionTracker(_settings)); _lastObservedSourceId = _selectedSourceId;
         _notice = loadModel && _settings.ModelManifestPath.Length != 0
             ? "Preparing live analysis. Assistance remains disarmed until you arm it."
             : "Preview is live. Frames are not being saved.";
     }
-    private void UpdatePreview()
+    private void UpdatePreview(bool force = false)
     {
-        if (_disposed || !_visible || _session is null || Volatile.Read(ref _encodingPreview) != 0) return;
+        if (_disposed || (!force && !_visible) || _session is null || Volatile.Read(ref _encodingPreview) != 0) return;
         if (_session.TakePreview() is not { } preview) return;
         if (Interlocked.CompareExchange(ref _encodingPreview, 1, 0) != 0) { preview.Dispose(); return; }
         int version = _version;
@@ -339,25 +388,42 @@ internal sealed class DesktopVisionService : IDesktopModule
                     var media = DesktopVisionBitmap.Encode(preview.Pixels, preview.Width, preview.Height, preview.Stride);
                     lock (_mediaGate)
                         if (!_disposed && version == _version)
-                            Volatile.Write(ref _preview, new(media, preview.Sequence, preview.Width, preview.Height, Stopwatch.GetTimestamp()));
+                            Volatile.Write(ref _preview, new(media, preview.Sequence, preview.Width, preview.Height, Stopwatch.GetTimestamp(), preview.CaptureTicks));
                 }
                 finally { Interlocked.Exchange(ref _encodingPreview, 0); }
             }
         });
     }
     private void ClearPreview() { lock (_mediaGate) { Volatile.Write(ref _preview, null); _frozen = null; } }
-    private async Task<object> FreezeAsync(int version, CancellationToken cancellation)
+    private async Task<object> FreezeAsync(int version, CancellationToken cancellation, bool nextShot = false)
     {
         if (_profile is null) throw new InvalidOperationException("Choose a game plugin profile before marking training areas.");
         if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
             throw new InvalidOperationException("Finish the current clip before changing its capture areas.");
         if (_session?.Status.Running != true) Start(loadModel: false);
         _session!.SetPreviewEnabled(true);
+        long minimumCapture = 0;
+        if (nextShot)
+        {
+            long waiting = Stopwatch.GetTimestamp(); bool neutral = false;
+            _notice = "Return to gameplay and take one manual shot. Waiting for fresh physical input to capture the meter reference.";
+            while (true)
+            {
+                CheckOperation(version, cancellation); _session.SetPreviewEnabled(true); UpdatePreview(force: true);
+                var input = _runtime()?.Latest?.Input;
+                if (input is not { IsConnected: true } connected) throw new InvalidOperationException("Connect the physical controller before capturing a shot reference.");
+                bool pressed = _profile.ReferenceTriggered(connected.State);
+                if (!pressed) neutral = true;
+                if (neutral && pressed) { minimumCapture = Stopwatch.GetTimestamp() + (long)(_profile.ReferenceDelayMs * Stopwatch.Frequency / 1000d); break; }
+                if (Stopwatch.GetElapsedTime(waiting).TotalSeconds > 20) throw new InvalidOperationException("No new shot input arrived. Try capture setup again when ready.");
+                await Task.Delay(16, cancellation);
+            }
+        }
         long began = Stopwatch.GetTimestamp();
         PreviewImage? image;
-        while ((image = Volatile.Read(ref _preview)) is null || Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds > 1)
+        while ((image = Volatile.Read(ref _preview)) is null || image.SourceCaptureTicks < minimumCapture || Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds > 1)
         {
-            CheckOperation(version, cancellation); UpdatePreview();
+            CheckOperation(version, cancellation); _session.SetPreviewEnabled(true); UpdatePreview(force: true);
             if (_session.Status.CaptureFailed || Stopwatch.GetElapsedTime(began).TotalSeconds > 4)
                 throw new InvalidOperationException("No fresh gameplay preview arrived. Restore the selected window and try again.");
             await Task.Delay(40, cancellation);
@@ -383,7 +449,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         var layout = args.GetProperty("layout").Read<VisionTrainingCaptureSettings>() with
         { Configured = true, SourceWidth = frozen.Image.SourceWidth, SourceHeight = frozen.Image.SourceHeight };
         var crop = layout.EvidenceMode == VisionEvidenceMode.SceneFirst ? layout.GameplayRegion : args.GetProperty("player").Read<VisionCrop>();
-        crop.Validate(); _profile.ValidateCapture(layout);
+        crop.Validate(); layout = _profile.ConfigureCapture(layout, frozen.Image.Media.Bytes); _profile.ValidateCapture(layout);
         if (!VisionTrainingCaptureSettings.Contains(layout.GameplayRegion, crop))
             throw new InvalidDataException("Keep the player area inside the gameplay area.");
         _settings = _settings with { Crop = crop, TrainingCapture = layout, CorrectionMs = 0 }; SaveSettings(); _calibration = null;
@@ -400,8 +466,13 @@ internal sealed class DesktopVisionService : IDesktopModule
         if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
             throw new InvalidOperationException("Wait for the current clip to finish saving.");
         var settings = _settings; string sourceId = _selectedSourceId;
-        var folder = await new FolderPicker(_owner).PickSingleFolderAsync();
-        CheckOperation(version, cancellation); if (folder is null) return null;
+        string folderPath = _trainingJob.Configuration.DatasetRoot;
+        if (folderPath.Length == 0)
+        {
+            var folder = await new FolderPicker(_owner).PickSingleFolderAsync();
+            CheckOperation(version, cancellation); if (folder is null) return null;
+            folderPath = folder.Path;
+        }
         if (_settings != settings || _profile?.ConfigurationFingerprint != profile.ConfigurationFingerprint || sourceId != _selectedSourceId)
             throw new InvalidOperationException("The plugin profile or source changed while selecting a folder. Review the setup and try again.");
         RefreshSources(); var source = SelectedSource();
@@ -415,7 +486,7 @@ internal sealed class DesktopVisionService : IDesktopModule
             await Task.Delay(40, cancellation);
         }
         CheckOperation(version, cancellation);
-        _session.StartTraining(folder.Path, profile, source.Title);
+        _session.StartTraining(folderPath, profile, source.Title);
         _notice = "Recording up to 10 seconds. Return focus to gameplay to capture the action.";
         return null;
     }
@@ -584,6 +655,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     public void Dispose()
     {
         if (_disposed) return; _disposed = true; CancelOperation();
+        _trainingJob.Dispose();
         _session?.Dispose(); _review?.Dispose(); _operation.Dispose(); ClearPreview();
     }
 }

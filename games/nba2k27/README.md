@@ -29,3 +29,23 @@ page contains neither shot fields nor NBA defaults and works with no plugin sele
 The host delegates profile editing and training validation through typed contracts;
 NBA-specific capture policy stays with this adapter. Registration requires the reviewed
 bundled manifest and does not authorize loading third-party native or UI code.
+
+
+## Calibrated capture and training
+
+The Model Training package enables this reviewed adapter. Its capture configuration
+lives in `Nba2K27CaptureConfiguration.cs`, and `Nba2K27RegionTracker.cs` follows the
+calibrated torso appearance, relative meter search region and floor homography.
+The fixed shot-feedback panel remains independent. Court geometry constrains the
+player's ground position without masking body pixels above the sideline. Tracking
+is a short-range prototype; it requires gameplay validation and reacquisition after
+loss. It does not include a trained person/pose detector or a meter-fill parser.
+
+The NBA workspace configures those anchors. Source window and data/output folders
+are global Model Training settings. Version-3 evidence retains the dynamic crops,
+full scene, meter/feedback and controller trajectory. `training/Run-NbaTraining.py`
+prepares explicitly reviewed train/validation clips using a separate meter-off
+configuration reference, then runs the existing trainer/exporter/evaluator. A local
+Python environment is needed only for offline work. Live analysis uses the native
+C# pipeline; visual-anchor candidates cannot arm automatic release before gameplay
+and hardware acceptance. No trained user model or bundled model weights are claimed.

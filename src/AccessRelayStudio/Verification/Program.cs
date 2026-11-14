@@ -2,6 +2,12 @@ using EliteScriptStudio.Packs.Nba2K27;
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
+if (args is ["--capture-anchors"])
+{
+    NbaCaptureAnchorChecks.Run();
+    return;
+}
+
 if (args is ["--marketplace", var marketplaceOutput])
 {
     await MarketplaceVerification.RunAsync(marketplaceOutput);

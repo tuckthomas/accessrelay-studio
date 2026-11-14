@@ -259,6 +259,7 @@ def main() -> int:
     legacy_camera_session_ids = []
     resolved_camera = args.camera or "2K"
     resolved_game_version = args.game_version
+    input_region_policy = "fixed-region-v1"
     if not args.diagnostic_fixture:
         if not args.train or not args.validation:
             raise ValueError("Training requires distinct --train and --validation session directories")
@@ -271,6 +272,10 @@ def main() -> int:
         validate_independent(training_footage, validation_footage)
         if train[3] != validation[3]:
             raise ValueError("Train/validation sessions use different shot-profile configurations")
+        policies = {"visual-anchors-v1" if session.get("captureEvidence", {}).get("version") == 3 else "fixed-region-v1"
+                    for _, session in train[0] + validation[0]}
+        if len(policies) != 1: raise ValueError("Do not mix fixed and tracked player inputs in one model")
+        input_region_policy = policies.pop()
         dataset_fingerprint = train[3]
         training_session_ids, validation_session_ids = sorted(train[2]), sorted(validation[2])
         training_sources, validation_sources = source_files(train), source_files(validation)
@@ -350,7 +355,7 @@ def main() -> int:
         "modelVersion": ("diagnostic-" if args.diagnostic_fixture else "experimental-") + args.head + "-" + args.uncertainty + "-v2",
         "outputContract": "temporal-release-v1", "uncertaintySemantics": uncertainty_semantics(args.uncertainty),
         "modelFile": model_path.name, "modelSha256": model_hash, "inputName": "frames", "outputName": "observation",
-        "preprocessing": PREPROCESSING_ID, "inputWidth": args.width, "inputHeight": args.height,
+        "preprocessing": PREPROCESSING_ID, "inputRegionPolicy": input_region_policy, "inputWidth": args.width, "inputHeight": args.height,
         "historyLength": args.history, "historyIntervalMs": args.interval_ms, "maximumPredictionHorizonMs": 2000,
         "rgbMean": [0, 0, 0], "rgbStandardDeviation": [1, 1, 1], "animationProfile": args.animation_profile,
         "gameVersion": resolved_game_version, "cameraConfiguration": resolved_camera, "license": "0BSD (architecture code); recorded-data and trained-weight rights must be reviewed",

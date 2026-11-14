@@ -44,6 +44,8 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
     bool ITrainingCaptureProfile.UsesSupervisionOverlay => UsesShotMeter;
     string IVisionCaptureProfile.AnimationProfile => "nba2k27:" + ConfigurationFingerprint;
     object IVisionCaptureProfile.ExportProfile() => this;
+    bool IVisionCaptureProfile.ReferenceTriggered(ControllerState input) => Math.Abs((int)input.RightY) > 16000 || ControlMap.IsPressed(ControlId.X, input, PaddleButtons.None);
+    int IVisionCaptureProfile.ReferenceDelayMs => 200;
     void IVisionCaptureProfile.ValidateCapture(VisionTrainingCaptureSettings settings)
     {
         settings.Validate(); Validate();
@@ -54,6 +56,34 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
             throw new InvalidDataException("NBA 2K27 training requires the shot meter on in the game and selected shot profile.");
         if (settings.Purpose == VisionTrainingPurpose.MeterOffValidation && UsesShotMeter)
             throw new InvalidDataException("NBA 2K27 meter-off validation requires the meter off in the game and selected profile.");
+        if (settings.EvidenceMode == VisionEvidenceMode.Anchored)
+        {
+            if (string.IsNullOrWhiteSpace(settings.GameBuild))
+                throw new InvalidDataException("Enter the game's build or patch in capture setup so training can match compatible recordings.");
+            Nba2K27CaptureConfiguration.Read(settings.PluginConfiguration).Validate(CameraView, UsesShotMeter, requireReference: true);
+        }
+    }
+
+    VisionTrainingCaptureSettings IVisionCaptureProfile.ConfigureCapture(VisionTrainingCaptureSettings settings, ReadOnlySpan<byte> referenceBitmap)
+    {
+        if (settings.EvidenceMode != VisionEvidenceMode.Anchored) return settings;
+        var configuration = Nba2K27CaptureConfiguration.Read(settings.PluginConfiguration);
+        configuration.Validate(CameraView, UsesShotMeter, requireReference: false);
+        if (!VisionTrainingCaptureSettings.Contains(settings.GameplayRegion, configuration.Player)
+            || (configuration.Meter is { } meter && !VisionTrainingCaptureSettings.Contains(settings.GameplayRegion, meter))
+            || configuration.Court.Any(p => p.X < settings.GameplayRegion.Left || p.Y < settings.GameplayRegion.Top
+                || p.X > settings.GameplayRegion.Left + settings.GameplayRegion.Width || p.Y > settings.GameplayRegion.Top + settings.GameplayRegion.Height))
+            throw new InvalidDataException("Keep the initial player, meter and floor anchors inside the gameplay image.");
+        configuration = (configuration with { Viewport = settings.GameplayRegion }).WithReference(referenceBitmap);
+        return settings with { PluginConfiguration = JsonSerializer.SerializeToElement(configuration, Nba2K27CaptureConfiguration.Json) };
+    }
+
+    IVisionRegionTracker? IVisionCaptureProfile.CreateRegionTracker(VisionSettings settings)
+    {
+        if (settings.TrainingCapture is not { Configured: true, EvidenceMode: VisionEvidenceMode.Anchored } capture) return null;
+        var configuration = Nba2K27CaptureConfiguration.Read(capture.PluginConfiguration);
+        configuration.Validate(CameraView, UsesShotMeter, requireReference: true);
+        return new Nba2K27RegionTracker(configuration);
     }
 
     IReadOnlyList<VisionEvidenceRegion> IVisionCaptureProfile.EvidenceRegions(VisionSettings settings)
@@ -62,13 +92,13 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
         var regions = new List<VisionEvidenceRegion> { new("player", "frames.bgra", 256, 256,
             layout.EvidenceMode == VisionEvidenceMode.SceneFirst ? layout.GameplayRegion : settings.Crop) };
         if (!layout.Configured) return regions;
-        bool sceneFirst = layout.EvidenceMode == VisionEvidenceMode.SceneFirst;
+        bool sceneFirst = layout.EvidenceMode is VisionEvidenceMode.SceneFirst or VisionEvidenceMode.Anchored;
         double width = layout.SourceWidth * layout.GameplayRegion.Width, height = layout.SourceHeight * layout.GameplayRegion.Height;
         double scale = Math.Min(1, 1280 / Math.Max(width, height));
         int sceneWidth = sceneFirst ? Math.Max(1, (int)Math.Round(width * scale)) : 640;
         int sceneHeight = sceneFirst ? Math.Max(1, (int)Math.Round(height * scale)) : 360;
         regions.Add(new("scene", "scene.bgra", sceneWidth, sceneHeight, layout.GameplayRegion));
-        if (!sceneFirst && layout.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && layout.MeterRegion is { } meter)
+        if (layout.EvidenceMode != VisionEvidenceMode.SceneFirst && layout.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && layout.MeterRegion is { } meter)
             regions.Add(new("meter", "meter.bgra", 256, 256, meter));
         if (layout.FeedbackRegion is { } feedback) regions.Add(new("feedback", "feedback.bgra", 640, 192, feedback));
         return regions;

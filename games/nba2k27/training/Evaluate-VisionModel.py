@@ -157,9 +157,10 @@ def main() -> int:
     target_shots, negative_shots, accepted_targets, false_releases = 0, 0, 0, 0
     errors = []
     capture_configuration = None
+    tracked_inputs = manifest.get("inputRegionPolicy") == "visual-anchors-v1"
     for directory, recording in sessions:
         configuration = (recording["captureWidth"], recording["captureHeight"], recording["crop"])
-        if capture_configuration is not None and configuration != capture_configuration:
+        if not tracked_inputs and capture_configuration is not None and configuration != capture_configuration:
             raise ValueError("One report must use a single capture size and player crop")
         capture_configuration = configuration
         labels = training.read_json(directory / "labels.json")
@@ -191,7 +192,7 @@ def main() -> int:
         "targetCoverage": accepted_targets / target_shots, "identityAccuracy": identity_correct / observation_count,
         "predictionP99ErrorMs": errors[max(0, math.ceil(.99 * len(errors)) - 1)] if errors else None,
         "falseReleaseRate": false_releases / negative_shots,
-        "captureWidth": capture_configuration[0], "captureHeight": capture_configuration[1], "playerCrop": capture_configuration[2],
+        "captureWidth": capture_configuration[0], "captureHeight": capture_configuration[1], "playerCrop": None if tracked_inputs else capture_configuration[2], "inputRegionPolicy": manifest.get("inputRegionPolicy", "fixed-region-v1"),
         "hardwareValidated": False, "hardwareDescription": "", "remotePlayClient": "",
         "hardwareSessionMinutes": 0, "hardwareAttempts": 0, "deadlineMissRate": 0
     }

@@ -13,6 +13,7 @@ internal sealed class Nba2K27VisionPlugin : IVisionGamePlugin, IGameControllerPl
     public string Id => "nba2k27";
     public string Name => "NBA 2K27";
     public string OutputContract => "temporal-release-v1";
+    public string TrainingWorkflowFile => "Run-NbaTraining.py";
     public IReadOnlyList<string> CameraViews => Nba2K27ShotProfile.CameraViews;
     public IReadOnlyList<IVisionCaptureProfile> Profiles => _profiles;
     public IVisionCaptureProfile? SelectedProfile => _selected;

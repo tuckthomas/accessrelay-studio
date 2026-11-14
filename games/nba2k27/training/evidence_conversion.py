@@ -7,6 +7,7 @@ import datetime
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -79,8 +80,11 @@ def validate_source(session, directory=None):
     profile, evidence = session.get("shotProfile"), session.get("captureEvidence")
     if isinstance(evidence, dict) and evidence.get("version") == 2:
         raise ValueError("Scene-first footage needs reviewed per-frame player/meter tracking before release-model conversion; a scene overview is not a player crop")
-    if not isinstance(profile, dict) or not isinstance(evidence, dict) or evidence.get("version") != 1:
-        raise ValueError("Conversion requires original version-1 enriched evidence")
+    if not isinstance(profile, dict) or not isinstance(evidence, dict) or evidence.get("version") not in (1, 3):
+        raise ValueError("Conversion requires original fixed-region or anchored evidence")
+    anchored = evidence["version"] == 3
+    if anchored and evidence.get("tracking") != "visual-anchors-v1":
+        raise ValueError("Anchored evidence has an unsupported region policy")
     purpose = evidence.get("purpose")
     if purpose not in ("meterSupervisedTraining", "meterOffValidation") or type(profile.get("usesShotMeter")) is not bool:
         raise ValueError("Unknown teacher/student capture purpose or meter state")
@@ -113,9 +117,18 @@ def validate_source(session, directory=None):
     player, scene, feedback = session.get("crop"), layout.get("gameplayRegion"), layout.get("feedbackRegion")
     if not contains(scene, player) or not contains(scene, feedback): raise ValueError("Player/feedback crops must be inside gameplay")
     for overlay in (layout.get("meterRegion"), feedback):
-        if overlay is not None and (not contains(scene, overlay) or overlaps(player, overlay, width, height)):
+        if overlay is not None and (not contains(scene, overlay) or (not anchored and overlaps(player, overlay, width, height))):
             raise ValueError("Model player ROI overlaps a meter/feedback overlay; re-record a disjoint ROI rather than silently masking pixels")
     expected = {"player": ("frames.bgra", 256, 256, player), "scene": ("scene.bgra", 640, 360, scene), "feedback": ("feedback.bgra", 640, 192, feedback)}
+    if anchored:
+        config = layout.get("pluginConfiguration")
+        if (not isinstance(config, dict) or config.get("version") != 1 or config.get("camera") != profile["cameraView"]
+                or config.get("playerAnchor") != "torso-appearance-v1" or config.get("meterAnchor") != "player-relative-region-v1"
+                or config.get("courtAnchor") != "floor-homography-v1"):
+            raise ValueError("Missing recorded NBA anchor configuration")
+        _, _, vw, vh = rectangle(scene)
+        scale = min(1, 1280 / max(width * vw, height * vh))
+        expected["scene"] = ("scene.bgra", max(1, round(width * vw * scale)), max(1, round(height * vh * scale)), scene)
     if purpose == "meterSupervisedTraining":
         if layout.get("meterRegion") is None: raise ValueError("Meter teacher evidence needs a marked meter region")
         expected["meter"] = ("meter.bgra", 256, 256, layout["meterRegion"])
@@ -138,6 +151,22 @@ def validate_source(session, directory=None):
         integer(frame.get("offsetBytes"), "frame offset")
         sequence = integer(frame.get("sequence"), "sequence", 1)
         generations.add(integer(frame.get("sourceGeneration"), "sourceGeneration"))
+        if anchored:
+            tracking = frame.get("tracking")
+            if not isinstance(tracking, dict) or tracking.get("valid") is not True or tracking.get("sequence") != sequence:
+                raise ValueError("An anchored frame lost identity or sequence provenance")
+            tracked_player, tracked_meter = tracking.get("player"), tracking.get("meter")
+            if not contains(scene, tracked_player): raise ValueError("Tracked player region is outside gameplay")
+            if purpose == "meterSupervisedTraining" and tracked_meter is None: raise ValueError("Missing player-associated meter region")
+            for overlay in (tracked_meter, feedback):
+                if overlay is not None and (not contains(scene, overlay) or overlaps(tracked_player, overlay, width, height)):
+                    raise ValueError("Tracked player crop contains meter/feedback; review anchors and record overlay-disjoint evidence")
+            confidence = tracking.get("confidence")
+            if type(confidence) not in (int, float) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                raise ValueError("Invalid anchor confidence")
+            court = tracking.get("court")
+            if not isinstance(court, list) or len(court) != 4 or any(not isinstance(p, dict) or any(type(p.get(axis)) not in (int, float) or not math.isfinite(p[axis]) or not -.2 <= p[axis] <= 1.2 for axis in ("x", "y")) for p in court):
+                raise ValueError("Missing per-frame court projection")
         if ticks <= previous or sequence <= previous_sequence: raise ValueError("Evidence frame times/sequences must increase")
         previous, previous_sequence = ticks, sequence
         if (frame.get("file"), frame.get("offsetBytes"), frame.get("byteLength")) != ("frames.bgra", index * 256 * 256 * 4, 256 * 256 * 4):
@@ -153,7 +182,7 @@ def validate_source(session, directory=None):
                 raise ValueError("Auxiliary evidence offset/length is inconsistent")
     if len(generations) != 1: raise ValueError("Source changed during the take")
     expected_files = {filename: size * len(frames) for filename, size in definitions.values()}
-    if sum(expected_files.values()) > MAX_VISUAL_BYTES: raise ValueError("Evidence exceeds the 2 GiB capture bound")
+    if sum(expected_files.values()) > (2 * MAX_VISUAL_BYTES if anchored else MAX_VISUAL_BYTES): raise ValueError("Evidence exceeds the 2 GiB capture bound")
     if directory is not None:
         for filename, size in expected_files.items():
             if child(directory, filename).stat().st_size != size: raise ValueError("Truncated/extra evidence stream data")
@@ -179,6 +208,8 @@ def validate_labels(labels, source):
         if (not isinstance(shot, dict) or not isinstance(shot.get("shotId"), str) or not shot["shotId"] or shot["shotId"] in identities
                 or shot.get("reviewed") is not True or type(shot.get("isTargetShot")) is not bool or type(shot.get("playerIdentityConfirmed")) is not bool):
             raise ValueError("Every shot needs unique identity, target status and explicit human review")
+        if source["captureEvidence"]["version"] == 3 and shot.get("playerRegionReviewed") is not True:
+            raise ValueError("Review player identity, complete body framing and overlay exclusion for every anchored interval")
         identities.add(shot["shotId"])
         start, end = integer(shot.get("startTicks"), "shot start"), integer(shot.get("endTicks"), "shot end")
         if not first <= start < end <= last: raise ValueError("Reviewed interval exceeds recorded frames")
@@ -197,6 +228,10 @@ def validate_mapping(source, student):
         if isinstance(first, str) and isinstance(second, str):
             first, second = unicodedata.normalize("NFC", first.strip()), unicodedata.normalize("NFC", second.strip())
         if first != second: raise ValueError("Teacher/student animation or camera mismatch: " + field)
+    if source["captureEvidence"]["version"] == 3:
+        if student["captureEvidence"]["version"] != 3 or source["captureEvidence"]["layout"]["gameBuild"] != student["captureEvidence"]["layout"]["gameBuild"]:
+            raise ValueError("Anchored teacher/student policy or game build differs")
+        return
     if (source["captureWidth"], source["captureHeight"], source["crop"], source["captureEvidence"]["layout"]["gameBuild"]) != (student["captureWidth"], student["captureHeight"], student["crop"], student["captureEvidence"]["layout"]["gameBuild"]):
         raise ValueError("Teacher/student capture geometry or game build differs")
 
@@ -223,12 +258,14 @@ def converted_metadata(source, student, conversion):
 
 def verify_conversion(directory, session):
     conversion = session.get("trainingConversion")
-    if not isinstance(conversion, dict) or conversion.get("version") != 1 or conversion.get("pixelPolicy") != "player-roi-disjoint-overlay-v1" or conversion.get("validationPassed") is not False:
+    if not isinstance(conversion, dict) or conversion.get("version") != 1 or conversion.get("pixelPolicy") not in ("player-roi-disjoint-overlay-v1", "tracked-player-roi-disjoint-overlay-v1") or conversion.get("validationPassed") is not False:
         raise ValueError("Unsupported reviewed training conversion")
     if any(conversion.get(key) != filename for key, filename in FILES.items()): raise ValueError("Conversion proof filenames are invalid")
     paths = {key: child(directory, filename) for key, filename in FILES.items()}
     source, labels, student, review = [read_json(paths[key]) for key in FILES]
     expected_files = validate_source(source, directory); validate_source(student)
+    expected_policy = "tracked-player-roi-disjoint-overlay-v1" if source["captureEvidence"]["version"] == 3 else "player-roi-disjoint-overlay-v1"
+    if conversion["pixelPolicy"] != expected_policy: raise ValueError("Converted pixel policy differs from acquisition")
     validate_mapping(source, student); validate_labels(labels, source)
     hashes = {"sourceSessionSha256": digest(paths["sourceMetadataFile"]), "labelsSha256": digest(paths["sourceLabelsFile"]), "studentReferenceSha256": digest(paths["studentReferenceFile"])}
     data_hashes = conversion.get("sourceDataSha256")
@@ -244,7 +281,7 @@ def verify_conversion(directory, session):
         if digest(child(directory, filename)) != expected_hash: raise ValueError("Converted source pixels/controller evidence changed")
 
 
-def convert(source_directory, student_directory, review_file, destination):
+def convert(source_directory, student_directory, review_file, destination, prefer_hard_links=False):
     source_directory, student_directory, destination = map(Path, (source_directory, student_directory, destination))
     if destination.exists(): raise ValueError("Conversion never overwrites a session; choose a fresh destination")
     if destination.resolve().is_relative_to(source_directory.resolve()) or destination.resolve().is_relative_to(student_directory.resolve()):
@@ -262,11 +299,14 @@ def convert(source_directory, student_directory, review_file, destination):
     try:
         for filename in files:
             original = child(source_directory, filename)
-            shutil.copyfile(original, staging / filename)
+            if prefer_hard_links:
+                try: os.link(original, staging / filename)
+                except OSError: shutil.copyfile(original, staging / filename)
+            else: shutil.copyfile(original, staging / filename)
         for original, filename in [(source_path, FILES["sourceMetadataFile"]), (labels_path, FILES["sourceLabelsFile"]), (student_path, FILES["studentReferenceFile"]), (Path(review_file), FILES["reviewFile"]), (labels_path, "labels.json")]:
             shutil.copyfile(original, staging / filename)
         conversion = {"version": 1, "sourceSessionId": source["sessionId"], "studentReferenceSessionId": student["sessionId"],
-                      "pixelPolicy": "player-roi-disjoint-overlay-v1", "validationPassed": False, **FILES, **hashes,
+                      "pixelPolicy": "tracked-player-roi-disjoint-overlay-v1" if source["captureEvidence"]["version"] == 3 else "player-roi-disjoint-overlay-v1", "validationPassed": False, **FILES, **hashes,
                       "reviewSha256": digest(review_file), "sourceDataSha256": data_hashes}
         metadata = converted_metadata(source, student, conversion)
         (staging / "session.json").write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n", encoding="utf-8")

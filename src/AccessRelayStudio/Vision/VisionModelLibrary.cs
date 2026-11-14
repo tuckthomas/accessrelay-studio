@@ -200,12 +200,14 @@ internal sealed class VisionModelLibrary
         }
         bool profileMatches = settings.AnimationProfile.Trim() == manifest.AnimationProfile;
         bool cameraMatches = settings.CameraView.Length == 0 || settings.CameraView == manifest.CameraConfiguration;
+        bool regionMatches = (settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored) == (manifest.InputRegionPolicy == "visual-anchors-v1");
         string blocker = !profileMatches ? "This model belongs to a different player/shot profile."
             : !cameraMatches ? "This model belongs to a different camera view."
+            : !regionMatches ? "Configure capture using this model's fixed or tracked input-region policy."
             : manifest.CheckArmingEvidence(path, settings);
         bool accepted = blocker.Length == 0;
         return new(path, manifest.DisplayName, manifest.ModelVersion, manifest.AnimationProfile, manifest.CameraConfiguration,
-            profileMatches && cameraMatches, accepted,
+            profileMatches && cameraMatches && regionMatches, accepted,
             accepted ? "Validation evidence matches these settings. Runtime compatibility, source and calibration are still required." : blocker);
     }
 
