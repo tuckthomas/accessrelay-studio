@@ -432,3 +432,26 @@ Evidence: `artifacts/CaptureCadenceEvidence/resize.json`,
 The gameplay window was unavailable to the passive probe, so end-to-end 60-FPS
 preservation is **not yet verified**. Future comparisons distinguish repeated
 Windows image deliveries from changed images and stop if another recording starts.
+
+### Beta.26 live capture comparison — 2026-11-14
+
+The existing 2560x1440 Remote Play Chrome window was subsequently measured without
+changing focus or sending UI/controller input. Approximately three measured seconds
+per mode delivered 51.6488 FPS with the OS default and 60.0014 FPS with the explicit
+1 ms interval. No adjacent images were bitwise identical. Both runs reported zero
+superseded frames, failed publications, pending replacements and buffer exhaustion.
+Receipt-gap p95/max changed from 35.7319/36.2916 ms to 23.9156/24.5757 ms. These are
+short capture-only results; a fresh saved training take is still required to verify
+the recording writer under its actual load. They do not establish console frame
+IDs, sustained zero-loss capture or Xbox end-to-end latency.
+
+Evidence: `artifacts/CaptureCadenceEvidence/live-20261114-060707/`. The running
+beta.26 title/runtime match the installed build; the usual `AccessRelayStudio/Run`
+directory is a junction to that installation.
+
+Saved-pixel review also confirmed a training-coverage defect: cached meter search
+regions can overlap the player even while no meter is visible, rejecting otherwise
+useful history. Other frames have a real meter inside the broad rectangular body
+envelope. These cases require distinct handling that preserves the player/ball and
+prevents teacher HUD leakage. See `artifacts/RecordedClipPreparation/overlap-review.png`.
+No rejection gates or target labels were changed, and no user model was trained.
