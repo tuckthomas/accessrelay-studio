@@ -350,3 +350,24 @@ original 538-frame raw clip reused its prepared evidence and displayed 207 usabl
 frames, all four synchronized streams and a player image on the review timeline.
 No shot labels were saved and no candidate was trained. The next manual take is
 pending the user's shooting readiness; capture and controller output remain off.
+
+## Recording handoff and beta.25 live result
+
+The next beta.24 take, `take-20261114-033725-fad960b9`, retained 403 frames across
+8.837 seconds but correctly stopped incomplete when Chrome changed from
+2560x1392 to 1906x1025 during the return to gameplay. It is not accepted training
+evidence. Source-size/generation guards remain enforced.
+
+Beta.25 (`eb201bc`) returns focus to the selected gameplay window inside the Record
+action, then waits for at least three fresh frames and 500 ms of stable dimensions
+before opening the writer. Publish/install completed at the project-local path;
+receipt: `artifacts/AutoCaptureModels/installation25.json`.
+
+The installed retry, `take-20261114-034251-b38df4fe`, completed: 463 full-scene
+frames across 9.952 seconds at a stable 2560x1440, no writer drops, 37.025 ms p95
+capture gap and 2,385 connected-controller samples. Build 2.0.0.12 is recorded.
+The controller trace remained neutral and sampled video shows idle dribbling;
+this verifies recording/handoff, not a shooting example or target-phase label.
+The user has been asked whether an audible countdown would make the cue usable
+without leaving fullscreen gameplay. No further takes or training are started
+while that coordination is pending. Preview was stopped; controller output is off.
