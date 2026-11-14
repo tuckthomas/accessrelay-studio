@@ -455,3 +455,63 @@ useful history. Other frames have a real meter inside the broad rectangular body
 envelope. These cases require distinct handling that preserves the player/ball and
 prevents teacher HUD leakage. See `artifacts/RecordedClipPreparation/overlap-review.png`.
 No rejection gates or target labels were changed, and no user model was trained.
+
+### Saved recording results and next-session checkpoint — 2026-11-14
+
+The user's beta.26 take `take-20261114-062157-d0fae04d` completed with 598 frames
+over 9.950974 seconds: **59.9941 FPS**. All stored application sequences are
+contiguous and all adjacent saved scene images differ. Writer drops: zero.
+Receipt gaps: p95 23.9344 ms, p99 24.4651 ms, maximum 25.0813 ms; none exceed
+33.334 ms. Capture start/end snapshots include one pending replacement outside
+the contiguous stored sequence. This take demonstrates recording at the stream's
+60-FPS rate; it does not establish universal zero-loss performance.
+
+A further meter-on take, `take-20261114-063159-add4a36c`, contains 586 frames over
+9.970028 seconds: **58.6759 FPS**, 12 missing application sequences/pending-frame
+replacements, zero writer-queue drops and a maximum 101.7125 ms receipt gap. Its
+maximum preparation duration is 59.5118 ms. An occasional consumer stall remains;
+do not describe all beta.26 recordings as drop-free. The offline diagnostic trace
+started at 06:32:17 UTC, after that recording's approximately 06:31:59–06:32:09 UTC
+window, so it is not evidence that this trace caused those gaps.
+
+The 598-frame take retains 2,410 connected controller samples and a real rhythm
+shot: full downward stick at approximately 752–1400 ms and upward stick at
+1438–1495 ms. Raw feedback reads RHYTHM LATE / 25'8". This is feedback evidence,
+not an accepted precise target-phase label.
+
+Saved-frame diagnostics found two RTMO detections of the same skeleton with
+different box widths. The supplemental joint-based duplicate check now requires
+at least 12 shared confident joints, all four torso joints, and tight normalized
+agreement. Existing box suppression and plugin identity ambiguity/expiry checks
+remain. A first replacement of box suppression was rejected after saved-footage
+acquisition regressed; the delivered change supplements it. Focused joint
+comparison checks and the native build passed. Replaying the actual take with
+the corrected suppression retains **384**, up from **347**, admissible player
+frames and removes its ambiguity rejections. This does not validate crowded
+gameplay or resolve HUD overlap. Preparation caches now bind an explicit
+`analysisPolicy` so old results are retained separately instead of reused for
+changed analysis. The installed application remains beta.26; this tracking fix
+has been exercised in the offline native helper, not installed as a new beta.
+
+Evidence: `artifacts/CaptureCadenceEvidence/recording-beta26.json`,
+`recording-beta26-second.json`, and `artifacts/RecordedClipPreparation/` including
+`beta26-identity-trace.json`, `beta26-shot-tracking.png`,
+`beta26-shot-feedback.png`, and `beta26-pose-suppression-preparation.log`.
+
+The user is finished recording for this session. Do not request or initiate more
+gameplay until they return. Offline GPU work is stopped. No model is trained,
+no target labels are accepted, and no controller assistance is armed by this work.
+
+Next steps:
+- [ ] Add and evaluate a native ONNX pose-input candidate using the already
+      recorded 17 joints; retain RGB scenes, meter and feedback for supervision
+      and review. This is planned, not implemented or accuracy-validated. It
+      avoids feeding meter pixels into the candidate when the full player
+      rectangle overlaps the HUD; preserve the existing RGB workflow separately.
+- [ ] Obtain two distinct meter-off clips with the original `Stretch Big`
+      profile, unchanged animation/camera and feedback enabled: configuration
+      reference and separate validation. The user will do this next session.
+- [ ] Review target game-phase labels and shot coverage, then train/export the
+      first observation-only candidate. Keep training/validation footage separate;
+      held-out accuracy and actual controller timing remain separate acceptance.
+- [ ] Investigate occasional capture-consumer stalls using the new stage timings.

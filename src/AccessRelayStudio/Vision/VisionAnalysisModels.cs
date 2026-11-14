@@ -74,8 +74,31 @@ internal sealed class VisionAnalysisModels : IVisionAnalysisModels
         }
         var kept = new List<VisionPersonPose>();
         foreach (var person in people.OrderByDescending(p => p.Confidence))
-        { if (kept.All(p => IntersectionOverUnion(p.Bounds, person.Bounds) < .45)) kept.Add(person); if (kept.Count == 40) break; }
+        { if (kept.All(p => IntersectionOverUnion(p.Bounds, person.Bounds) < .45 && !IsDuplicatePose(p, person, width, height))) kept.Add(person); if (kept.Count == 40) break; }
         return kept.ToArray();
+    }
+
+    // A raised-arm detection can have a very different box from another detection of
+    // that same skeleton. Supplement the existing box suppression with conservative
+    // joint agreement before the plugin checks identity ambiguity.
+    internal static bool IsDuplicatePose(VisionPersonPose first, VisionPersonPose second, int width, int height)
+    {
+        if (width <= 0 || height <= 0 || first.Keypoints.Length != 17 || second.Keypoints.Length != 17) return false;
+        double scale = Math.Min(first.Bounds.Height, second.Bounds.Height);
+        if (!double.IsFinite(scale) || scale <= 0) return false;
+        int shared = 0, torso = 0;
+        double sum = 0, maximum = 0, torsoMaximum = 0, aspect = width / (double)height;
+        for (int i = 0; i < 17; i++)
+        {
+            var a = first.Keypoints[i]; var b = second.Keypoints[i];
+            if (!(a.Confidence >= .35 && b.Confidence >= .35)) continue;
+            double dx = (a.X - b.X) * aspect, dy = a.Y - b.Y;
+            double distance = Math.Sqrt(dx * dx + dy * dy) / scale;
+            if (!double.IsFinite(distance)) return false;
+            shared++; sum += distance; maximum = Math.Max(maximum, distance);
+            if (i is 5 or 6 or 11 or 12) { torso++; torsoMaximum = Math.Max(torsoMaximum, distance); }
+        }
+        return shared >= 12 && torso == 4 && sum / shared <= .025 && maximum <= .1 && torsoMaximum <= .03;
     }
     public VisionTextRegion[] ReadText(ReadOnlySpan<byte> bgra, int width, int height, int stride)
     {

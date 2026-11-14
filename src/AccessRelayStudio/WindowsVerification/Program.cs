@@ -14,6 +14,18 @@ if (args is ["--prepare-recorded-scene", var sceneRuntime, var sceneAssets, var 
     return;
 }
 
+if (args is ["--trace-recorded-scene", var traceRuntime, var traceAssets, var traceDirectory, var traceOutput])
+{
+    AutomaticCaptureModelChecks.TraceScene(traceRuntime, traceAssets, traceDirectory, traceOutput);
+    return;
+}
+
+if (args is ["--pose-suppression-only"])
+{
+    AutomaticCaptureModelChecks.CheckPoseSuppression();
+    return;
+}
+
 if (args is ["--acquisition-worker", var acquisitionEvidence])
 {
     TrainingPluginChecks.CheckAcquisitionWorker(acquisitionEvidence);

@@ -10,6 +10,7 @@ namespace EliteScriptStudio.Vision;
 /// <summary>Offline exact-frame annotation. Original scene/controller evidence is never overwritten.</summary>
 internal static class VisionTrainingPreparation
 {
+    private const string AnalysisPolicy = "identity-pose-suppression-v2";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 
@@ -82,6 +83,7 @@ internal static class VisionTrainingPreparation
             var saved = JsonNode.Parse(File.ReadAllBytes(Path.Combine(destination, "session.json")));
             if (saved?["complete"]?.GetValue<bool>() == true && saved["preparation"]?["sourceSessionSha256"]?.GetValue<string>() == sessionHash
                 && saved["preparation"]?["cropPolicy"]?.GetValue<string>() == "pose-envelope-hud-disjoint-v1"
+                && saved["preparation"]?["analysisPolicy"]?.GetValue<string>() == AnalysisPolicy
                 && saved["captureEvidence"]?["layout"]?["gameBuild"]?.GetValue<string>() == layout.GameBuild
                 && saved["preparation"]?["sourceSceneSha256"]?.GetValue<string>() == sceneHash) return destination;
             // Keep interrupted output available for diagnosis; retry in a fresh folder.
@@ -136,6 +138,7 @@ internal static class VisionTrainingPreparation
         var results = new List<object>();
         output["preparation"] = JsonSerializer.SerializeToNode(new { version = 1, sourceSessionId = source["sessionId"]!.GetValue<string>(),
             cropPolicy = "pose-envelope-hud-disjoint-v1",
+            analysisPolicy = AnalysisPolicy,
             sourceSessionSha256 = sessionHash, sourceSceneSha256 = sceneHash, sourceFrameCount = frames.Count,
             analysisWidth = width, analysisHeight = height, createdAtUtc = DateTimeOffset.UtcNow,
             gameVersionFile = version is not null ? "source-game-version.json" : null,

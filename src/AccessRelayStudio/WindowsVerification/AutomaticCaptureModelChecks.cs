@@ -8,6 +8,61 @@ using Microsoft.ML.OnnxRuntime;
 
 internal static class AutomaticCaptureModelChecks
 {
+    internal static void CheckPoseSuppression()
+    {
+        static void Check(bool passed, string message) { if (!passed) throw new InvalidOperationException(message); }
+        var points = Enumerable.Range(0, 17).Select(i => new VisionKeypoint(.44 + i % 3 * .02, .25 + i * .025, .95)).ToArray();
+        var first = new VisionPersonPose(new(.4, .2, .16, .6), .95, points);
+        var duplicate = first with { Bounds = new(.43, .21, .055, .58), Confidence = .7,
+            Keypoints = points.Select(p => p with { X = p.X + .001, Y = p.Y - .001 }).ToArray() };
+        Check(VisionAnalysisModels.IsDuplicatePose(first, duplicate, 1920, 1080),
+            "Different detection extents split a near-identical skeleton into two people.");
+        var different = first with { Keypoints = points.Select(p => p with { X = p.X + .025 }).ToArray() };
+        Check(!VisionAnalysisModels.IsDuplicatePose(first, different, 1920, 1080),
+            "Distinct skeletons with overlapping detection boxes were suppressed.");
+        var limbs = points.ToArray(); foreach (int i in new[] { 9, 10, 15, 16 }) limbs[i] = limbs[i] with { X = limbs[i].X + .1 };
+        Check(!VisionAnalysisModels.IsDuplicatePose(first, first with { Keypoints = limbs }, 1920, 1080),
+            "Different limb configurations were treated as one person.");
+        var sparse = points.Select((p, i) => i < 6 ? p with { Confidence = .1 } : p).ToArray();
+        Check(!VisionAnalysisModels.IsDuplicatePose(first, first with { Keypoints = sparse }, 1920, 1080),
+            "Insufficient common pose evidence authorized suppression.");
+        var missingTorso = points.ToArray(); missingTorso[11] = missingTorso[11] with { Confidence = .1 };
+        Check(!VisionAnalysisModels.IsDuplicatePose(first, first with { Keypoints = missingTorso }, 1920, 1080),
+            "Missing torso evidence authorized suppression.");
+        Console.WriteLine("SUCCESS: the joint comparison identifies duplicate extents and rejects different poses or insufficient evidence. Crowded-scene acceptance remains separate.");
+    }
+
+    internal static void TraceScene(string runtimeRoot, string assets, string directory, string output)
+    {
+        runtimeRoot = Path.GetFullPath(runtimeRoot);
+        var paths = new[] { runtimeRoot }.Concat(Directory.EnumerateFiles(Path.Combine(runtimeRoot, "CudaRuntime"), "*.dll", SearchOption.AllDirectories)
+            .Select(Path.GetDirectoryName).OfType<string>().Distinct());
+        Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, paths) + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"));
+        OrtEnv.DisableDllImportResolver = true;
+        NativeLibrary.SetDllImportResolver(typeof(OrtEnv).Assembly, (name, _, _) => name is "onnxruntime" or "onnxruntime.dll" ? NativeLibrary.Load(Path.Combine(runtimeRoot, "onnxruntime.dll")) : 0);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        using var source = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "session.json")));
+        var root = source.RootElement;
+        if (!root.GetProperty("complete").GetBoolean()) throw new InvalidDataException("Trace a completed saved clip.");
+        var profile = root.GetProperty("shotProfile").Deserialize<Nba2K27ShotProfile>(options)!;
+        var scene = root.GetProperty("captureEvidence").GetProperty("streams").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "scene");
+        int width = scene.GetProperty("width").GetInt32(), height = scene.GetProperty("height").GetInt32();
+        var pixels = new byte[checked(width * height * 4)];
+        using var tracker = new Nba2K27AutomaticTracker(new() { Gamertag = profile.Gamertag, MeterOn = profile.UsesShotMeter, Camera = profile.CameraView },
+            () => new VisionAnalysisModels(Nba2K27AutomaticCapture.Models, VisionExecutionProvider.Cuda, assets));
+        using var raw = File.OpenRead(Path.Combine(directory, scene.GetProperty("file").GetString()!));
+        var results = new List<object>(); int index = 0;
+        foreach (var frame in root.GetProperty("frames").EnumerateArray().Take(150))
+        {
+            raw.ReadExactly(pixels);
+            var observation = tracker.Track(pixels, width, height, width * 4, frame.GetProperty("sequence").GetInt64(),
+                frame.GetProperty("sourceGeneration").GetInt64(), frame.GetProperty("captureTicks").GetInt64());
+            results.Add(new { sourceIndex = index++, observation });
+        }
+        File.WriteAllText(output, JsonSerializer.Serialize(new { scope = "First 150 saved frames with diagnostic pose/text candidates. Original evidence unchanged; no live input or labels.", frames = results }, options));
+        Console.WriteLine($"Traced {index} saved frames: {output}");
+    }
+
     internal static void PrepareScene(string runtimeRoot, string assets, string directory)
     {
         runtimeRoot = Path.GetFullPath(runtimeRoot);
