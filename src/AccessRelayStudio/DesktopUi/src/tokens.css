@@ -32,7 +32,11 @@
   --nav-active: #173b54;
   --nav-active-text: #fbf7ee;
   --icon-bg: #dfeae6;
-  --switch-off: #80929e;
+  --state-off-bg: #173b54;
+  --state-off-text: #ffffff;
+  --state-off-border: #173b54;
+  --state-off-hover: #244f67;
+  --switch-off: var(--state-off-bg);
   --switch-knob: #ffffff;
   --neutral-bg: #e0e7eb;
   --neutral-ink: #40545f;
@@ -85,7 +89,11 @@
   --selected-border: #7bd0a7;
   --nav-active: #244f67;
   --icon-bg: #2b413c;
-  --switch-off: #788d9c;
+  --state-off-bg: #254f6a;
+  --state-off-text: #e8f3fa;
+  --state-off-border: #6a98b7;
+  --state-off-hover: #2f607e;
+  --switch-off: var(--state-off-bg);
   --switch-knob: #11171d;
   --neutral-bg: #334451;
   --neutral-ink: #d2dee6;

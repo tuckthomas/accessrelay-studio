@@ -46,7 +46,7 @@ export function ControllerPage({ state, status, command }: PageProps) {
       <Button variant="ghost" className="icon-button" busy={busy === 'deviceRefresh'} title="Refresh controllers" aria-label="Refresh controllers" onClick={() => perform('deviceRefresh')}><Icon name="refresh" size={18} /></Button></div>
       <Badge tone={live.connected ? 'success' : 'neutral'}>{live.connected ? 'Input connected' : 'No input'}</Badge><div className="split-divider" />
       {live.outputActive && <Toggle label="Run scripts" checked={!!live.scriptsEnabled} disabled={!!busy || !live.connected || !!live.training || !!live.recording?.isRecording} onChange={enabled => perform('scriptsSet', { enabled })} />}
-      <Button variant={live.outputActive || connectingOutput ? 'secondary' : 'primary'} aria-busy={connectingOutput || undefined} disabled={!live.outputActive && !connectingOutput && (!!busy || !live.connected || !!live.training || !!live.recording?.isRecording)}
+      <Button active={!!live.outputActive} aria-busy={connectingOutput || undefined} disabled={!live.outputActive && !connectingOutput && (!!busy || !live.connected || !!live.training || !!live.recording?.isRecording)}
         onClick={() => live.outputActive || connectingOutput ? perform('outputStop') : perform('scriptsSet', { enabled: true })}><Icon name="power" size={17} />{live.outputActive ? 'Stop controller' : connectingOutput ? 'Cancel connection' : 'Start controller'}</Button>
     </div>
     {!state.driverAvailable && <Notice tone="warning" title="One-time device setup">Open Settings to install the virtual device driver before connecting output.</Notice>}
@@ -242,11 +242,11 @@ function RecordPanel({state,status,command,onSaved}:PageProps & {onSaved:(script
       .map((option:any)=><label key={option.id} className="check-row"><Checkbox type="checkbox" disabled={capture.isRecording||!!pending} checked={channels.includes(option.id)}
         onChange={event=>setChannels(event.target.checked?[...channels,option.id]:channels.filter(id=>id!==option.id))}/>{option.label}</label>)}</div></details>
     {capture.isRecording?<div className="stack"><div><span className="capture-counter">{(Math.max(0,capture.elapsedMs||0)/1000).toFixed(2)}<span style={{fontSize:17}}> s</span></span><p>{capture.hasInput?'Recording your controller input…':'Waiting for your first selected movement…'}</p></div>
-      <Button variant="primary" busy={busy==='recordStop'} onClick={()=>void run('recordStop')}><Icon name="stop" size={16}/>Stop recording</Button></div>:
+      <Button active={true} busy={busy==='recordStop'} onClick={()=>void run('recordStop')}><Icon name="stop" size={16}/>Stop recording</Button></div>:
       pending?<div className="stack"><Notice tone="success" title="Movement captured">{formatDuration(pending.durationMs)} · {pending.frameCount} samples. Give the Lua script a name to save it.</Notice>
         <Field label="Script name"><Input placeholder="A name you will remember" maxLength={80} value={name} onChange={event=>setName(event.target.value)}/></Field>
         <div className="row"><Button onClick={()=>void run('recordDiscard')}>Discard</Button><Button variant="primary" busy={busy==='recordSave'} disabled={!name.trim()} onClick={()=>void run('recordSave',{name:name.trim()})}><Icon name="save" size={16}/>Save as Lua script</Button></div></div>:
-      <div className="stack"><Button variant="primary" disabled={!status.connected||!channels.length||status.training} busy={busy==='recordStart'} onClick={()=>void run('recordStart',{channels})}><Icon name="circle" size={16}/>Start recording</Button>
+      <div className="stack"><Button active={false} disabled={!status.connected||!channels.length||status.training} busy={busy==='recordStart'} onClick={()=>void run('recordStart',{channels})}><Icon name="circle" size={16}/>Start recording</Button>
         <p>{status.connected?'The timer starts when you first move a selected control.':'Connect a controller before recording.'}</p></div>}
     {error&&<Notice tone="danger">{error}</Notice>}{capture.note&&<p>{capture.note}</p>}
   </section>;

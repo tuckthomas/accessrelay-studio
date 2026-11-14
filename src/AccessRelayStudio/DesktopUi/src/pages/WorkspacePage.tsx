@@ -75,7 +75,7 @@ export function WorkspacePage({ state, status, command, navigate }: {
       </section>
       <Card title="Controls"><div className="session-list">{rows.map(row => <div className="session-item" key={row.id}>
         <span className="session-item-icon"><Icon name={row.icon} /></span><div className="session-item-copy"><strong>{row.label}</strong><p id={'dashboard-' + row.id + '-detail'}>{row.detail}</p></div>
-        <Button className="session-power" variant={active[row.id] ? 'primary' : 'secondary'} aria-label={row.id === 'vision' ? 'Live Gameplay capture' : row.id === 'voice' ? 'Voice processing' : row.label}
+        <Button className="session-power" active={row.id==='controller'?!!controller.outputActive:row.id==='vision'?!!visionRunning:!!(voice.isRunning||commandListening)} aria-label={row.id === 'vision' ? 'Live Gameplay capture' : row.id === 'voice' ? 'Voice processing' : row.label}
           aria-pressed={active[row.id]} aria-describedby={'dashboard-' + row.id + '-detail'}
           disabled={pending[row.id] === 'stop' || (!active[row.id] && !!unavailable[row.id])} onClick={() => void toggle(row.id)}>
           <Icon name={pending[row.id] ? 'loader' : 'power'} size={16} className={pending[row.id] ? 'spin' : ''} />
@@ -127,7 +127,7 @@ function UsageChart({ values, label }: { values: (number | null | undefined)[]; 
 function ResourceUse({ metrics, enabled, busy, onToggle }: { metrics: SystemStatus; enabled: boolean; busy: boolean; onToggle: () => void }) {
   const history = metrics.history || [];
   const ramPercent = ratio(metrics.memoryUsedBytes, metrics.memoryTotalBytes), vramPercent = ratio(metrics.vramUsedBytes, metrics.vramTotalBytes);
-  return <Card className="workspace-resources" title="Resource use" actions={<Button variant={enabled ? 'primary' : 'secondary'}
+  return <Card className="workspace-resources" title="Resource use" actions={<Button active={enabled}
     aria-label="Resource monitoring" aria-pressed={enabled} busy={busy} onClick={onToggle}><Icon name="power" size={16} />{enabled ? 'On' : 'Off'}</Button>}>
     {!enabled ? <p className="subtle">Monitoring is off. Resource polling and GPU counters are stopped.</p> : <>
       <div className="resource-status"><span>Whole PC</span><span className="subtle">{metrics.sampledAtUtc

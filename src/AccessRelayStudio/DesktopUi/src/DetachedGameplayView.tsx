@@ -22,7 +22,7 @@ export function DetachedGameplayView() {
   return <main className="detached-gameplay">
     {error && <Notice tone="danger">{error}</Notice>}
     <GameplayPreview status={status} onError={setError} window={{ attach: () => desktop.command('app.gameplayAttach') }}
-      actions={<Button disabled={!status.session?.running || !!status.stopping || busy} onClick={async () => {
+      actions={<Button active={!!status.session?.running} disabled={!status.session?.running || !!status.stopping || busy} onClick={async () => {
         setBusy(true); setError('');
         try { await desktop.command('vision.stop'); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
         finally { setBusy(false); }

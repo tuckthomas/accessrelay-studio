@@ -130,14 +130,14 @@ export function SwitchNavigation({ controller, status, command, showLauncher = t
   const toolbar = active && <div className="scan-toolbar" aria-label="Switch navigation controls">
     {editing ? <div data-scan-editor="" className="row"><span>{label}</span><Button onClick={() => scanner.current?.adjust(-1)}>Decrease / previous</Button>
       <Button onClick={() => scanner.current?.adjust(1)}>Increase / next</Button><Button onClick={() => scanner.current?.finishEditing()}>Finish editing</Button>
-      <Button onClick={() => stop()}>Stop scanning</Button></div>
+      <Button active={true} onClick={() => stop()}>Stop scanning</Button></div>
       : <><span>{settings.mode === 'automatic' ? 'Automatic scanning' : 'Step scanning'} · {settings.source === 'keyboard' ? `${settings.activateKey} selects` : 'Controller switches select'}</span>
-        <Button onClick={() => stop()}>Stop scanning</Button></>}
+        <Button active={true} onClick={() => stop()}>Stop scanning</Button></>}
   </div>;
   return <>
     {showLauncher && <Button variant="ghost" onClick={() => setOpen(true)} aria-label="Switch navigation">Switch navigation</Button>}
     <Modal open={open} onClose={() => { if (!busy) setOpen(false); }} title="Switch navigation" description="Use one switch to select as focus moves, or two switches to step and select. F8 starts or stops; Escape stops scanning."
-      footer={<><Button disabled={busy} onClick={() => setOpen(false)}>Close</Button>{active ? <Button onClick={() => stop()}>Stop scanning</Button> : <Button variant="primary" busy={busy} onClick={() => void start()}>Start scanning</Button>}</>}>
+      footer={<><Button disabled={busy} onClick={() => setOpen(false)}>Close</Button>{active ? <Button active={true} onClick={() => stop()}>Stop scanning</Button> : <Button active={false} busy={busy} onClick={() => void start()}>Start scanning</Button>}</>}>
       <Field label="Scan mode"><Select disabled={active || busy} value={settings.mode} onValueChange={selectionValue => setSettings(value => ({ ...value, mode: selectionValue as Settings['mode'] }))}>
         <SelectOption value="automatic">One switch · automatic scanning</SelectOption><SelectOption value="step">Two switches · step and select</SelectOption></Select></Field>
       <Field label="Switch source"><Select disabled={active || busy} value={settings.source} onValueChange={selectionValue => setSettings(value => ({ ...value, source: selectionValue as Settings['source'] }))}>

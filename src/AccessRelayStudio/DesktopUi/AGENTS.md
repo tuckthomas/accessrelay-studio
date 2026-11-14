@@ -12,6 +12,9 @@
 - Use theme tokens for surfaces, control radius, focus, text and spacing. Keep
   text at least 14px. Menus must flip/scroll within available space and work in
   dialogs, with keyboard/typeahead, focus return and disabled options.
+- Start/stop and on/off buttons use the shared Button's `active` prop with the
+  actual current state: blue off, green on. Disabled controls retain that state
+  color. Never use primary/secondary action priority to express running state.
 - Navbar actions are Beta and the theme toggle. Do not add runtime/status tags,
   activity lights, navigation switches, slogans or emergency action buttons there.
 - Marketplace catalog/packages belong in the separate `accessrelay-marketplace`

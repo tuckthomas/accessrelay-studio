@@ -65,9 +65,9 @@ export function Icon({ name, size = 20, className = '' }: { name: string; size?:
   const Component = icons[name] || Circle;
   return <Component size={size} strokeWidth={1.75} aria-hidden="true" className={className} />;
 }
-export function Button({ variant = 'secondary', busy = false, children, className = '', disabled, ...props }:
-  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'unstyled'; busy?: boolean }) {
-  return <button type="button" {...props} data-slot="button" className={(variant === 'unstyled' ? '' : 'button button-' + variant + ' ') + className}
+export function Button({ variant = 'secondary', busy = false, active, children, className = '', disabled, ...props }:
+  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'unstyled'; busy?: boolean; active?: boolean }) {
+  return <button type="button" {...props} data-slot="button" data-state={active === undefined ? undefined : active ? 'on' : 'off'} aria-pressed={active ?? props['aria-pressed']} className={(variant === 'unstyled' ? '' : 'button button-' + variant + ' ') + className}
     disabled={disabled || busy} aria-busy={busy || undefined}>{busy && <Icon name="loader" size={17} className="spin" />}{children}</button>;
 }
 export function ActionMenu({ label, children }: { label: string; children: ReactNode }) {

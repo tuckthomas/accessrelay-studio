@@ -146,11 +146,11 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
           </> : <p className="field-hint">After starting, select <strong>AccessRelay Virtual Microphone</strong> in Xbox, Discord or another Windows app.</p>}
           {route.destination === 'virtual' && state.virtualMicIssue && <Notice tone="warning">{state.virtualMicIssue} Check Settings for virtual-device setup.</Notice>}
           <div className="voice-start-row">
-            {isRunning || status.isStarting ? <Button variant="danger" onClick={() => void command('stop').catch(e => setError(String(e)))}><Icon name="stop" size={18} />{status.isStarting ? 'Cancel start' : 'Stop voice'}</Button>
-              : <Button variant="primary" busy={busy === 'start'} disabled={blocked || !route.microphoneId || (route.destination === 'headphones' && !route.outputId)} onClick={() => void execute('start', async () => {
+            {isRunning || status.isStarting ? <Button active={!!isRunning} onClick={() => void command('stop').catch(e => setError(String(e)))}><Icon name="stop" size={18} />{status.isStarting ? 'Cancel start' : 'Stop voice'}</Button>
+              : <Button active={false} busy={busy === 'start'} disabled={blocked || !route.microphoneId || (route.destination === 'headphones' && !route.outputId)} onClick={() => void execute('start', async () => {
                 await command('routeSave', route); await command('start');
               })}><Icon name={route.destination === 'headphones' ? 'play' : 'mic'} size={18} />{route.destination === 'headphones' ? 'Try this voice' : 'Start virtual microphone'}</Button>}
-            <Button variant={settings.muted ? 'secondary' : 'ghost'} disabled={blocked} onClick={() => live.update({ muted: !settings.muted })}>
+            <Button active={!settings.muted} disabled={blocked} onClick={() => live.update({ muted: !settings.muted })}>
               <Icon name="volume" size={18} />{settings.muted ? 'Unmute' : 'Mute'}</Button>
           </div>
           <p className="voice-session-message" aria-live="polite">{status.message || 'Voice processing is off.'}{isRunning && status.bufferedMilliseconds > 0 ? ` · ${status.bufferedMilliseconds} ms audio queued` : ''}</p>
@@ -220,7 +220,7 @@ export function VoicePage({ state = {}, status: liveStatus, command }: PageProps
             disabled={blocked || status.clipPlaying} value={status.clipPlaying ? Math.max(trim.startMs, Math.min(trim.endMs, status.clipPositionMs || trim.startMs)) : Math.max(trim.startMs, Math.min(trim.endMs, playhead))}
             onChange={event => setPlayhead(Number(event.target.value))} />
         </Field>
-        <div className="voice-editor-transport"><Button disabled={blocked || selectionMs < 1000 || selectionMs > 300_000} onClick={() => void execute('clipPlay', async () => {
+        <div className="voice-editor-transport"><Button active={!!status.clipPlaying} disabled={blocked || selectionMs < 1000 || selectionMs > 300_000} onClick={() => void execute('clipPlay', async () => {
           if (status.clipPlaying) { setPlayhead(status.clipPositionMs || trim.startMs); await command('clipPause'); }
           else { await saveTrim(); await command('clipPlay', { positionMs: Math.max(trim.startMs, Math.min(trim.endMs, playhead)) }); }
         })}><Icon name={status.clipPlaying ? 'pause' : 'play'} size={17} />{status.clipPlaying ? 'Pause' : 'Play selection'}</Button>

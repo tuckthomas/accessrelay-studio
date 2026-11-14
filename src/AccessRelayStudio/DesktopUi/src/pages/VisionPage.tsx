@@ -43,8 +43,8 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
       ? <Card title={plugins.length ? 'Choose a training plugin' : 'No training plugins installed'}><p className="subtle">{plugins.length ? 'Select an installed plugin above.' : 'Install a model training plugin from Marketplace.'}</p>
         {openMarketplace && <Button onClick={openMarketplace}><Icon name="store" size={17} />Browse Marketplace</Button>}</Card> : <>
       <GameplayPreview status={live} window={captureWindow} onError={setError} actions={session.running || live.stopping
-        ? <Button disabled={!!live.stopping} onClick={() => void run('stop')}><Icon name="stop" size={17} />Stop capture</Button>
-        : <Button variant="primary" disabled={!sourceId || working} busy={busy === 'start'} onClick={() => void run('start', { loadModel: false })}><Icon name="play" size={17} />Start capture</Button>} />
+        ? <Button active={true} disabled={!!live.stopping} onClick={() => void run('stop')}><Icon name="stop" size={17} />Stop capture</Button>
+        : <Button active={false} disabled={!sourceId || working} busy={busy === 'start'} onClick={() => void run('start', { loadModel: false })}><Icon name="play" size={17} />Start capture</Button>} />
     </>}
     <DiscardDialog open={pending !== null} onKeep={() => setPending(null)} onDiscard={() => { const next = pending; setPending(null); setDraftEpoch(value => value + 1); if (next) void run(next.action, { id: next.id }); }} />
   </div>;

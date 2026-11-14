@@ -48,8 +48,8 @@ export function VoiceCommands({ state, status, command }: PageProps) {
       <div role="status" aria-live="polite">{recognition?.running && recognition?.ready === false ? 'Starting local commands…' : recognition?.learning ? 'Recording a personal sound…' : running ? 'Local commands are listening.' : 'Local commands are off.'}</div>
       {output?.lastCommand && <p className="subtle">Last composed command: {output.lastCommand}. Onset to host: {output.onsetToHostMs?.toFixed(0)} ms. Sound end to host: {output.endToHostMs?.toFixed(0)} ms. Console receipt is not measured.</p>}
       <div className="row"><Button variant="primary" disabled={!dirty || !!busy || !!running} onClick={async () => { if (await execute('commandsSave', { settings })) { setBaseline(JSON.stringify(settings)); setMessage('Voice commands saved. Listening remains off.'); } }}>Save voice commands</Button>
-        <Button disabled={dirty || !!busy || running || !microphone || settings.bindings.length === 0} onClick={() => void execute('commandsStart', { microphoneId: microphone })}>Start command listening</Button>
-        <Button disabled={!recognition?.running && !output?.enabled && !busy} onClick={() => void command('commandsStop').catch(e => setError(String(e)))}>Stop commands and recording</Button>
+        <Button active={!!running} disabled={dirty || !!busy || running || !microphone || settings.bindings.length === 0} onClick={() => void execute('commandsStart', { microphoneId: microphone })}>Start command listening</Button>
+        <Button active={!!(recognition?.running||output?.enabled)} disabled={!recognition?.running && !output?.enabled && !busy} onClick={() => void command('commandsStop').catch(e => setError(String(e)))}>Stop commands and recording</Button>
         <Button disabled={!dirty || !!busy || !!running} onClick={() => { setSettings(JSON.parse(saved)); setBaseline(saved); }}>Discard command edits</Button></div>
     </div></Card></div>;
 }

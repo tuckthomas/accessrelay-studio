@@ -16,6 +16,7 @@ describe('dashboard controls and resource use', () => {
   it('opens without starting features and removes the requested filler', () => {
     const props = fixture(); render(<WorkspacePage {...props} />);
     expect(props.command).not.toHaveBeenCalled();
+    for (const name of ['Controller output', 'Live Gameplay capture', 'Voice processing']) expect(screen.getByRole('button', { name, exact: true }).getAttribute('data-state')).toBe('off');
     for (const name of ['Controller output', 'Live Gameplay capture', 'Voice processing']) expect(screen.getByRole('button', { name, exact: true }).getAttribute('aria-pressed')).toBe('false');
     expect(screen.queryByText('Everything has its own space.')).toBeNull();
     expect(screen.queryByText('Your PC is the workspace.')).toBeNull();
@@ -35,6 +36,7 @@ describe('dashboard controls and resource use', () => {
     props.state.vision.selectedSourceId = ''; props.status.vision = { session: { running: true }, training: { isRecording: true } };
     props.state.voice.devices.microphones = []; props.status.voice = { ...props.status.voice, isRunning: true };
     render(<WorkspacePage {...props} />);
+    for (const name of ['Controller output', 'Live Gameplay capture', 'Voice processing']) expect(screen.getByRole('button', { name, exact: true }).getAttribute('data-state')).toBe('on');
     for (const name of ['Controller output', 'Live Gameplay capture', 'Voice processing']) fireEvent.click(screen.getByRole('button', { name, exact: true }));
     await waitFor(() => expect(props.command.mock.calls.map(([method]) => method).sort()).toEqual(['controller.outputStop', 'vision.stop', 'voice.stop']));
   });
