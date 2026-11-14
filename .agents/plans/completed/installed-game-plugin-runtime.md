@@ -21,7 +21,7 @@ separation. This work corrects implementation ownership, not merely folder names
 - [x] Make the review timeline render during dragging, coalescing to the latest
       requested frame without a release-only debounce or an image-request backlog.
       Label controls remain bound to the loaded frame.
-- [ ] Verify the affected scrubber, package boundaries, actual plugin build/load
+- [x] Verify the affected scrubber, package boundaries, actual plugin build/load
       and source/resource hashes. Build/install the update, push both main branches,
       and report concrete remote commits and any remaining validation limits.
 
@@ -43,3 +43,15 @@ Package 1.1.0 includes 24 integrity-bound runtime/UI/workflow/model/notice asset
 
 The app has not been driven on the user's screen for these checks. Live camera,
 training accuracy and physical controller acceptance remain outside this change.
+
+Completed 2026-11-14: beta.28 and NBA training implementation 1.1.0 installed
+after Studio closed. The installed app and all 24 plugin assets match the staged
+hashes. Existing profile bytes, training recordings and the usual Run junction
+were preserved. Obsolete bundled game resources were archived under project-local
+artifacts. The app was not launched or driven for physical gameplay validation.
+
+Installed code: 5a18c1070db9e560dcb59465eed895bac0f2962b.
+App verification commit: 9de420d5a2ca2d5c83ae1da4e0ad1c30dbbf0322.
+Marketplace: 7a2b99953f18dec879fa4bcb94ced2729d655cca.
+GitHub app build, implementation-contract and catalog checks passed.
+The installation receipt remains local at artifacts/PluginTrainingSeparation/installation28.json.
