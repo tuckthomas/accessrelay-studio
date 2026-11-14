@@ -1,9 +1,29 @@
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Packs.Nba2K27;
 using System.Text.Json;
+using System.Buffers.Binary;
 
 internal static class AutomaticIdentityChecks
 {
+    internal static void InspectAcquisition(string bitmap, string observation, string output)
+    {
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var original = JsonSerializer.Deserialize<VisionRegionObservation>(File.ReadAllBytes(observation), options)!;
+        var bmp = File.ReadAllBytes(bitmap);
+        int width = BinaryPrimitives.ReadInt32LittleEndian(bmp.AsSpan(18)), signedHeight = BinaryPrimitives.ReadInt32LittleEndian(bmp.AsSpan(22));
+        int height = Math.Abs(signedHeight), offset = BinaryPrimitives.ReadInt32LittleEndian(bmp.AsSpan(10));
+        if (width is < 1 or > 4096 || height is < 1 or > 4096 || BinaryPrimitives.ReadInt16LittleEndian(bmp.AsSpan(28)) != 32)
+            throw new InvalidDataException("Use a native BGRA diagnostic bitmap.");
+        var pixels = new byte[checked(width * height * 4)];
+        for (int y = 0; y < height; y++) bmp.AsSpan(offset + (signedHeight < 0 ? y : height - 1 - y) * width * 4, width * 4).CopyTo(pixels.AsSpan(y * width * 4));
+        var body = original.BodyBounds ?? throw new InvalidDataException("No acquired body.");
+        var (court, confidence) = Nba2K27AutomaticTracker.FindCourt(pixels, width, height, width * 4, body);
+        var result = original with { Meter = Nba2K27AutomaticTracker.FindMeter(pixels, width, height, width * 4, body),
+            Feedback = Nba2K27AutomaticTracker.FindFeedback(original.TextRegions ?? []), Court = court, CourtConfidence = confidence };
+        File.WriteAllText(output, JsonSerializer.Serialize(result, options));
+        Console.WriteLine($"Inspected retained acquisition frame {original.Sequence}: {court.Length} floor vertices, meter={result.Meter is not null}, feedback={result.Feedback is not null}.");
+    }
+
     // Runs the actual HUD policy on retained gameplay, without a GPU or live capture.
     internal static void InspectCalibration(string directory, string output)
     {

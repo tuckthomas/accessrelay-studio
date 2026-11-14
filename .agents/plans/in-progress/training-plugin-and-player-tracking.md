@@ -255,3 +255,26 @@ they stop it; the former two-minute pre-shot timeout could expire during a voice
 or chat handoff. Missing initial identity still times out after two minutes, and
 missing regions after a triggered shot time out after 30 seconds. Reference slots
 remain bounded at 300 while waiting, and the raw clip remains bounded at ten seconds.
+
+## Beta.22 live recording result
+
+The user completed the next manual attempt. The installed beta retained
+`take-20261114-021533-00487316`: 538 raw full-scene frames over 9.970 seconds
+(53.86 frames/s), no writer-channel drops and 2,415 controller trace samples.
+Capture-gap median was 18.23 ms, p95 21.68 ms, p99 25.25 ms and maximum 41.38 ms.
+These measure recording cadence, not original Xbox frame age or applied release
+latency. The clip remains unannotated calibration evidence, not a trained model.
+
+Live acquisition produced exact-case DrakulaVlad2 identity, 17 joints, the gray
+curved meter and the RHYTHM/DISTANCE feedback panel. Review exposed two proposal
+issues: waiting for the full recording could replace the first observed meter
+with a later, pose-scaled cached projection, and a floor-color flood could climb
+the similarly colored back wall. Setup now preserves the first complete image
+with an actually observed meter. Floor estimation additionally requires a broad
+dark-to-light floor transition and cannot grow above it. On the retained actual
+frame 654, the native policy returns the meter, feedback and a four-vertex floor
+outline; its rendered overlay was reviewed. This is a corrected saved-frame
+proposal, not movement/occlusion or multi-camera court acceptance. The user's
+exact game build/patch is pending before saving the capture profile. Artifacts:
+`artifacts/AutoCaptureModels/live22-reviewed-regions.json` and
+`AccessRelayStudio-Beta/TrainingResults/acquisition-20261114-021524-e8f690a3`.

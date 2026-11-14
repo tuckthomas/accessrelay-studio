@@ -201,7 +201,7 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
         }
         return candidates.Count == 1 ? candidates[0] : null;
     }
-    private static (VisionPoint[] Court, double Confidence) FindCourt(ReadOnlySpan<byte> bgra, int width, int height, int stride, VisionCrop body)
+    internal static (VisionPoint[] Court, double Confidence) FindCourt(ReadOnlySpan<byte> bgra, int width, int height, int stride, VisionCrop body)
     {
         const int gw = 160, gh = 90;
         int sy = Math.Clamp((int)((body.Top + body.Height * .98) * gh), 0, gh - 1);
@@ -209,9 +209,25 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
         (int Rg, int Bg, int Luma) Pixel(int x, int y, ReadOnlySpan<byte> pixels)
         { int i = Math.Min(height - 1, (int)((y + .5) * height / gh)) * stride + Math.Min(width - 1, (int)((x + .5) * width / gw)) * 4;
             return (pixels[i + 2] - pixels[i + 1], pixels[i] - pixels[i + 1], (pixels[i + 2] * 77 + pixels[i + 1] * 150 + pixels[i] * 29) >> 8); }
+        // A shared floor/wall color must not let the flood climb into the stands.
+        // Locate a broad dark-to-light floor transition before growing ground context.
+        int floorRow = -1, floorScore = 0;
+        int firstRow = Math.Max(2, (int)((body.Top - Math.Max(.15, body.Height * 1.5)) * gh));
+        int lastRow = Math.Min(gh - 2, (int)((body.Top + body.Height * .8) * gh));
+        for (int y = firstRow; y <= lastRow; y++)
+        {
+            int votes = 0, score = 0;
+            for (int x = 8; x < gw - 8; x++)
+            {
+                int rise = Pixel(x, y + 1, bgra).Luma - Pixel(x, y - 1, bgra).Luma;
+                if (rise >= 16) { votes++; score += Math.Min(70, rise); }
+            }
+            if (votes >= gw * .3 && score > floorScore) { floorScore = score; floorRow = y; }
+        }
+        if (floorRow < 0 || sy <= floorRow) return ([], 0);
         var seed = Pixel(sx, sy, bgra); var mask = new bool[gw * gh];
         for (int y = 0; y < gh; y++) for (int x = 0; x < gw; x++)
-        { var value = Pixel(x, y, bgra); mask[y * gw + x] = y >= Math.Max(0, (int)(body.Top * gh) - 12) && value.Luma > 35
+        { var value = Pixel(x, y, bgra); mask[y * gw + x] = y >= floorRow && value.Luma > 35
                 && Math.Abs(value.Rg - seed.Rg) < 28 && Math.Abs(value.Bg - seed.Bg) < 28 && Math.Abs(value.Luma - seed.Luma) < 65; }
         if (!mask[sy * gw + sx]) return ([], 0);
         var queue = new int[mask.Length]; int head = 0, tail = 1; queue[0] = sy * gw + sx; mask[queue[0]] = false;

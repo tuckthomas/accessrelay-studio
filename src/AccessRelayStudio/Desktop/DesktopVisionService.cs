@@ -442,7 +442,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         {
             Start(loadModel: false); _session!.SetPreviewEnabled(true);
             _notice = "Return to gameplay and take one manual shot. Its full gameplay clip is saved when controller input or a raised-hands pose triggers capture.";
-            long began = Stopwatch.GetTimestamp(); PreviewImage? image;
+            long began = Stopwatch.GetTimestamp(); PreviewImage? image, detected = null;
             while (true)
             {
                 CheckOperation(version, cancellation); _session.SetPreviewEnabled(true); UpdatePreview(force: true);
@@ -480,8 +480,12 @@ internal sealed class DesktopVisionService : IDesktopModule
                             File.WriteAllBytes(Path.Combine(diagnostics, phase + ".bmp"), image.Media.Bytes);
                             File.WriteAllBytes(Path.Combine(diagnostics, phase + ".json"), JsonSerializer.SerializeToUtf8Bytes(snapshot, DesktopJson.Options)); }, cancellation);
                 }
-                if (image?.Tracking is { Valid: true, AcquisitionComplete: true } && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1
-                    && _session.TrainingSnapshot is not { IsRecording: true }) break;
+                // Freeze an actual observed meter, never a cached projection after pose changes.
+                // Keep that exact image while the full calibration clip finishes saving.
+                if (detected is null && image?.Tracking is { Valid: true, AcquisitionComplete: true } observation
+                    && (!profile.UsesSupervisionOverlay || observation.MeterDetected)
+                    && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1) detected = image;
+                if (detected is not null && _session.TrainingSnapshot is not { IsRecording: true }) { image = detected; break; }
                 if (_session.Status.CaptureFailed) throw new InvalidOperationException(_session.Status.Message);
                 // Waiting for a person to shoot must not expire a successfully acquired player.
                 // Stop/profile/source changes still cancel; references rotate in 300 slots.

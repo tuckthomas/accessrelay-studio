@@ -2,6 +2,12 @@ using EliteScriptStudio.Packs.Nba2K27;
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
+if (args is ["--inspect-acquisition", var bitmap, var observation, var report])
+{
+    AutomaticIdentityChecks.InspectAcquisition(bitmap, observation, report);
+    return;
+}
+
 if (args is ["--inspect-calibration", var takeDirectory, var outputPath])
 {
     AutomaticIdentityChecks.InspectCalibration(takeDirectory, outputPath);
