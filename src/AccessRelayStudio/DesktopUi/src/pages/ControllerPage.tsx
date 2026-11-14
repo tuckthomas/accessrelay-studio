@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
 import { CoPilotInput } from '../CoPilotInput';
-import { ProfilePicker, TimingFields } from '../ui';
-import { recordingPhaseLabels, recordingPhases, phaseDuration, retimeRecording, type RecordingPhase } from '../recording-timing';
+import { ProfilePicker, TimingFields, FlickDirectionFields } from '../ui';
+import { recordingPhases, recordingFlickDirection, hasRecordingAxis, phaseDuration, retimeRecording, type RecordingPhase, type FlickDirection } from '../recording-timing';
+import { sequenceTimingFields } from '../sequence-timing';
 import { GamePacks } from '../GamePacks';
 import { useGameControllerTuning } from '../game-plugins/registry';
 import { currentTheme, themeChanged } from '../theme';
@@ -23,10 +24,6 @@ const suggestedModel = (state: any, status: any) => {
   if (name.includes('switch') || device?.vendorId === 0x057e) return 'switch-pro';
   return device ? 'xbox-one' : 'elite-series-2';
 };
-const delayFields: [string, string, number][] = [
-  ['startDelay', 'Before movement', 0], ['downSweep', 'Move down', 0], ['downHold', 'Hold down', 1], ['upSweep', 'Move up', 4],
-  ['upHold', 'Hold up', 1], ['centerHold', 'Return to center', 1], ['flick', 'Flick duration', 1], ['settle', 'Settle time', 1]
-];
 
 export function ControllerPage({ state, status, command }: PageProps) {
   const [tab, setTab] = useState('mapping'), [profileAction, setProfileAction] = useState(''), [profileName, setProfileName] = useState('');
@@ -302,9 +299,8 @@ function TimingEditor({state,status,command}:PageProps){
   const [nextVariant, setNextVariant] = useState<string | null>(null);
   return <div className={Tuning ? "split-grid" : "stack"}><Card title="Shape the sequence" description="Adjust each phase, then save it to the current controller profile."><div className="stack">
     <Field label="Built-in sequence"><Select value={variant} onValueChange={selectionValue=>{if(changed)setNextVariant(selectionValue);else setVariant(selectionValue);}}>{timings.map((entry:any)=><SelectOption key={entry.variant} value={entry.variant}>{entry.label}</SelectOption>)}</Select></Field>
-    <TimingFields fields={delayFields.map(([id,label,min])=>({id,label,min,value:draft[id]??min}))} onChange={(key,value)=>setDraft({...draft,[key]:Number(value)})}/>
-    <details><summary>Flick direction</summary><div className="form-grid">{['flickX','flickY'].map(key=><Field label={key==='flickX'?'Horizontal':'Vertical'} key={key}>
-      <Input type="number" min={-32768} max={32767} value={draft[key]} onChange={event=>setDraft({...draft,[key]:Number(event.target.value)})}/></Field>)}</div></details>
+    <TimingFields fields={sequenceTimingFields.map(field=>({...field,value:draft[field.id]??field.min}))} onChange={(key,value)=>setDraft({...draft,[key]:Number(value)})}/>
+    <FlickDirectionFields value={draft} onChange={(key,value)=>setDraft({...draft,[key]:value})}/>
     {error&&<Notice tone="danger">{error}</Notice>}{message&&<Notice tone="success">{message}</Notice>}
     <div className="editor-actions"><span className="saved-note">{changed?'Unsaved changes':'All changes saved'}</span><Button disabled={!changed||busy} onClick={()=>setDraft(item.timing)}>Reset</Button>
       <Button variant="primary" busy={busy} disabled={!changed||status.training} onClick={async()=>{setBusy(true);setError('');try{await command('timingSave',{variant,timing:draft});setMessage('Sequence timing saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}}><Icon name="save" size={16}/>Save timing</Button></div>
@@ -332,27 +328,34 @@ function RecordingEditor({id,pluginId,command,onClose}:{id:string;pluginId?:stri
   const Tuning = useGameControllerTuning(pluginId);
   const [recording,setRecording]=useState<any>(null),[original,setOriginal]=useState<any>(null),[index,setIndex]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [phaseChanges,setPhaseChanges]=useState<Partial<Record<RecordingPhase,string>>>({});
+  const [directionChange,setDirectionChange]=useState<FlickDirection|undefined>();
   const [trimStart,setTrimStart]=useState(0),[trimEnd,setTrimEnd]=useState(0),[intervalStart,setIntervalStart]=useState(0),[intervalEnd,setIntervalEnd]=useState(1),[intervalMs,setIntervalMs]=useState(100);
-  const load=useCallback(async()=>{const value=await command('recordGet',{id});setRecording(value);setOriginal(value);setPhaseChanges({});setTrimEnd(Math.max(0,value.frames.length-1));},[id,command]);
+  const load=useCallback(async()=>{const value=await command('recordGet',{id});setRecording(value);setOriginal(value);setPhaseChanges({});setDirectionChange(undefined);setTrimEnd(Math.max(0,value.frames.length-1));},[id,command]);
   useEffect(()=>{void load().catch(e=>setError(e instanceof Error?e.message:String(e)));},[load]);
   const phases=recording?recordingPhases(recording):{};
   let preview=recording,timingError='';
-  try { if(recording)preview=retimeRecording(recording,phaseChanges); } catch(e) { timingError=e instanceof Error?e.message:String(e); }
-  const editRecording=(value:any)=>{setRecording(value);setPhaseChanges({});setMessage('');};
+  try { if(recording)preview=retimeRecording(recording,phaseChanges,directionChange); } catch(e) { timingError=e instanceof Error?e.message:String(e); }
+  const editRecording=(value:any)=>{setRecording(value);setPhaseChanges({});setDirectionChange(undefined);setMessage('');};
   const frame=preview?.frames?.[index],dirty=!!timingError||JSON.stringify(preview)!==JSON.stringify(original);
   useUnsavedChanges(!!recording && dirty);
   const [closeRequested,setCloseRequested]=useState(false);
   const requestClose=()=>{if(busy)return;if(dirty)setCloseRequested(true);else onClose();};
   const updateFrame=(key:string,value:number)=>editRecording({...preview,frames:preview.frames.map((item:any,i:number)=>i===index?key==='timeMs'?{...item,timeMs:value}:{...item,state:{...item.state,[key]:value}}:item)});
-  const save=async()=>{if(timingError)return;setBusy(true);setError('');try{await command('recordUpdate',{recording:preview});setRecording(preview);setOriginal(structuredClone(preview));setPhaseChanges({});setMessage('Sequence saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
+  const save=async()=>{if(timingError)return;setBusy(true);setError('');try{await command('recordUpdate',{recording:preview});setRecording(preview);setOriginal(structuredClone(preview));setPhaseChanges({});setDirectionChange(undefined);setMessage('Sequence saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
   return <><Modal open onClose={requestClose} wide title="Refine your sequence" description="Adjust phase timing while keeping your recorded movement."
     footer={<><span className="saved-note">{dirty?'Unsaved changes':'All changes saved'}</span><Button onClick={requestClose} disabled={busy}>Close</Button><Button variant="primary" busy={busy} disabled={!recording||!dirty||!!timingError} onClick={()=>void save()}><Icon name="save" size={16}/>Save sequence</Button></>}>
     {error&&<Notice tone="danger">{error}</Notice>}{message&&<Notice tone="success">{message}</Notice>}{recording?<>
       <Field label="Sequence name"><Input disabled={busy} maxLength={80} value={recording.name} onChange={event=>setRecording({...recording,name:event.target.value})}/></Field>
-      <TimingFields disabled={busy} fields={(Object.entries(recordingPhaseLabels) as [RecordingPhase,string][]).map(([key,label])=>{
-        const interval=phases[key];return {id:key,label,value:phaseChanges[key]??(interval?phaseDuration(recording,interval):''),min:interval?interval.end-interval.start:0,disabled:!interval};
-      })} onChange={(key,value)=>{setPhaseChanges({...phaseChanges,[key]:value});setMessage('');}}/>
-      <p className="subtle">Measured from the first right-stick down/up movement; holds start at 75% deflection. Uncaptured phases stay unavailable.</p>
+      <TimingFields disabled={busy} fields={sequenceTimingFields.map(({id,label})=>{
+        const interval=phases[id];return {id,label,value:phaseChanges[id]??(interval?phaseDuration(recording,interval):0),min:0,disabled:id!=='startDelay'&&!hasRecordingAxis(recording,'rightY')};
+      })} onChange={(key,value)=>{const changes={...phaseChanges,[key]:value};
+        if(key==='flick'&&Number(value)>0&&!phases.settle&&!Number(phaseChanges.settle))changes.settle='1';
+        if(key==='flick'&&value==='0'){changes.settle='0';setDirectionChange(undefined);}
+        setPhaseChanges(changes);setMessage('');}}/>
+      <FlickDirectionFields value={directionChange??recordingFlickDirection(recording)} disabled={busy}
+        horizontalDisabled={!hasRecordingAxis(recording,'rightX')} verticalDisabled={!hasRecordingAxis(recording,'rightY')}
+        onChange={(key,value)=>{setDirectionChange({...recordingFlickDirection(recording),...directionChange,[key]:value});setMessage('');}}/>
+      <p className="subtle">Timings are estimated from the recorded movement. Zero means a stage is absent; enter a duration to add it.</p>
       {timingError&&<Notice tone="danger">{timingError}</Notice>}
       <TrajectoryChart recording={preview}/>
       <details><summary>Advanced sample editing</summary><fieldset disabled={busy||!!timingError} style={{border:0,padding:0,margin:0,minWidth:0}}>

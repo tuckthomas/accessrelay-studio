@@ -26,6 +26,16 @@ export function TimingFields({ fields, onChange, disabled = false }: {
         onChange={event => onChange(field.id, event.target.value)} /><span>ms</span>
     </div></div>)}</div>;
 }
+export function FlickDirectionFields({ value, onChange, disabled = false, horizontalDisabled = false, verticalDisabled = false }: {
+  value: { flickX: number; flickY: number }; onChange: (axis: 'flickX' | 'flickY', value: number) => void;
+  disabled?: boolean; horizontalDisabled?: boolean; verticalDisabled?: boolean;
+}) {
+  return <details><summary>Flick direction</summary><div className="form-grid">
+    {(['flickX', 'flickY'] as const).map(axis => <Field label={axis === 'flickX' ? 'Horizontal' : 'Vertical'} key={axis}>
+      <Input type="number" min={-32768} max={32767} value={value[axis]} disabled={disabled || (axis === 'flickX' ? horizontalDisabled : verticalDisabled)}
+        onChange={event => onChange(axis, Number(event.target.value))} /></Field>)}
+  </div></details>;
+}
 const unsavedDrafts = new Set<symbol>();
 const openModals = new Set<HTMLDialogElement>();
 const modalOpeners = new WeakMap<Element, HTMLElement>();

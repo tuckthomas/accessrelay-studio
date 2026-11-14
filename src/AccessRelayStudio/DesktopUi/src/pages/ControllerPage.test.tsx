@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControllerPage, TrajectoryChart } from './ControllerPage';
 import { previewState } from '../api';
+import { sequenceTimingFields } from '../sequence-timing';
 afterEach(cleanup);
 const setup = () => structuredClone(previewState.controller);
 
@@ -159,6 +160,13 @@ describe('controller workflows', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^Sequences/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const hold = await screen.findByLabelText('Hold down');
+    sequenceTimingFields.forEach(field => expect(screen.getByLabelText(field.label)).toBeTruthy());
+    expect((screen.getByLabelText('Before movement') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('Return to center') as HTMLInputElement).value).toBe('40');
+    expect((screen.getByLabelText('Flick duration') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('Settle time') as HTMLInputElement).value).toBe('0');
+    fireEvent.click(screen.getByText('Flick direction'));
+    expect(screen.getByLabelText('Horizontal')).toBeTruthy(); expect(screen.getByLabelText('Vertical')).toBeTruthy();
     expect((hold as HTMLInputElement).value).toBe('80');
     expect((screen.getByLabelText('Move down') as HTMLInputElement).value).toBe('40');
     expect((screen.getByLabelText('Move up') as HTMLInputElement).value).toBe('40');
@@ -187,7 +195,8 @@ describe('controller workflows', () => {
     render(<ControllerPage state={state} status={state.status} command={command} />);
     fireEvent.click(screen.getByRole('tab', { name: /^Sequences/ })); fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const hold = await screen.findByLabelText('Hold down');
-    expect((screen.getByLabelText('Move down') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Move down') as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText('Move down') as HTMLInputElement).value).toBe('0');
     fireEvent.change(hold, { target: { value: '' } });
     expect((screen.getByRole('button', { name: 'Save sequence' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(hold, { target: { value: '160' } });
@@ -198,6 +207,32 @@ describe('controller workflows', () => {
     expect((screen.getByLabelText('Sequence name') as HTMLInputElement).value).toBe('Keep this draft');
     fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }));
     expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
+  });
+  it('saves added delay, return, flick, settle and direction in the recording itself', async () => {
+    const state = setup(), id = '67e6e39e-531e-447b-a7a7-763287ca44ea';
+    const recording = { id, name: 'Shot', channels: 'rightStick', durationMs: 100, frames: [
+      { timeMs: 0, state: { rightX: 0, rightY: -32768 } }, { timeMs: 80, state: { rightX: 0, rightY: 32767 } }] };
+    state.activeProfile.recordings = [{ id, name: 'Shot', durationMs: 100, frameCount: 2 }];
+    const command = vi.fn(async (action: string, _args?: any) => action === 'recordGet' ? structuredClone(recording) : null);
+    render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Sequences/ })); fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    await screen.findByLabelText('Before movement');
+    for (const [label, value] of [['Before movement','50'],['Return to center','80'],['Flick duration','60'],['Settle time','40']])
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByText('Flick direction'));
+    fireEvent.change(screen.getByLabelText('Horizontal'), { target: { value: '32767' } });
+    fireEvent.change(screen.getByLabelText('Vertical'), { target: { value: '0' } });
+    expect(command.mock.calls.filter(([action]) => action === 'recordUpdate')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Save sequence' }));
+    await screen.findByText('Sequence saved.');
+    const saved = command.mock.calls.find(([action]) => action === 'recordUpdate')?.[1].recording;
+    expect(saved.durationMs).toBe(330);
+    expect(saved.frames.some((frame: any) => frame.state.rightX === 32767 && frame.state.rightY === 0)).toBe(true);
+    expect((screen.getByLabelText('Before movement') as HTMLInputElement).value).toBe('50');
+    expect((screen.getByLabelText('Return to center') as HTMLInputElement).value).toBe('80');
+    expect((screen.getByLabelText('Flick duration') as HTMLInputElement).value).toBe('60');
+    expect((screen.getByLabelText('Settle time') as HTMLInputElement).value).toBe('40');
+    expect((screen.getByLabelText('Horizontal') as HTMLInputElement).value).toBe('32767');
   });
   it('keeps setup deletion deliberate and disables deleting the last setup', () => {
     const state = setup(), command = vi.fn();
