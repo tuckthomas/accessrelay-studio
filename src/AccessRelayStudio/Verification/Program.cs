@@ -20,6 +20,12 @@ if (args is ["--capture-anchors"])
     return;
 }
 
+if (args is ["--court-only"])
+{
+    AutomaticIdentityChecks.CheckCourt();
+    return;
+}
+
 if (args is ["--marketplace", var marketplaceOutput])
 {
     await MarketplaceVerification.RunAsync(marketplaceOutput);

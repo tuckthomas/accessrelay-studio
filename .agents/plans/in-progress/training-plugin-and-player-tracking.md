@@ -515,3 +515,32 @@ Next steps:
       first observation-only candidate. Keep training/validation footage separate;
       held-out accuracy and actual controller timing remain separate acceptance.
 - [ ] Investigate occasional capture-consumer stalls using the new stage timings.
+
+### CrewHQ multicolor court estimate — beta.27
+
+The user's screenshot exposed a seed-color flood-fill defect: standing beside the
+wood-colored paint restricted the estimated floor to that color component. The
+original native estimator reproduces the 15-vertex paint-only outline on a cropped
+copy of the supplied screenshot. This is an estimated floor-context polygon; the
+raw gameplay recorder still retains the full scene and never uses it as a mask.
+
+The NBA adapter now learns recurring floor appearances from median patches at
+several rows and columns below the existing floor boundary. It connects paint,
+gray flooring and printed graphics without broadening the wall exclusion. A small
+seed search handles a loose ball or line at the player's feet. The hull uses only
+row endpoints, limiting the sort to 180 points while retaining the same convex
+hull as all connected grid points. Cached preparation binds a new analysis policy
+so old floor annotations remain separate rather than appearing updated.
+
+The corrected native result includes both gray sides and the paint on the user's
+reference while excluding the wall sample. Focused checks passed for mixed floor
+colors, matching wall color, obstructed seed, changing player seed position,
+1080p/1440p normalized geometry and missing-boundary rejection. No live screen or
+controller actions, GPU inference or new training recordings were used. This does
+not establish semantic sideline detection or acceptance of all moving cameras.
+
+Evidence is under `artifacts/CourtBoundary/`: `before.json`, `after.json`,
+`reference-provenance.json`, `reference-result.json`, `court-comparison.png`,
+`focused-check.log` and the native build logs. Beta.27 publication/installation
+receipts will be stored there. The Marketplace package contract is unchanged;
+this is an implementation fix in its reviewed NBA adapter.

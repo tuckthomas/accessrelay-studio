@@ -249,22 +249,82 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
             if (votes >= gw * .3 && score > floorScore) { floorScore = score; floorRow = y; }
         }
         if (floorRow < 0 || sy <= floorRow) return ([], 0);
-        var seed = Pixel(sx, sy, bgra); var mask = new bool[gw * gh];
+        // A court can contain wood, paint and large graphics. Learn repeated floor
+        // appearances across the ground plane rather than the color beside one foot.
+        // Median patches reject thin markings; support in separate rows/columns
+        // prevents one ball, jersey or UI label from defining a floor appearance.
+        var colors = new List<(int Rg, int Bg, int Luma, int Count, int Rows, int Columns)>();
+        Span<int> rg = stackalloc int[9], blue = stackalloc int[9], luma = stackalloc int[9];
+        for (int row = 0; row < 6; row++) for (int column = 0; column < 9; column++)
+        {
+            int x = 12 + column * (gw - 25) / 8;
+            int y = Math.Clamp(floorRow + 3 + row * Math.Max(0, gh - floorRow - 7) / 5, 1, gh - 2);
+            double nx = (x + .5) / gw, ny = (y + .5) / gh;
+            if (nx > body.Left - .025 && nx < body.Left + body.Width + .025
+                && ny > body.Top - .025 && ny < body.Top + body.Height + .025) continue;
+            int index = 0;
+            for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++)
+            {
+                var value = Pixel(x + dx, y + dy, bgra);
+                rg[index] = value.Rg; blue[index] = value.Bg; luma[index++] = value.Luma;
+            }
+            rg.Sort(); blue.Sort(); luma.Sort();
+            if (luma[4] <= 35) continue;
+            int match = -1;
+            for (int i = 0; i < colors.Count; i++)
+                if (Math.Abs(colors[i].Rg - rg[4]) < 16 && Math.Abs(colors[i].Bg - blue[4]) < 16
+                    && Math.Abs(colors[i].Luma - luma[4]) < 24) { match = i; break; }
+            if (match < 0) colors.Add((rg[4], blue[4], luma[4], 1, 1 << row, 1 << column));
+            else
+            {
+                var color = colors[match]; int count = color.Count + 1;
+                colors[match] = ((color.Rg * color.Count + rg[4]) / count, (color.Bg * color.Count + blue[4]) / count,
+                    (color.Luma * color.Count + luma[4]) / count, count, color.Rows | (1 << row), color.Columns | (1 << column));
+            }
+        }
+        var palette = colors.Where(c => c.Count >= 4 && (c.Rows & (c.Rows - 1)) != 0
+            && (c.Columns & (c.Columns - 1)) != 0).ToArray();
+        if (palette.Length == 0) return ([], 0);
+        var mask = new bool[gw * gh];
         for (int y = 0; y < gh; y++) for (int x = 0; x < gw; x++)
-        { var value = Pixel(x, y, bgra); mask[y * gw + x] = y >= floorRow && value.Luma > 35
-                && Math.Abs(value.Rg - seed.Rg) < 28 && Math.Abs(value.Bg - seed.Bg) < 28 && Math.Abs(value.Luma - seed.Luma) < 65; }
-        if (!mask[sy * gw + sx]) return ([], 0);
+        {
+            if (y < floorRow) continue;
+            var value = Pixel(x, y, bgra);
+            if (value.Luma <= 35) continue;
+            foreach (var color in palette)
+                if (Math.Abs(value.Rg - color.Rg) < 28 && Math.Abs(value.Bg - color.Bg) < 28
+                    && Math.Abs(value.Luma - color.Luma) < 65) { mask[y * gw + x] = true; break; }
+        }
+        if (!mask[sy * gw + sx])
+        {
+            // A court line or loose ball may cover the exact foot-adjacent seed.
+            bool found = false;
+            for (int radius = 1; radius <= 3 && !found; radius++)
+                for (int dy = -radius; dy <= radius && !found; dy++) for (int dx = -radius; dx <= radius; dx++)
+                {
+                    int x = sx + dx, y = sy + dy;
+                    if (x < 0 || x >= gw || y < floorRow || y >= gh || !mask[y * gw + x]) continue;
+                    sx = x; sy = y; found = true; break;
+                }
+            if (!found) return ([], 0);
+        }
         var queue = new int[mask.Length]; int head = 0, tail = 1; queue[0] = sy * gw + sx; mask[queue[0]] = false;
-        var points = new List<VisionPoint>();
+        var rowLeft = new int[gh]; Array.Fill(rowLeft, gw);
+        var rowRight = new int[gh]; Array.Fill(rowRight, -1);
         while (head < tail)
         {
             int p = queue[head++], x = p % gw, y = p / gw;
-            points.Add(new((x + .5) / gw, (y + .5) / gh));
+            rowLeft[y] = Math.Min(rowLeft[y], x); rowRight[y] = Math.Max(rowRight[y], x);
             for (int d = 0; d < 4; d++) for (int step = 1; step <= 2; step++)
             { int n = p + (d == 0 ? -step : d == 1 ? step : d == 2 ? -gw * step : gw * step);
                 if (n >= 0 && n < mask.Length && (d >= 2 || n / gw == y) && mask[n]) { mask[n] = false; queue[tail++] = n; } }
         }
         if (tail < mask.Length * .06 || tail > mask.Length * .85) return ([], 0);
+        // Row endpoints have the same convex hull as every interior grid point.
+        // This bounds the hull sort to 180 points even when the whole floor is found.
+        var points = new List<VisionPoint>(gh * 2);
+        for (int y = 0; y < gh; y++) if (rowRight[y] >= 0)
+        { points.Add(new((rowLeft[y] + .5) / gw, (y + .5) / gh)); points.Add(new((rowRight[y] + .5) / gw, (y + .5) / gh)); }
         var sorted = points.OrderBy(p => p.X).ThenBy(p => p.Y).ToArray(); var hull = new List<VisionPoint>();
         static double Cross(VisionPoint a, VisionPoint b, VisionPoint c) => (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
         foreach (var point in sorted) { while (hull.Count >= 2 && Cross(hull[^2], hull[^1], point) <= 0) hull.RemoveAt(hull.Count - 1); hull.Add(point); }

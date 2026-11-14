@@ -10,7 +10,7 @@ namespace EliteScriptStudio.Vision;
 /// <summary>Offline exact-frame annotation. Original scene/controller evidence is never overwritten.</summary>
 internal static class VisionTrainingPreparation
 {
-    private const string AnalysisPolicy = "identity-pose-suppression-v2";
+    private const string AnalysisPolicy = "identity-pose-multicolor-floor-v3";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
 

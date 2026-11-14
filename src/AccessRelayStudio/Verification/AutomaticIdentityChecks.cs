@@ -6,6 +6,49 @@ using System.Diagnostics;
 
 internal static class AutomaticIdentityChecks
 {
+    internal static void CheckCourt()
+    {
+        VisionPoint[]? previous = null;
+        foreach (var (width, height) in new[] { (1920, 1080), (2560, 1440) })
+        {
+            var pixels = new byte[width * height * 4];
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            {
+                double nx = x / (double)width, ny = y / (double)height;
+                // Wall and paint share a color. A dark baseboard separates the floor.
+                int r = 174, g = 118, b = 64;
+                if (ny >= .32 && ny < .35) r = g = b = 15;
+                else if (ny >= .35)
+                {
+                    r = g = b = 150;
+                    if (nx > .4 && nx < .65 && ny > .45 && ny < .85) { r = 174; g = 118; b = 64; }
+                    else if (nx > .1 && nx < .3 && ny > .6 && ny < .8) r = g = b = 90;
+                    // A small obstruction lies over the foot-adjacent seed.
+                    if (Math.Abs(nx - .508) < .008 && Math.Abs(ny - .694) < .012) r = g = b = 10;
+                }
+                int i = (y * width + x) * 4;
+                pixels[i] = (byte)b; pixels[i + 1] = (byte)g; pixels[i + 2] = (byte)r; pixels[i + 3] = 255;
+            }
+            var painted = Nba2K27AutomaticTracker.FindCourt(pixels, width, height, width * 4, new(.42, .38, .08, .32));
+            var gray = Nba2K27AutomaticTracker.FindCourt(pixels, width, height, width * 4, new(.74, .38, .08, .32));
+            foreach (var result in new[] { painted, gray })
+            {
+                Check(result.Court.Length >= 3 && result.Confidence > 0, "A multicolor floor was not acquired.");
+                foreach (var point in new[] { new VisionPoint(.15, .75), new(.85, .75), new(.5, .6) })
+                    Check(Nba2K27CaptureConfiguration.Inside(result.Court, point), "Floor colors or printed graphics split the court into a local patch.");
+                Check(!Nba2K27CaptureConfiguration.Inside(result.Court, new(.5, .2)), "Matching wall paint leaked into the court.");
+            }
+            Check(painted.Court.SequenceEqual(gray.Court), "Moving from paint to gray floor changed the court extent.");
+            if (previous is not null) Check(previous.SequenceEqual(painted.Court), "1080p and 1440p produced different normalized court estimates.");
+            previous = painted.Court;
+        }
+        var flat = new byte[320 * 180 * 4];
+        for (int i = 0; i < flat.Length; i += 4) { flat[i] = flat[i + 1] = flat[i + 2] = 150; flat[i + 3] = 255; }
+        Check(Nba2K27AutomaticTracker.FindCourt(flat, 320, 180, 320 * 4, new(.4, .4, .1, .3)).Court.Length == 0,
+            "A scene without a floor boundary fabricated a court.");
+        Console.WriteLine("SUCCESS: mixed wood/gray/graphics, foot-seed obstruction, matching-wall exclusion, seed-position stability and 1080p/1440p court geometry.");
+    }
+
     internal static void InspectAcquisition(string bitmap, string observation, string output)
     {
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
