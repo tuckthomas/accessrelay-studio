@@ -14,6 +14,18 @@ import {
 } from 'lucide-react';
 
 export interface PageProps { state: any; status: any; command: (action: string, args?: any) => Promise<any> }
+export function TimingFields({ fields, onChange, disabled = false }: {
+  fields: { id: string; label: string; value: number | string; min: number; disabled?: boolean }[];
+  onChange: (id: string, value: string) => void; disabled?: boolean;
+}) {
+  const prefix = useId();
+  return <div className="timing-grid">{fields.map(field => <div className="timing-row" key={field.id}>
+    <label htmlFor={prefix + field.id}>{field.label}</label><div className="field-unit">
+      <Input id={prefix + field.id} type="number" min={field.min} max={10000} step={1} value={field.value}
+        disabled={disabled || field.disabled} placeholder={field.disabled ? 'Not captured' : undefined}
+        onChange={event => onChange(field.id, event.target.value)} /><span>ms</span>
+    </div></div>)}</div>;
+}
 const unsavedDrafts = new Set<symbol>();
 const openModals = new Set<HTMLDialogElement>();
 const modalOpeners = new WeakMap<Element, HTMLElement>();

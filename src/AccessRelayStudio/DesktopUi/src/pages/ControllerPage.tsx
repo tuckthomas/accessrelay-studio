@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
 import { CoPilotInput } from '../CoPilotInput';
-import { ProfilePicker } from '../ui';
+import { ProfilePicker, TimingFields } from '../ui';
+import { recordingPhaseLabels, recordingPhases, phaseDuration, retimeRecording, type RecordingPhase } from '../recording-timing';
 import { GamePacks } from '../GamePacks';
 import { useGameControllerTuning } from '../game-plugins/registry';
 import { currentTheme, themeChanged } from '../theme';
@@ -244,7 +245,7 @@ function Sequences({ state, status, command }: PageProps) {
   const [name,setName]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const records=state.activeProfile?.recordings||[];
   const [nextView, setNextView] = useState<string | null>(null);
-  return <div className="stack"><div className="row-spread"><div><h2>Small sequences. Your own rhythm.</h2><p className="subtle">Keep a movement you recorded, or tune a built-in sequence.</p></div>
+  return <div className="stack"><div className="row-spread"><div><h2>Sequences</h2><p className="subtle">Recordings replay your captured input. Built-in sequences generate movement from timing settings.</p></div>
     <Button onClick={()=>void command('recordImport').catch(()=>{})}><Icon name="upload" size={16}/>Import sequence</Button></div>
     <Tabs value={view} onChange={next=>{if(next!==view){if(hasUnsavedChanges())setNextView(next);else setView(next);}}} ariaLabel="Sequence type" items={[{id:'saved',label:'Your recordings',count:records.length},{id:'builtIn',label:'Built-in sequences'}]}/>
     {view==='saved'?<div className="split-grid"><Card title="Your saved sequences" description="Choose one to inspect its trajectory and edit individual movements.">
@@ -301,8 +302,7 @@ function TimingEditor({state,status,command}:PageProps){
   const [nextVariant, setNextVariant] = useState<string | null>(null);
   return <div className={Tuning ? "split-grid" : "stack"}><Card title="Shape the sequence" description="Adjust each phase, then save it to the current controller profile."><div className="stack">
     <Field label="Built-in sequence"><Select value={variant} onValueChange={selectionValue=>{if(changed)setNextVariant(selectionValue);else setVariant(selectionValue);}}>{timings.map((entry:any)=><SelectOption key={entry.variant} value={entry.variant}>{entry.label}</SelectOption>)}</Select></Field>
-    <div className="timing-grid">{delayFields.map(([key,label,min])=><div className="timing-row" key={key}><label htmlFor={'timing-'+key}>{label}</label><div className="field-unit">
-      <Input id={'timing-'+key} type="number" min={min} max={10000} value={draft[key]??min} onChange={event=>setDraft({...draft,[key]:Number(event.target.value)})}/><span>ms</span></div></div>)}</div>
+    <TimingFields fields={delayFields.map(([id,label,min])=>({id,label,min,value:draft[id]??min}))} onChange={(key,value)=>setDraft({...draft,[key]:Number(value)})}/>
     <details><summary>Flick direction</summary><div className="form-grid">{['flickX','flickY'].map(key=><Field label={key==='flickX'?'Horizontal':'Vertical'} key={key}>
       <Input type="number" min={-32768} max={32767} value={draft[key]} onChange={event=>setDraft({...draft,[key]:Number(event.target.value)})}/></Field>)}</div></details>
     {error&&<Notice tone="danger">{error}</Notice>}{message&&<Notice tone="success">{message}</Notice>}
@@ -331,37 +331,49 @@ export function TrajectoryChart({data,recording}:{data?:any;recording?:any}){
 function RecordingEditor({id,pluginId,command,onClose}:{id:string;pluginId?:string;command:PageProps['command'];onClose:()=>void}){
   const Tuning = useGameControllerTuning(pluginId);
   const [recording,setRecording]=useState<any>(null),[original,setOriginal]=useState<any>(null),[index,setIndex]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  const [phaseChanges,setPhaseChanges]=useState<Partial<Record<RecordingPhase,string>>>({});
   const [trimStart,setTrimStart]=useState(0),[trimEnd,setTrimEnd]=useState(0),[intervalStart,setIntervalStart]=useState(0),[intervalEnd,setIntervalEnd]=useState(1),[intervalMs,setIntervalMs]=useState(100);
-  const load=useCallback(async()=>{const value=await command('recordGet',{id});setRecording(value);setOriginal(value);setTrimEnd(Math.max(0,value.frames.length-1));},[id,command]);
+  const load=useCallback(async()=>{const value=await command('recordGet',{id});setRecording(value);setOriginal(value);setPhaseChanges({});setTrimEnd(Math.max(0,value.frames.length-1));},[id,command]);
   useEffect(()=>{void load().catch(e=>setError(e instanceof Error?e.message:String(e)));},[load]);
-  const frame=recording?.frames?.[index],dirty=JSON.stringify(recording)!==JSON.stringify(original);
+  const phases=recording?recordingPhases(recording):{};
+  let preview=recording,timingError='';
+  try { if(recording)preview=retimeRecording(recording,phaseChanges); } catch(e) { timingError=e instanceof Error?e.message:String(e); }
+  const editRecording=(value:any)=>{setRecording(value);setPhaseChanges({});setMessage('');};
+  const frame=preview?.frames?.[index],dirty=!!timingError||JSON.stringify(preview)!==JSON.stringify(original);
   useUnsavedChanges(!!recording && dirty);
   const [closeRequested,setCloseRequested]=useState(false);
   const requestClose=()=>{if(busy)return;if(dirty)setCloseRequested(true);else onClose();};
-  const updateFrame=(key:string,value:number)=>setRecording({...recording,frames:recording.frames.map((item:any,i:number)=>i===index?key==='timeMs'?{...item,timeMs:value}:{...item,state:{...item.state,[key]:value}}:item)});
-  const save=async()=>{setBusy(true);setError('');try{await command('recordUpdate',{recording});setOriginal(structuredClone(recording));setMessage('Sequence saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
-  return <><Modal open onClose={requestClose} wide title="Refine your sequence" description="Inspect the movement, trim the take, or adjust the saved samples."
-    footer={<><span className="saved-note">{dirty?'Unsaved changes':'All changes saved'}</span><Button onClick={requestClose} disabled={busy}>Close</Button><Button variant="primary" busy={busy} disabled={!recording||!dirty} onClick={()=>void save()}><Icon name="save" size={16}/>Save sequence</Button></>}>
+  const updateFrame=(key:string,value:number)=>editRecording({...preview,frames:preview.frames.map((item:any,i:number)=>i===index?key==='timeMs'?{...item,timeMs:value}:{...item,state:{...item.state,[key]:value}}:item)});
+  const save=async()=>{if(timingError)return;setBusy(true);setError('');try{await command('recordUpdate',{recording:preview});setRecording(preview);setOriginal(structuredClone(preview));setPhaseChanges({});setMessage('Sequence saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
+  return <><Modal open onClose={requestClose} wide title="Refine your sequence" description="Adjust phase timing while keeping your recorded movement."
+    footer={<><span className="saved-note">{dirty?'Unsaved changes':'All changes saved'}</span><Button onClick={requestClose} disabled={busy}>Close</Button><Button variant="primary" busy={busy} disabled={!recording||!dirty||!!timingError} onClick={()=>void save()}><Icon name="save" size={16}/>Save sequence</Button></>}>
     {error&&<Notice tone="danger">{error}</Notice>}{message&&<Notice tone="success">{message}</Notice>}{recording?<>
-      <div className="form-grid"><Field label="Sequence name"><Input maxLength={80} value={recording.name} onChange={event=>setRecording({...recording,name:event.target.value})}/></Field>
-        <Field label="Total duration (ms)"><Input type="number" min={1} max={10000} value={recording.durationMs} onChange={event=>setRecording({...recording,durationMs:Number(event.target.value)})}/></Field></div>
-      <TrajectoryChart recording={recording}/>
+      <Field label="Sequence name"><Input disabled={busy} maxLength={80} value={recording.name} onChange={event=>setRecording({...recording,name:event.target.value})}/></Field>
+      <TimingFields disabled={busy} fields={(Object.entries(recordingPhaseLabels) as [RecordingPhase,string][]).map(([key,label])=>{
+        const interval=phases[key];return {id:key,label,value:phaseChanges[key]??(interval?phaseDuration(recording,interval):''),min:interval?interval.end-interval.start:0,disabled:!interval};
+      })} onChange={(key,value)=>{setPhaseChanges({...phaseChanges,[key]:value});setMessage('');}}/>
+      <p className="subtle">Measured from the first right-stick down/up movement; holds start at 75% deflection. Uncaptured phases stay unavailable.</p>
+      {timingError&&<Notice tone="danger">{timingError}</Notice>}
+      <TrajectoryChart recording={preview}/>
+      <details><summary>Advanced sample editing</summary><fieldset disabled={busy||!!timingError} style={{border:0,padding:0,margin:0,minWidth:0}}>
+      <Field label="Total duration (ms)"><Input type="number" min={1} max={10000} value={preview.durationMs} onChange={event=>editRecording({...preview,durationMs:Number(event.target.value)})}/></Field>
       <details><summary>Trim the beginning or end</summary><div className="form-grid"><Field label="First sample"><Input type="number" min={0} max={recording.frames.length-1} value={trimStart} onChange={event=>setTrimStart(Number(event.target.value))}/></Field>
         <Field label="Last sample"><Input type="number" min={trimStart} max={recording.frames.length-1} value={trimEnd} onChange={event=>setTrimEnd(Number(event.target.value))}/></Field></div>
         <Button style={{marginTop:14}} onClick={()=>{if(trimStart<0||trimEnd<trimStart||trimEnd>=recording.frames.length){setError('Choose a valid first and last sample.');return;}
-          const start=recording.frames[trimStart].timeMs,end=trimEnd+1<recording.frames.length?recording.frames[trimEnd+1].timeMs:recording.durationMs;
-          const frames=recording.frames.slice(trimStart,trimEnd+1).map((item:any)=>({...item,timeMs:item.timeMs-start}));
-          setRecording({...recording,durationMs:end-start,frames});setIndex(0);setTrimStart(0);setTrimEnd(frames.length-1);setMessage('Trim is ready. Save the sequence to keep it.');}}>Trim to these samples</Button></details>
+          const start=preview.frames[trimStart].timeMs,end=trimEnd+1<preview.frames.length?preview.frames[trimEnd+1].timeMs:preview.durationMs;
+          const frames=preview.frames.slice(trimStart,trimEnd+1).map((item:any)=>({...item,timeMs:item.timeMs-start}));
+          editRecording({...preview,durationMs:end-start,frames});setIndex(0);setTrimStart(0);setTrimEnd(frames.length-1);setMessage('Trim is ready. Save the sequence to keep it.');}}>Trim to these samples</Button></details>
       <details><summary>Adjust an interval</summary><div className="form-grid form-grid-three">
         <Field label="Start sample (included)"><Input type="number" min={0} max={recording.frames.length-1} value={intervalStart} onChange={event=>setIntervalStart(Number(event.target.value))}/></Field>
         <Field label="End boundary (excluded)"><Input type="number" min={intervalStart+1} max={recording.frames.length} value={intervalEnd} onChange={event=>setIntervalEnd(Number(event.target.value))}/></Field>
         <Field label="New interval duration (ms)"><Input type="number" min={1} max={10000} value={intervalMs} onChange={event=>setIntervalMs(Number(event.target.value))}/></Field></div>
-        <Button style={{marginTop:14}} busy={busy} onClick={async()=>{setBusy(true);setError('');try{await command('recordRetime',{id,startFrame:intervalStart,endFrame:intervalEnd,durationMs:intervalMs,...(dirty?{recording}:{})});await load();setMessage('Interval timing saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}}>Save interval timing</Button></details>
+        <Button style={{marginTop:14}} busy={busy} onClick={async()=>{setBusy(true);setError('');try{await command('recordRetime',{id,startFrame:intervalStart,endFrame:intervalEnd,durationMs:intervalMs,...(dirty?{recording:preview}:{})});await load();setMessage('Interval timing saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}}>Save interval timing</Button></details>
       <details><summary>Inspect and edit individual samples</summary><div className="data-table-wrap"><table className="data-table"><thead><tr><th>Sample</th><th>Time</th><th>Right X</th><th>Right Y</th><th>Buttons</th></tr></thead>
-        <tbody>{recording.frames.map((item:any,i:number)=><tr key={i} className={index===i?'selected':''}><td><Button variant="unstyled" onClick={()=>setIndex(i)} aria-label={'Edit sample '+i}>{i}</Button></td><td>{item.timeMs} ms</td><td>{item.state.rightX}</td><td>{item.state.rightY}</td><td>{item.state.buttons}</td></tr>)}</tbody></table></div>
+        <tbody>{preview.frames.map((item:any,i:number)=><tr key={i} className={index===i?'selected':''}><td><Button variant="unstyled" onClick={()=>setIndex(i)} aria-label={'Edit sample '+i}>{i}</Button></td><td>{item.timeMs} ms</td><td>{item.state.rightX}</td><td>{item.state.rightY}</td><td>{item.state.buttons}</td></tr>)}</tbody></table></div>
         <div className="frame-fields" style={{marginTop:15}}>{['timeMs','rightX','rightY','leftX','leftY','leftTrigger','rightTrigger','buttons'].map(key=><Field key={key} label={humanize(key)}>
-          <Input type="number" min={key==='timeMs'||key.includes('Trigger')||key==='buttons'?0:-32768} max={key==='buttons'?65535:key.includes('Trigger')?255:key==='timeMs'?recording.durationMs:32767}
+          <Input type="number" min={key==='timeMs'||key.includes('Trigger')||key==='buttons'?0:-32768} max={key==='buttons'?65535:key.includes('Trigger')?255:key==='timeMs'?preview.durationMs:32767}
             value={key==='timeMs'?frame?.timeMs||0:frame?.state[key]||0} onChange={event=>updateFrame(key,Number(event.target.value))}/></Field>)}</div></details>
+      </fieldset></details>
       {Tuning && <Tuning id={id} command={command} disabled={dirty} onApplied={load}/>}
     </>:!error&&<p className="subtle">Opening your saved sequence…</p>}
   </Modal><DiscardDialog open={closeRequested} onKeep={()=>setCloseRequested(false)} onDiscard={onClose}/></>;

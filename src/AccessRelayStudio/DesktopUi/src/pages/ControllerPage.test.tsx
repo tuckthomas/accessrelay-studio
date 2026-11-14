@@ -78,6 +78,7 @@ describe('controller workflows', () => {
     render(<ControllerPage state={state} status={state.status} command={command} />);
     fireEvent.click(screen.getByRole('tab', { name: /Sequences/ })); fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     fireEvent.change(await screen.findByLabelText('Sequence name'), { target: { value: 'Uncommitted draft' } });
+    fireEvent.click(screen.getByText('Advanced sample editing'));
     fireEvent.click(screen.getByText('Adjust an interval'));
     fireEvent.click(screen.getByRole('button', { name: 'Save interval timing' }));
     expect(await screen.findByText('Choose a valid interval')).toBeTruthy();
@@ -146,6 +147,57 @@ describe('controller workflows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save timing' }));
     await waitFor(() => expect(command).toHaveBeenCalledWith('timingSave', expect.objectContaining({ variant: 'rhythm', timing: expect.objectContaining({ downHold: 550 }) })));
     expect(command.mock.calls.some(([name]) => ['outputStart', 'scriptsSet'].includes(name))).toBe(false);
+  });
+  it('edits measured recording phases with the shared timing controls and saves one complete draft', async () => {
+    const state = setup(), id = '67e6e39e-531e-447b-a7a7-763287ca44ea';
+    const recording = { id, name: 'Shot', channels: 'rightStick', durationMs: 250,
+      frames: [[0, -4000], [40, -32768], [120, -5000], [160, 32767], [210, 0]]
+        .map(([timeMs, rightY], i) => ({ timeMs, state: { rightX: i * 100, rightY } })) };
+    state.activeProfile.recordings = [{ id, name: 'Shot', durationMs: 250, frameCount: 5 }];
+    const command = vi.fn(async (action: string, _args?: any) => action === 'recordGet' ? structuredClone(recording) : null);
+    render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Sequences/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const hold = await screen.findByLabelText('Hold down');
+    expect((hold as HTMLInputElement).value).toBe('80');
+    expect((screen.getByLabelText('Move down') as HTMLInputElement).value).toBe('40');
+    expect((screen.getByLabelText('Move up') as HTMLInputElement).value).toBe('40');
+    expect((screen.getByLabelText('Hold up') as HTMLInputElement).value).toBe('50');
+    expect(hold.closest('.timing-grid')).toBeTruthy();
+    fireEvent.change(hold, { target: { value: '160' } });
+    fireEvent.change(screen.getByLabelText('Sequence name'), { target: { value: 'Adjusted shot' } });
+    expect(command.mock.calls.some(([action]) => action === 'recordUpdate')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Save sequence' }));
+    await screen.findByText('Sequence saved.');
+    const saved = command.mock.calls.find(([action]) => action === 'recordUpdate')?.[1].recording;
+    expect(saved.name).toBe('Adjusted shot'); expect(saved.durationMs).toBe(330);
+    expect(saved.frames.map((frame: any) => frame.timeMs)).toEqual([0, 40, 200, 240, 290]);
+    expect(saved.frames.map((frame: any) => frame.state)).toEqual(recording.frames.map(frame => frame.state));
+    expect(command.mock.calls.some(([action]) => ['recordRetime', 'outputStart', 'scriptsSet'].includes(action))).toBe(false);
+  });
+  it('retains phase and name drafts when saving fails and blocks an invalid timing', async () => {
+    const state = setup(), id = '67e6e39e-531e-447b-a7a7-763287ca44ea';
+    const recording = { id, name: 'Shot', durationMs: 100, frames: [
+      { timeMs: 0, state: { rightY: -32768 } }, { timeMs: 80, state: { rightY: 32767 } }] };
+    state.activeProfile.recordings = [{ id, name: 'Shot', durationMs: 100, frameCount: 2 }];
+    const command = vi.fn(async (action: string) => {
+      if (action === 'recordGet') return structuredClone(recording);
+      throw new Error('Profile changed on disk');
+    });
+    render(<ControllerPage state={state} status={state.status} command={command} />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Sequences/ })); fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const hold = await screen.findByLabelText('Hold down');
+    expect((screen.getByLabelText('Move down') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(hold, { target: { value: '' } });
+    expect((screen.getByRole('button', { name: 'Save sequence' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(hold, { target: { value: '160' } });
+    fireEvent.change(screen.getByLabelText('Sequence name'), { target: { value: 'Keep this draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save sequence' }));
+    await screen.findByText('Profile changed on disk');
+    expect((hold as HTMLInputElement).value).toBe('160');
+    expect((screen.getByLabelText('Sequence name') as HTMLInputElement).value).toBe('Keep this draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }));
+    expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
   });
   it('keeps setup deletion deliberate and disables deleting the last setup', () => {
     const state = setup(), command = vi.fn();
