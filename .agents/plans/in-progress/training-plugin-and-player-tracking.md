@@ -114,3 +114,13 @@ The local interpreter stays on M: in `artifacts/GpuProbePython`; the installatio
 results default beside the installed app on M:. Python is used only for offline
 training/evaluation; live inference remains native ONNX Runtime in the C# app.
 Assistant MCP facts do not include capture settings or the raw reference image.
+
+
+Beta.18 installed from `ac9d38d` at the existing project-local executable. Native
+UI verification confirmed the installed NBA adapter, saved meter-on profile,
+host-owned Chrome source, four anchor/feedback controls and Train model tab. The
+training interpreter resolves to the M: environment. The first WebView launch
+reported an interface failure; one Retry recovered it and subsequent navigation
+succeeded. The cause is unconfirmed. Installation receipt:
+`artifacts/AnchorSmoke/installation.json`. No gameplay reference calibration or
+user take was recorded during this installation check.
