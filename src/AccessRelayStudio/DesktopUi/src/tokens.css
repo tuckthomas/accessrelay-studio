@@ -23,9 +23,9 @@
   --button-subtle-hover: #b9e6cf;
   --button-subtle-border: #438568;
   --button-subtle-text: #173b54;
-  --button-disabled-bg: #d8dee3;
-  --button-disabled-border: #99a4ad;
-  --button-disabled-text: #56616a;
+  --button-disabled-bg: #49657a;
+  --button-disabled-border: #708ba0;
+  --button-disabled-text: #e3ebf2;
   --accent-hover: #195d4d;
   --focus: #276c55;
   --hover: #e0e8ec;
@@ -82,9 +82,9 @@
   --button-subtle-hover: #315d50;
   --button-subtle-border: #75ba99;
   --button-subtle-text: #b7f0d3;
-  --button-disabled-bg: #343a40;
-  --button-disabled-border: #68737d;
-  --button-disabled-text: #a3abb3;
+  --button-disabled-bg: #49657a;
+  --button-disabled-border: #708ba0;
+  --button-disabled-text: #e3ebf2;
   --accent-hover: #a4edcd;
   --focus: #98f9c3;
   --hover: #2b3b48;

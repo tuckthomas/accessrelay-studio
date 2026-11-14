@@ -14,7 +14,7 @@
   dialogs, with keyboard/typeahead, focus return and disabled options.
 - Start/stop and on/off buttons use the shared Button's `active` prop with the
   actual current state: blue off, green on. Disabled controls use a distinct
-  muted neutral style, not either enabled state color. Never use primary/secondary
+  muted blue style, distinct from navy Off and green On; never gray on gray. Never use primary/secondary
   action priority to express running state. Labels retain the underlying state.
 - Navbar actions are Beta and the theme toggle. Do not add runtime/status tags,
   activity lights, navigation switches, slogans or emergency action buttons there.
