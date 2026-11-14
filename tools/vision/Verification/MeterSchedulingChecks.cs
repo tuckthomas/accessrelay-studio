@@ -63,6 +63,13 @@ internal static class MeterSchedulingChecks
         digital.Sample(x, x, true, true, false, 100); digital.Sample(x, x, true, true, false, 170); Predict(digital, 170, 50);
         digital.Sample(x, x, true, true, false, 190);
         Check(digital.Output.Buttons == 0 && digital.LastAction is { StrokeDurationMs: 0 }, "Qualified button release or its calibration receipt failed.");
+        var zero = Ready(new() { Kind = VisionActionKind.RightStickStroke, StrokeDurationMs = 8, EndHoldMs = 0 });
+        zero.Sample(Down,Down,true,true,false,100); zero.Sample(Down,Down,true,true,false,101); Predict(zero,101,34);
+        zero.Sample(Down,Down,true,true,false,102); zero.Sample(Down,Down,true,true,false,104);
+        zero.Sample(Down,Down,true,true,false,110); // A late wake crosses the nominal end.
+        Check(zero.Output.RightY==short.MaxValue && zero.LastAction is null,"Zero hold skipped the actual up report.");
+        zero.Sample(Down,Down,true,true,false,112);
+        Check(zero.Output.RightY==0 && zero.LastAction is not null,"Zero hold did not return neutral after its up report.");
         Console.WriteLine("SUCCESS Meter scheduling: passthrough, qualification, delay accounting, linear/smooth anchors, refresh, neutral latch, button receipts and cancellation.");
     }
 }

@@ -29,6 +29,10 @@ disconnect, manual override, stale input/capture or an active competing sequence
 cancels the plan; an interrupted ramp returns neutral. The scheduler wakes the
 runtime and never writes the controller itself.
 
+An up endpoint is submitted before neutral even when the configured end hold is
+zero or a late wake crosses the nominal end. A minimum 2 ms up report separates
+those writes; configured longer holds start from the actual up submission.
+
 Native action receipts support plugin calibration. Configuration edits cannot
 manufacture receipts; the host supplies the latest native receipt and observation
 to `ApplyLiveCalibration`. Failed/disconnected output clears the receipt. A receipt

@@ -17,7 +17,7 @@ internal sealed class ControllerOutputArbiter
     private double _confidence, _uncertainty;
     private long _accepted, _rejected, _releases, _missed;
     private VisionControllerAction _action = new();
-    private long _holdStarted, _strokeStart, _strokeAnchor, _receiptId;
+    private long _holdStarted, _strokeStart, _strokeAnchor, _upStarted, _receiptId;
     private bool _strokeStarted, _ownsRightStick, _axisLatched, _physicalNeutral;
     private short _rightY;
     private readonly string _runId = Guid.NewGuid().ToString("N");
@@ -104,7 +104,7 @@ internal sealed class ControllerOutputArbiter
         _deadline = null;
         if (_strokeStarted) _axisLatched = true;
         _ownsRightStick = _strokeStarted = false;
-        _strokeStart = _strokeAnchor = _holdStarted = 0;
+        _strokeStart = _strokeAnchor = _holdStarted = _upStarted = 0;
         _lastFrame = -1;
         _needsPhysicalRelease = true;
         _message = reason;
@@ -260,7 +260,7 @@ internal sealed class ControllerOutputArbiter
         _deadline = null;
         if (_strokeStarted) _axisLatched = true;
         _ownsRightStick = _strokeStarted = false;
-        _strokeStart = _strokeAnchor = 0;
+        _strokeStart = _strokeAnchor = _upStarted = 0;
         _needsPhysicalRelease = true;
         _message = message;
     }
@@ -276,21 +276,27 @@ internal sealed class ControllerOutputArbiter
         { _missed++; CancelAttempt("Stick action cancelled: input, capture or scheduler freshness was lost."); return true; }
         _strokeStarted = true;
         double elapsed = Milliseconds((double)now - _strokeStart);
-        if (elapsed >= _action.StrokeDurationMs + _action.EndHoldMs)
+        if (_upStarted != 0 && Milliseconds((double)now - _upStarted) >= Math.Max(2, _action.EndHoldMs))
         {
             _deadline = null; _ownsRightStick = false; _axisLatched = true;
             _needsPhysicalRelease = true; _releases++;
             LastAction = new(++_receiptId, _generation, _shot, _strokeStart, _strokeAnchor, now,
                 _action.StrokeDurationMs, _action.AnchorFraction, _action.ConfigurationKey, _runId);
-            _strokeStarted = false; _shot = _shotStarted = 0;
+            _strokeStarted = false; _shot = _shotStarted = _upStarted = 0;
             _message = "Stick stroke completed. Return the physical stick to neutral before another attempt.";
             return true;
         }
         double phase = Math.Clamp(elapsed / _action.StrokeDurationMs, 0, 1);
         if (_action.Curve == VisionStrokeCurve.Smoothstep) phase = phase * phase * (3 - 2 * phase);
         _rightY = (short)Math.Clamp(Math.Round(short.MinValue + phase * 65535), short.MinValue, short.MaxValue);
-        double next = Math.Min(elapsed + 2, elapsed < _action.StrokeDurationMs ? _action.StrokeDurationMs : _action.StrokeDurationMs + _action.EndHoldMs);
-        _deadline = _strokeStart + (long)Math.Ceiling(next * _frequency / 1000);
+        if (phase >= 1)
+        {
+            _upStarted = now;
+            // Even a zero configured hold must actually submit the up endpoint
+            // before a later report returns neutral; late wakes cannot skip it.
+            _deadline = _upStarted + (long)Math.Ceiling(Math.Max(2, _action.EndHoldMs) * _frequency / 1000);
+        }
+        else _deadline = _strokeStart + (long)Math.Ceiling(Math.Min(elapsed + 2, _action.StrokeDurationMs) * _frequency / 1000);
         _message = elapsed < _action.StrokeDurationMs ? "Executing the calibrated stick stroke." : "Completing the calibrated up hold.";
         return true;
     }

@@ -11,9 +11,9 @@ game policy in the separately shipped NBA plugin, build/install/push both repos.
 - [x] Add plugin-owned calibration trials/results and shared-component controls.
 - [x] Verify actual saved gameplay detection, edge positions, ambiguity, variable
       cadence/speed and scheduler cancellation; measure CPU costs without inventing targets.
-- [ ] Build and install a new beta and immutable plugin version; preserve profiles,
+- [x] Build and install a new beta and immutable plugin version; preserve profiles,
       recordings, optional runtime junctions and existing sequence-editor updates.
-- [ ] Push and verify both main branches; report remaining physical acceptance honestly.
+- [x] Push and verify both main branches; report remaining physical acceptance honestly.
 
 The optional under-foot indicator is a possible acquisition priority/movement hint,
 not a mandatory anchor. Three screen-space displacements include camera movement
@@ -40,3 +40,20 @@ the later, more stable visual readings. A separately labelled continued-hold
 simulation produced forecasts after that point; it is not physical acceptance.
 No Excellent calibration results were invented. Actual practice calibration,
 render/input delay measurement and held-out gameplay accuracy remain unverified.
+
+Delivered Studio 1.9.0-beta.31 and NBA package 1.2.0 (manifest SHA-256
+`3af6dcfa616e71a7ba23c4fac312996898e43be9279cd8ee80fcc5a36364cadb`).
+Installation is under the project root; the usual Run junction points to it.
+All 25 plugin assets and 23 user JSON settings files were checked during install;
+recordings were not modified. The installed package loaded against the installed
+SDK in a separate verification process without loading ONNX or opening output.
+The actual beta.31 window launched with controller, capture and voice off.
+Subsequent mouse input prevented UI navigation verification; no live gameplay or
+calibration result is claimed. The scheduler also checks a zero-up-hold late wake:
+it sends the full-up endpoint before a later neutral report (minimum 2 ms hold).
+
+Installation/replay receipts remain local under
+`artifacts/RecordedClipPreparation/direct-meter/`. Marketplace implementation and
+versioned assets are on that repository's main at `998a0c9`; host implementation
+and generic SDK documentation are on the application main. Existing beta.30
+sequence editor changes were retained.
