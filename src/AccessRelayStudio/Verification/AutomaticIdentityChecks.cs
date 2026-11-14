@@ -34,7 +34,7 @@ internal static class AutomaticIdentityChecks
         internal VisionPersonPose[] People = [];
         internal VisionTextRegion[] Text = [];
         public string ExecutionProvider => "synthetic";
-        public VisionPersonPose[] DetectPeople(ReadOnlySpan<byte> pixels, int width, int height, int stride) => People;
+        public VisionPersonPose[] DetectPeople(ReadOnlySpan<byte> pixels, int width, int height, int stride, VisionCrop? searchRegion = null) => People;
         public VisionTextRegion[] ReadText(ReadOnlySpan<byte> pixels, int width, int height, int stride) => Text;
         public void RequestStop() { }
         public void Dispose() { }

@@ -44,12 +44,13 @@ internal sealed class VisionAnalysisModels : IVisionAnalysisModels
         }
         catch { _pose.Dispose(); throw; }
     }
-    public VisionPersonPose[] DetectPeople(ReadOnlySpan<byte> bgra, int width, int height, int stride)
+    public VisionPersonPose[] DetectPeople(ReadOnlySpan<byte> bgra, int width, int height, int stride, VisionCrop? searchRegion = null)
     {
-        const int size = 416; double ratio = Math.Min((double)size / width, (double)size / height);
-        int rw = Math.Max(1, (int)(width * ratio)), rh = Math.Max(1, (int)(height * ratio));
+        var region = searchRegion ?? new(0, 0, 1, 1); region.Validate();
+        const int size = 416; double ratio = Math.Min(size / (width * region.Width), size / (height * region.Height));
+        int rw = Math.Clamp((int)(width * region.Width * ratio), 1, size), rh = Math.Clamp((int)(height * region.Height * ratio), 1, size);
         var input = _pose.Input(size, size); input.Fill(114);
-        Resize(bgra, width, height, stride, new(0, 0, 1, 1), rw, rh, input, size, size, 1, 0);
+        Resize(bgra, width, height, stride, region, rw, rh, input, size, size, 1, 0);
         using var result = _pose.Run();
         var outputs = result.ToArray();
         var det = outputs[0].GetTensorDataAsSpan<float>(); var joints = outputs[1].GetTensorDataAsSpan<float>();
@@ -58,15 +59,15 @@ internal sealed class VisionAnalysisModels : IVisionAnalysisModels
         var people = new List<VisionPersonPose>();
         for (int i = 0; i < det.Length / 5; i++)
         {
-            float score = det[i * 5 + 4]; if (!float.IsFinite(score) || score < .45) continue;
-            double left = Math.Clamp(det[i * 5] / (ratio * width), 0, 1), top = Math.Clamp(det[i * 5 + 1] / (ratio * height), 0, 1);
-            double right = Math.Clamp(det[i * 5 + 2] / (ratio * width), 0, 1), bottom = Math.Clamp(det[i * 5 + 3] / (ratio * height), 0, 1);
+            float score = det[i * 5 + 4]; if (!float.IsFinite(score) || score < (searchRegion is null ? .45 : .25)) continue;
+            double left = Math.Clamp(region.Left + det[i * 5] / (ratio * width), 0, 1), top = Math.Clamp(region.Top + det[i * 5 + 1] / (ratio * height), 0, 1);
+            double right = Math.Clamp(region.Left + det[i * 5 + 2] / (ratio * width), 0, 1), bottom = Math.Clamp(region.Top + det[i * 5 + 3] / (ratio * height), 0, 1);
             if (right - left < .01 || bottom - top < .025) continue;
             var pose = new VisionKeypoint[17];
             for (int k = 0; k < pose.Length; k++)
             {
                 int p = (i * 17 + k) * 3;
-                pose[k] = new(joints[p] / (ratio * width), joints[p + 1] / (ratio * height), joints[p + 2]);
+                pose[k] = new(region.Left + joints[p] / (ratio * width), region.Top + joints[p + 1] / (ratio * height), joints[p + 2]);
             }
             if (pose.Any(p => !double.IsFinite(p.X) || !double.IsFinite(p.Y) || !double.IsFinite(p.Confidence))) continue;
             people.Add(new(new(left, top, right - left, bottom - top), score, pose));

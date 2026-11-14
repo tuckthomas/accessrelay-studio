@@ -8,7 +8,7 @@ internal sealed record VisionCaptureModelSet(string Id, string PoseSha256, strin
 internal interface IVisionAnalysisModels : IDisposable
 {
     string ExecutionProvider { get; }
-    VisionPersonPose[] DetectPeople(ReadOnlySpan<byte> bgra, int width, int height, int stride);
+    VisionPersonPose[] DetectPeople(ReadOnlySpan<byte> bgra, int width, int height, int stride, VisionCrop? searchRegion = null);
     VisionTextRegion[] ReadText(ReadOnlySpan<byte> bgra, int width, int height, int stride);
     void RequestStop();
 }

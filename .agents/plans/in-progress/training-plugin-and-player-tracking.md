@@ -175,3 +175,12 @@ footage using ordered 16-frame history. The synthetic candidate remains outside
 the user's model library. Evidence: `artifacts/AutoCaptureModels`,
 `artifacts/AutoCaptureRecorder` and `artifacts/AutoCaptureWorkflow`.
 Actual NBA gameplay acquisition and user-model timing remain unverified.
+
+
+First actual acquisition attempt (beta.19): exact OCR read `DrakulaVlad2` at
+0.974 model confidence, but full-window RTMO detected no body. This is a failed
+acquisition, not gameplay acceptance. The corrective beta.20 uses the tag to
+locate a broad, higher-resolution pose search and follows detected body bounds
+thereafter; final player regions still come from body/joint detections. The native
+probe found one body on the saved gameplay frame with this correction. A single
+saved-frame probe is not live tracking, meter/floor detection or timing acceptance.

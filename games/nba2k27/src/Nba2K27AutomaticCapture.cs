@@ -54,17 +54,30 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
         { ResetIdentity(); _feedback = null; _relativeMeter = null; }
         _generation = generation; _sequence = sequence; _width = width; _height = height;
         _models ??= createModels(); if (_stopping) { _models.RequestStop(); throw new OperationCanceledException(); }
-        var people = _people = _models.DetectPeople(bgra, width, height, stride);
         bool freshText = _lastOcr == 0 || Stopwatch.GetElapsedTime(_lastOcr).TotalMilliseconds >= 350;
         if (freshText)
         {
             _text = _models.ReadText(bgra, width, height, stride); _lastOcr = Stopwatch.GetTimestamp();
             _feedback ??= FindFeedback(_text);
         }
+        var namedTags = _text.Where(t => t.Confidence >= .8 && MatchesTag(t.Text, configuration.Gamertag)).ToArray();
+        VisionCrop? search = null;
+        if (_previous is { } prior)
+            search = Clip(prior.Bounds.Left - prior.Bounds.Width, prior.Bounds.Top - prior.Bounds.Height * .5,
+                prior.Bounds.Left + prior.Bounds.Width * 2, prior.Bounds.Top + prior.Bounds.Height * 1.5);
+        else if (namedTags.Length == 1)
+        {
+            // The tag defines a broad acquisition search, not the final body crop.
+            // Pose inference resolves actual limbs/bounds at higher effective resolution.
+            var tag = namedTags[0].Bounds; double cx = tag.Left + tag.Width / 2;
+            double h = Math.Max(tag.Height * 12, tag.Width * width / height * 1.6), w = Math.Max(tag.Width * 2.2, h * height / width * 1.25);
+            search = Clip(cx - w / 2, tag.Top - h * 1.15, cx + w / 2, tag.Top + h * .15);
+        }
+        var people = _people = _models.DetectPeople(bgra, width, height, stride, search);
         VisionPersonPose? selected;
         if (freshText || _identity is null)
         {
-            var tags = _text.Where(t => t.Confidence >= .8 && MatchesTag(t.Text, configuration.Gamertag)).ToArray();
+            var tags = namedTags;
             if (tags.Length != 1) return Missing(sequence, tags.Length > 1 ? "The displayed gamertag is ambiguous." : "Looking for the exact displayed gamertag: " + configuration.Gamertag);
             var ranked = people.Select(person => (Person: person, Distance: AssociationDistance(person, tags[0].Bounds)))
                 .Where(item => double.IsFinite(item.Distance)).OrderBy(item => item.Distance).ToArray();
@@ -177,7 +190,7 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
             {
                 int p = queue[head++], x = p % gw, y = p / gw; if (colored[p]) colors++;
                 lx = Math.Min(lx, x); rx = Math.Max(rx, x); ty = Math.Min(ty, y); by = Math.Max(by, y);
-                for (int d = 0; d < 4; d++) { int n = p + (d == 0 ? -1 : d == 1 ? 1 : d == 2 ? -gw : gw);
+                for (int d = 0; d < 4; d++) for (int step = 1; step <= 2; step++) { int n = p + (d == 0 ? -step : d == 1 ? step : d == 2 ? -gw * step : gw * step);
                     if (n >= 0 && n < mask.Length && (d >= 2 || n / gw == y) && mask[n]) { mask[n] = false; queue[tail++] = n; } }
             }
             double h = (by - ty + 1d) / gh * region.Height, w = (rx - lx + 1d) / gw * region.Width;

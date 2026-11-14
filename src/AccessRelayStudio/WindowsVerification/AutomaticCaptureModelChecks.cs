@@ -8,6 +8,26 @@ using Microsoft.ML.OnnxRuntime;
 
 internal static class AutomaticCaptureModelChecks
 {
+    internal static void ProbeFrame(string runtimeRoot, string assets, string imagePath, string outputPath)
+    {
+        runtimeRoot = Path.GetFullPath(runtimeRoot);
+        string runtime = Path.Combine(runtimeRoot, "onnxruntime.dll");
+        var paths = new[] { runtimeRoot }.Concat(Directory.EnumerateFiles(Path.Combine(runtimeRoot, "CudaRuntime"), "*.dll", SearchOption.AllDirectories)
+            .Select(Path.GetDirectoryName).OfType<string>().Distinct());
+        Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, paths) + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"));
+        OrtEnv.DisableDllImportResolver = true;
+        NativeLibrary.SetDllImportResolver(typeof(OrtEnv).Assembly, (name, _, _) => name is "onnxruntime" or "onnxruntime.dll" ? NativeLibrary.Load(runtime) : 0);
+        var bmp = File.ReadAllBytes(imagePath); int width = BinaryPrimitives.ReadInt32LittleEndian(bmp.AsSpan(18)), sh = BinaryPrimitives.ReadInt32LittleEndian(bmp.AsSpan(22));
+        int height = Math.Abs(sh), offset = BinaryPrimitives.ReadInt32LittleEndian(bmp.AsSpan(10));
+        if (BinaryPrimitives.ReadInt16LittleEndian(bmp.AsSpan(28)) != 32) throw new InvalidDataException("Use a native BGRA diagnostic bitmap.");
+        var pixels = new byte[width * height * 4];
+        for (int y = 0; y < height; y++) bmp.AsSpan(offset + (sh < 0 ? y : height - 1 - y) * width * 4, width * 4).CopyTo(pixels.AsSpan(y * width * 4));
+        using var tracker = new Nba2K27AutomaticTracker(new() { Gamertag = "DrakulaVlad2" },
+            () => new VisionAnalysisModels(Nba2K27AutomaticCapture.Models, VisionExecutionProvider.Cuda, assets));
+        var observation = tracker.Track(pixels, width, height, width * 4, 1, 1);
+        File.WriteAllText(outputPath, JsonSerializer.Serialize(observation));
+        Console.WriteLine($"Single saved gameplay frame: {observation.Message} Bodies={observation.DetectedPeople?.Length ?? 0}. This is not live tracking acceptance.");
+    }
     internal static void Run(string runtimeRoot, string assets, string directory, string provider)
     {
         runtimeRoot = Path.GetFullPath(runtimeRoot); directory = Path.GetFullPath(directory);
