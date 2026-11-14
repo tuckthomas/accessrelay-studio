@@ -74,8 +74,8 @@ public sealed record GamePackManifest
                 _ => throw new InvalidDataException("Unsupported resource kind for this package API.") };
             if (asset.Path is null || asset.Path.Length > 180 || !asset.Path.StartsWith(prefix, StringComparison.Ordinal)
                 || !asset.Path.EndsWith(extension, StringComparison.Ordinal) || asset.Path.Split('/').Any(segment => !Identifier(SchemaVersion == 2 ? segment.ToLowerInvariant() : segment, 80)
-                    || segment is "." or ".." || segment.EndsWith('.') || segment.Split('.')[0] is "con" or "prn" or "aux" or "nul"
-                    || (segment.Length >= 4 && (segment.StartsWith("com") || segment.StartsWith("lpt")) && char.IsDigit(segment[3])))
+                    || segment is "." or ".." || segment.EndsWith('.') || segment.ToLowerInvariant().Split('.')[0] is "con" or "prn" or "aux" or "nul"
+                    || (segment.Length >= 4 && (segment.StartsWith("com", StringComparison.OrdinalIgnoreCase) || segment.StartsWith("lpt", StringComparison.OrdinalIgnoreCase)) && char.IsDigit(segment[3])))
                 || (asset.Kind == GamePackAssetKind.Data && Path.GetExtension(asset.Path) is not (".json" or ".txt" or ".md"))
                 || !Hash(asset.Sha256) || asset.Bytes <= 0 || asset.Bytes > limit)
                 throw new InvalidDataException("Invalid resource path, size, type or SHA-256.");
@@ -91,7 +91,7 @@ public sealed record GamePackManifest
             || !Assets.Any(a => a.Kind == GamePackAssetKind.Runtime && a.Path == runtime.Assembly)
             || !Assets.Any(a => a.Kind == GamePackAssetKind.Ui && a.Path == runtime.UiEntry)
             || !Assets.Any(a => a.Kind == GamePackAssetKind.Workflow && a.Path == runtime.TrainingEntry)
-            || new[] { runtime.AuditEntry, runtime.ExperimentsEntry }.Any(path => path.Length != 0 && !Assets.Any(a => a.Kind == GamePackAssetKind.Workflow && a.Path == path))
+            || new[] { runtime.AuditEntry, runtime.ExperimentsEntry }.Any(path => path is null || (path.Length != 0 && !Assets.Any(a => a.Kind == GamePackAssetKind.Workflow && a.Path == path)))
             || runtime.ModelDirectory != "capture-models"))
             throw new InvalidDataException("The runtime must declare a supported contract, factory and checked implementation resources.");
         if (Bindings.IsDefault || Bindings.Length > ControlMap.All.Count || Bindings.Any(binding => binding is null || !Enum.IsDefined(binding.Control)

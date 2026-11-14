@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text.Json;
 using EliteScriptStudio.Core;
@@ -11,6 +12,15 @@ internal static class InstalledPluginVerification
         var loader = new InstalledGamePlugins(library, component => Path.Combine(evidence, component));
         loader.Reload(); Check(loader.Plugins.Count == 0, "An absent plugin exposed an implementation.");
         var imported = new GamePackLibrary(library).Import(Path.GetFullPath(manifest), CancellationToken.None);
+        foreach (var invalid in new[] {
+            imported.Manifest with { Runtime = imported.Manifest.Runtime! with { AuditEntry = null! } },
+            imported.Manifest with { Runtime = imported.Manifest.Runtime! with { Assembly = "runtime/CON.dll" },
+                Assets = imported.Manifest.Assets.Select(a => a.Path == imported.Manifest.Runtime!.Assembly ? a with { Path = "runtime/CON.dll" } : a).ToImmutableArray() }
+        })
+        {
+            try { invalid.Validate(); throw new Exception("Invalid extension metadata was accepted."); }
+            catch (InvalidDataException) { }
+        }
         loader.Reload(); Check(loader.Errors.Length == 0, string.Join("\n", loader.Errors));
         Check(loader.Plugins.Count == 1, "An installed implementation did not load.");
         var plugin = loader.Plugins.Single();
