@@ -88,3 +88,27 @@ Its committed implementation/package is Marketplace `3e15105`. A separate
 headless load against the installed beta.33 SDK reports assembly 1.2.3.0 without
 loading ONNX or activating a controller. The running app was not replaced or
 restarted, and its settings and recordings were not edited.
+
+## 2026-11-14: unresolved reversal failure and automatic attempt traces
+
+The user reports the same reversal failure after 1.2.3. The previously quoted
+fill reading was one example across different runs, not an established ceiling.
+Neither the injected-gap fixture nor replaying manually completed shot images
+with a simulated continued hold establishes the cause of the live failure.
+Automatic reversal remains unresolved; do not adjust calibration from failed
+actions or present those checks as live acceptance.
+
+Studio beta.34 retains eight recent predictor attempts automatically under
+`Diagnostics/Vision/attempt-0.json` through `attempt-7.json` in the installed app
+folder. Reports include every retained processed frame's physical input and
+timestamp, actual loaded predictor assembly/version, signal/forecast, submission
+and acceptance flags, source freshness, native arbiter status/cancellation and
+requested output state. They also capture current settings and the last native
+action receipt. These are local diagnostic reports, not training recordings;
+no video or audio is saved. Serialization and file writes run outside capture
+and controller threads. No thresholds, release deadlines or output ownership
+rules are changed by this instrumentation.
+
+The update must be loaded before these reports can explain a new ordinary
+calibration attempt. Studio is left running until the user closes it themselves;
+screen control and controller actions remain prohibited.

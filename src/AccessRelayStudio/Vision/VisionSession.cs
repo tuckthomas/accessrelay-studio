@@ -53,10 +53,15 @@ internal sealed class VisionSession : IDisposable
     private long _lockMeasurementToken;
     private long _performanceReplacedFrames, _performanceDropBaseline, _performanceReleaseBaseline, _performanceMissBaseline;
     private int _metricIndex, _metricCount;
+    private long _attemptBeganAt;
+    private bool _attemptNeedsNeutral;
+    private static int _attemptWritePending;
+    private static long _attemptReportNumber;
     private bool _disposed;
     private readonly record struct FrameMetric(long Sequence, long CaptureTicks, long CompletedTicks,
-        double ProcessingMs, bool PredictionAccepted, VisionStatusSnapshot Output,
-        long AllocatedBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections, long? CompositorTicks);
+        double ProcessingMs, bool PredictionSubmitted, bool PredictionAccepted, VisionStatusSnapshot Output,
+        long AllocatedBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections, long? CompositorTicks,
+        VisionSignalObservation? Signal, VisionSignalContext? PhysicalContext, ControllerState? RequestedOutput, bool SourceFresh);
 
     internal VisionSession(StudioRuntime runtime) => _runtime = runtime;
     internal VisionSessionStatus Status { get { lock (_gate) return _status; } }
@@ -123,6 +128,7 @@ internal sealed class VisionSession : IDisposable
             _runtime.InvalidateVisionSession("Preparing capture and model.");
             _status = new(true, false, false, "Starting window capture…", 0, 0, 0, 0, 0);
             _metricCount = _metricIndex = 0;
+            _attemptBeganAt = 0; _attemptNeedsNeutral = false;
             _lockMeasurementToken = _runtime.BeginLockMeasurements();
             _performance.Reset(new(predictor?.Name ?? "Capture only", null, settings.AnimationProfile, settings.CameraView,
                 settings.Crop, 0, 0, VisionPerformanceBuffer.Fingerprint(settings), _lockMeasurementToken, settings.PreprocessingBackendName));
@@ -203,6 +209,7 @@ internal sealed class VisionSession : IDisposable
                 if (!fresh && sourceReady)
                 {
                     _runtime.InvalidateVisionSession("Capture is unavailable, stale, or unchanged. Resume observation and rearm.");
+                    QueueAttemptDiagnostics(now, "Capture became unavailable or stale.");
                     sourceReady = false;
                     model?.ResetTracking();
                     predictor?.Reset();
@@ -286,13 +293,16 @@ internal sealed class VisionSession : IDisposable
                             observedStatus = _runtime.VisionStatus;
                         }
                         bool accepted = false;
+                        bool submitted = false;
                         bool hasDecision = false;
+                        VisionSignalContext? signalContext = null;
                         if (predictor is not null)
                         {
                             var input = _runtime.Latest?.Input;
                             var context = new VisionSignalContext(input is { IsConnected: true } sample ? sample.State : null,
                                 _runtime.LatestInputTimestamp, observedStatus.SessionGeneration, observedStatus.ShotToken,
                                 observedStatus.ShotStartedTimestamp, observedStatus.Armed);
+                            signalContext = context;
                             var signal = predictor.Observe(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride,
                                 frame.Sequence, frame.SourceGeneration, frame.CaptureTicks, context);
                             Volatile.Write(ref _signal, signal); modelMessage = predictor.Status;
@@ -300,9 +310,12 @@ internal sealed class VisionSession : IDisposable
                             {
                                 hasDecision = true; predictions++;
                                 if (fresh && sourceReady && predictor.CanArm)
+                                {
+                                    submitted = true;
                                     accepted = _runtime.SubmitVisionPrediction(new(observedStatus.SessionGeneration, observedStatus.ShotToken,
                                         frame.Sequence, frame.CaptureTicks, Stopwatch.GetTimestamp(), signal.TimeToTargetMs ?? 0,
                                         signal.Confidence, signal.UncertaintyMs, signal.Acquired && !signal.InvalidateAttempt));
+                                }
                             }
                         }
                         if (model is not null && (regions is null || regions.Valid))
@@ -313,7 +326,10 @@ internal sealed class VisionSession : IDisposable
                                 hasDecision = true;
                                 predictions++;
                                 if (fresh && sourceReady && model.CanArm)
+                                {
+                                    submitted = true;
                                     accepted = _runtime.SubmitVisionPrediction(observation);
+                                }
                             }
                         }
                         else if (regions is { Valid: false }) model?.ResetTracking();
@@ -345,8 +361,9 @@ internal sealed class VisionSession : IDisposable
                         lock (_gate)
                         {
                             _metrics[_metricIndex] = new(frame.Sequence, frame.CaptureTicks, completed, processingMs,
-                                accepted, _runtime.VisionStatus, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
-                                GC.CollectionCount(0) - gen0, GC.CollectionCount(1) - gen1, GC.CollectionCount(2) - gen2, frame.CompositorTicks);
+                                submitted, accepted, _runtime.VisionStatus, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
+                                GC.CollectionCount(0) - gen0, GC.CollectionCount(1) - gen1, GC.CollectionCount(2) - gen2, frame.CompositorTicks,
+                                predictor is null ? null : _signal, signalContext, _runtime.Latest?.Output, fresh);
                             _metricIndex = (_metricIndex + 1) % _metrics.Length;
                             _metricCount = Math.Min(_metricCount + 1, _metrics.Length);
                             _performanceReplacedFrames = Math.Max(0, source.DroppedFrames - _performanceDropBaseline);
@@ -359,6 +376,21 @@ internal sealed class VisionSession : IDisposable
                                 fresh ? modelMessage : "Source is stale or unchanged. " + modelMessage,
                                 frames, predictions, source.DroppedFrames, processingMs, frame.CaptureTicks, frame.Width, frame.Height,
                                 excludedTimingFrames, modelLoadFailed, !fresh, CapturePipeline: source.Pipeline);
+                        }
+                        if (signalContext is { } physical && predictor is not null)
+                        {
+                            // Trace ordinary attempts, including unarmed or wrongly directed holds.
+                            // Neither this trace nor its disk writer changes controller output.
+                            bool active = physical.Physical is { } state && (predictor.Action.Kind == VisionActionKind.RightStickStroke
+                                ? Math.Abs((int)state.RightY) >= predictor.Action.AxisThreshold || Math.Abs((int)state.RightX) >= predictor.Action.AxisThreshold
+                                : (state.Buttons & (ushort)settings.ShootButton) != 0);
+                            if (!active) { QueueAttemptDiagnostics(completed, "Physical input returned below the hold threshold."); _attemptNeedsNeutral = false; }
+                            else if (!_attemptNeedsNeutral)
+                            {
+                                if (_attemptBeganAt == 0) _attemptBeganAt = frame.CaptureTicks;
+                                if (Stopwatch.GetElapsedTime(_attemptBeganAt, completed).TotalMilliseconds >= settings.MaximumShotDurationMs)
+                                { QueueAttemptDiagnostics(completed, "Maximum attempt duration reached."); _attemptNeedsNeutral = true; }
+                            }
                         }
                     }
                 }
@@ -374,6 +406,7 @@ internal sealed class VisionSession : IDisposable
         }
         finally
         {
+            QueueAttemptDiagnostics(Stopwatch.GetTimestamp(), "Observation ended.");
             lock (_gate) _stopping = true;
             _performance.Finish();
             _runtime.FinishLockMeasurements(_lockMeasurementToken);
@@ -416,7 +449,41 @@ internal sealed class VisionSession : IDisposable
         _runtime.InvalidateVisionSession("Vision stopped by the player.");
     }
 
-    internal void ExportDiagnostics(string path)
+    private void QueueAttemptDiagnostics(long completedAt, string reason)
+    {
+        long began = _attemptBeganAt; _attemptBeganAt = 0;
+        if (began != 0) _attemptNeedsNeutral = true;
+        if (began == 0 || Stopwatch.GetElapsedTime(began, completedAt).TotalMilliseconds < (_livePredictor?.Action.HoldQualificationMs ?? 0)
+            || Interlocked.CompareExchange(ref _attemptWritePending, 1, 0) != 0) return;
+        object report;
+        try { report = DiagnosticsReport(began, completedAt, reason); }
+        catch (Exception error)
+        { Volatile.Write(ref _attemptWritePending, 0); Debug.WriteLine("Vision attempt snapshot: " + error.Message); return; }
+        // Keep eight recent reports, written away from both capture and controller threads.
+        // No video, audio, training data or user configuration is written here.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                string directory = Path.Combine(AppContext.BaseDirectory, "Diagnostics", "Vision");
+                Directory.CreateDirectory(directory);
+                long slot = Interlocked.Increment(ref _attemptReportNumber) % 8;
+                string path = Path.Combine(directory, $"attempt-{slot}.json"), temporary = path + ".tmp";
+                await using (var file = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
+                    await JsonSerializer.SerializeAsync(file, report, new JsonSerializerOptions {
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals });
+                File.Move(temporary, path, overwrite: true);
+            }
+            catch (Exception error) { Debug.WriteLine("Vision attempt diagnostics: " + error.Message); }
+            finally { Volatile.Write(ref _attemptWritePending, 0); }
+        });
+    }
+
+    internal void ExportDiagnostics(string path) => File.WriteAllText(path,
+        JsonSerializer.Serialize(DiagnosticsReport(0, long.MaxValue, "Manual export"), new JsonSerializerOptions { WriteIndented = true }));
+
+    private object DiagnosticsReport(long fromTimestamp, long throughTimestamp, string reason)
     {
         FrameMetric[] metrics;
         VisionSessionStatus status;
@@ -424,9 +491,16 @@ internal sealed class VisionSession : IDisposable
         VisionDiagnosticEvent[] modelEvents;
         lock (_gate)
         {
-            metrics = new FrameMetric[_metricCount];
             int first = (_metricIndex - _metricCount + _metrics.Length) % _metrics.Length;
-            for (int i = 0; i < metrics.Length; i++) metrics[i] = _metrics[(first + i) % _metrics.Length];
+            int count = 0;
+            for (int i = 0; i < _metricCount; i++)
+                if (_metrics[(first + i) % _metrics.Length].CaptureTicks is var at && at >= fromTimestamp && at <= throughTimestamp) count++;
+            metrics = new FrameMetric[count];
+            for (int i = 0, target = 0; i < _metricCount; i++)
+            {
+                var metric = _metrics[(first + i) % _metrics.Length];
+                if (metric.CaptureTicks >= fromTimestamp && metric.CaptureTicks <= throughTimestamp) metrics[target++] = metric;
+            }
             status = _status;
             modelHash = _modelHash;
             modelEvents = _model?.Diagnostics.ExportEvents() ?? _lastModelEvents;
@@ -435,14 +509,19 @@ internal sealed class VisionSession : IDisposable
         double Percentile(double quantile) => samples.Length == 0 ? 0 : samples[Math.Max(0, (int)Math.Ceiling(samples.Length * quantile) - 1)];
         var report = new
         {
-            version = 3, exportedAtUtc = DateTimeOffset.UtcNow, stopwatchFrequency = Stopwatch.Frequency,
+            version = 4, exportedAtUtc = DateTimeOffset.UtcNow, stopwatchFrequency = Stopwatch.Frequency,
+            reason, fromTimestamp, throughTimestamp,
+            predictor = _livePredictor is { } predictor ? new { predictor.Name,
+                assembly = predictor.GetType().Assembly.GetName().Name,
+                version = predictor.GetType().Assembly.GetName().Version?.ToString(), predictor.CanArm, predictor.Status, predictor.Action } : null,
+            settings = _activeSettings, lastAction = _runtime.LastVisionAction, outputStatus = _runtime.Latest?.OutputStatus,
             timingScope = "CaptureTicks marks local WGC frame receipt before image copies. CompositorTicks retains unmodified WGC metadata and may lead receipt. Processing and local controller handoff are measured; Xbox render and applied input times are not.",
             gcScope = "Collection counts during a frame correlate with GC activity; they are not measured pause durations. Allocation bytes cover the vision worker thread only.",
             sampleCount = samples.Length, p50Ms = Percentile(.5), p95Ms = Percentile(.95), p99Ms = Percentile(.99),
             maximumMs = samples.LastOrDefault(), status, output = _runtime.VisionStatus, frames = metrics,
             modelManifestHash = modelHash, modelEvents, performance = Performance
         };
-        File.WriteAllText(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+        return report;
     }
 
     internal void StartTraining(string directory, IVisionCaptureProfile profile, string sourceTitle, VisionSettings? captureOverride = null)
