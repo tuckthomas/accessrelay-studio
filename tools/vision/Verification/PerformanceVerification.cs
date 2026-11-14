@@ -276,7 +276,7 @@ internal static class PerformanceVerification
                 Throws(() => VisionPerformanceRuns.Read(path));
             }
             Reject(node => node["unexpected"] = true);
-            Reject(node => node["version"] = 4);
+            Reject(node => node["version"] = 999);
             Reject(node => node["snapshot"]!["preprocessingBackend"] = "unrecognized");
             Reject(node => node["snapshot"]!["windowFreshnessReadbackBytes"] = 15);
             Reject(node => { node["version"] = 2; node["snapshot"]!["preprocessingBackend"] = "d3d11-cuda-rgb-v2-experimental"; });
