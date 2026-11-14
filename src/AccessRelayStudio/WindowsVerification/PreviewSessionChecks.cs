@@ -1,4 +1,3 @@
-using EliteScriptStudio.Packs.Nba2K27;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -70,12 +69,11 @@ internal static class PreviewSessionChecks
             using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
             runtime.Attach(new FakeControllerOutput());
             using var session = new VisionSession(runtime);
-            var profile = new Nba2K27ShotProfile(Guid.NewGuid(), "Preview regression fixture", 78, 80,
-                "Fixture base", "Fixture upper one", "Fixture upper two");
+            var profile = new TestCaptureProfile();
             var settings = VisionSettings.Default with
             {
-                AnimationProfile = "nba2k27:" + profile.ConfigurationFingerprint,
-                CameraView = profile.CameraView
+                AnimationProfile = "preview-fixture",
+                CameraView = "Fixture camera"
             };
             // One capture-only session exercises the real worker and recorder without an ONNX native runtime.
             session.Start(window, settings);

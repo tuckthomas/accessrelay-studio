@@ -10,7 +10,7 @@
     <AssemblyTitle>AccessRelay Studio Beta</AssemblyTitle>
     <Description>Assistive controller input and voice access for Windows</Description>
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
-    <Version>1.9.0-beta.27</Version>
+    <Version>1.9.0-beta.28</Version>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -32,10 +32,6 @@
     <ProjectReference Include="../AccessRelayStudio.Application/AccessRelayStudio.Application.csproj" />
     <ProjectReference Include="../AccessRelayStudio.Runtime/AccessRelayStudio.Runtime.csproj" />
     <Compile Include="App.xaml.cs;DesktopWindow.xaml.cs;BuildInfo.cs;Desktop/*.cs;Diagnostics/*.cs" />
-    <Content Include="../../games/nba2k27/pack.json" TargetPath="GamePacks/nba2k27/pack.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="../../games/nba2k27/scripts/*.lua" TargetPath="GamePacks/nba2k27/scripts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="../../games/switch-demo/pack.json" TargetPath="GamePacks/switch-demo/pack.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="../../games/switch-demo/scripts/*.lua" TargetPath="GamePacks/switch-demo/scripts/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="DesktopUi\dist\**\*" TargetPath="DesktopUi\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="DesktopUi/src/tokens.css" TargetPath="Scene/Viewer/theme-tokens.css"
@@ -82,11 +78,6 @@
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
   </ItemGroup>
-  <Target Name="BundleCaptureModels" AfterTargets="Publish">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Install-NbaCaptureModels.ps1&quot; -InstallDirectory &quot;$([System.IO.Path]::GetFullPath('$(PublishDir).'))&quot; -CacheDirectory &quot;$(MSBuildProjectDirectory)\..\..\artifacts\AutoCaptureModels&quot;" />
-    <Error Condition="!Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\pose.onnx') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\text-det.onnx') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\text-rec.onnx') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\LICENSE.txt') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\THIRD-PARTY-NOTICES.txt') Or !Exists('$(PublishDir)CaptureModels\nba2k27-automatic-v1\models.json')"
-           Text="Published capture models or redistribution notices are missing." />
-  </Target>
   <Target Name="PublishAssistantBridge" AfterTargets="Publish">
     <MSBuild Projects="../AccessRelayStudio.Mcp/AccessRelayStudio.Mcp.csproj" Targets="Restore;Publish"
              Properties="Configuration=$(Configuration);TargetFramework=net10.0;RuntimeIdentifier=win-x64;SelfContained=true;PublishDir=$([MSBuild]::EnsureTrailingSlash('$(PublishDir)'))Mcp/" />

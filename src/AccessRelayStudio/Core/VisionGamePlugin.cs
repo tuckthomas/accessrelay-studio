@@ -3,13 +3,14 @@ using System.Text.Json;
 namespace EliteScriptStudio.Core;
 
 /// <summary>Game-owned configuration consumed by host-owned capture and scheduling.</summary>
-internal interface IVisionCaptureProfile : ITrainingCaptureProfile
+public interface IVisionCaptureProfile : ITrainingCaptureProfile
 {
     Guid Id { get; }
     string Name { get; }
     string CameraView { get; }
     string ConfigurationFingerprint { get; }
     string AnimationProfile { get; }
+    string AnalysisPolicy => "plugin-regions-v1";
     object ExportProfile();
     void ValidateCapture(VisionTrainingCaptureSettings settings);
     IReadOnlyList<VisionEvidenceRegion> EvidenceRegions(VisionSettings settings);
@@ -24,10 +25,10 @@ internal interface IVisionCaptureProfile : ITrainingCaptureProfile
     int ReferenceDelayMs => 0;
 }
 
-internal sealed record VisionEvidenceRegion(string Name, string File, int Width, int Height, VisionCrop Crop);
+public sealed record VisionEvidenceRegion(string Name, string File, int Width, int Height, VisionCrop Crop);
 
-/// <summary>Trusted built-in adapters. Imported packs cannot load native code or write controller output.</summary>
-internal interface IVisionGamePlugin
+/// <summary>Installed, trusted game implementation. The host owns device activation and capture lifecycle.</summary>
+public interface IVisionGamePlugin
 {
     string Id { get; }
     string Name { get; }
@@ -42,8 +43,16 @@ internal interface IVisionGamePlugin
     void DeleteProfile(Guid id);
 }
 
-internal interface IGameControllerPlugin
+public interface IGameControllerPlugin
 {
     string Id { get; }
     (StudioProfile Profile, object Result) ApplyControllerAction(StudioProfile profile, string action, JsonElement args);
 }
+
+/// <summary>API 1 for installed .NET game extensions, shared from the host assembly.</summary>
+public interface IGamePluginFactory
+{
+    IVisionGamePlugin Create(GamePluginContext context);
+}
+
+public sealed record GamePluginContext(string PackageDirectory, string? ProfileDirectory);

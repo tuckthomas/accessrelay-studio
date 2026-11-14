@@ -12,7 +12,8 @@ internal static class DesktopMediaResponse
         try
         {
             var uri = new Uri(args.Request.Uri);
-            var media = args.Request.Method == "GET" && uri.Scheme == "https" && uri.Host == "media.accessrelay.test"
+            var media = args.Request.Method == "GET" && uri.Scheme == "https" && (uri.Host == "media.accessrelay.test"
+                || (uri.Host == "plugins.accessrelay.test" && uri.AbsolutePath.StartsWith("/plugins/", StringComparison.Ordinal)))
                 && uri.IsDefaultPort ? read(uri) : null;
             if (media is null)
             { args.Response = sender.Environment.CreateWebResourceResponse(null, 404, "Not found", "Cache-Control: no-store\r\n"); return; }

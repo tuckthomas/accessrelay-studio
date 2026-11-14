@@ -15,7 +15,7 @@ internal sealed class DesktopControllerService : IDesktopModule
     private readonly Func<StudioRuntime?> _runtime;
     private readonly Func<Task> _stopAll;
     private readonly ProfileStore _store;
-    private readonly IReadOnlyList<IGameControllerPlugin> _gamePlugins;
+    private readonly Func<IReadOnlyList<IGameControllerPlugin>> _gamePlugins;
     private IReadOnlyList<StudioProfile> _profiles = [];
     private StudioProfile _active = StudioProfile.CreateDefault(), _persisted;
     private StickDeadzone _deadzone;
@@ -26,7 +26,7 @@ internal sealed class DesktopControllerService : IDesktopModule
     private string _notice = "Ready. Controller output and scripts start only when you turn them on.";
     private bool _disposed;
     private int _revision;
-    private readonly GamePackLibrary _packLibrary = new(DesktopEnvironment.GamePackDirectory, Path.Combine(AppContext.BaseDirectory, "GamePacks"));
+    private readonly GamePackLibrary _packLibrary = new(DesktopEnvironment.GamePackDirectory);
     private readonly Func<string, Task>? _importPackModel;
     private IReadOnlyList<GamePackDefinition> _packs = [];
     private string[] _packErrors = [];
@@ -67,9 +67,9 @@ internal sealed class DesktopControllerService : IDesktopModule
         finally { _packOperation = null; }
     }
 
-    internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll, Func<string, Task>? importPackModel = null, IReadOnlyList<IGameControllerPlugin>? gamePlugins = null)
+    internal DesktopControllerService(WindowId owner, Func<StudioRuntime?> runtime, Func<Task> stopAll, Func<string, Task>? importPackModel = null, Func<IReadOnlyList<IGameControllerPlugin>>? gamePlugins = null)
     {
-        _owner = owner; _runtime = runtime; _stopAll = stopAll; _importPackModel = importPackModel; _gamePlugins = gamePlugins ?? [];
+        _owner = owner; _runtime = runtime; _stopAll = stopAll; _importPackModel = importPackModel; _gamePlugins = gamePlugins ?? (() => []);
         _store = new ProfileStore(DesktopEnvironment.DataDirectory("ControllerProfiles"));
         _deadzone = _store.LoadStickDeadzone();
         _feedbackSettings = _store.LoadFeedbackSettings();
@@ -213,6 +213,7 @@ internal sealed class DesktopControllerService : IDesktopModule
                     var importedPack = await Task.Run(() =>
                     {
                         var validated = GamePackDefinition.Read(chosen.Path);
+                        if (validated.Manifest.Runtime is not null) throw new InvalidOperationException("Install implementation plugins through Marketplace. This importer accepts controller packs.");
                         var installed = _packs.FirstOrDefault(pack => pack.Manifest.Id == validated.Manifest.Id && pack.Manifest.Version == validated.Manifest.Version);
                         if (installed is not null)
                         {
@@ -446,7 +447,7 @@ internal sealed class DesktopControllerService : IDesktopModule
             case "nbaFeedback": // Compatibility alias for older clients; still requires the linked pack.
             case "packAction":
             {
-                var plugin = _gamePlugins.FirstOrDefault(item => item.Id == _active.GamePack?.Id)
+                var plugin = _gamePlugins().FirstOrDefault(item => item.Id == _active.GamePack?.Id)
                     ?? throw new InvalidOperationException("This action requires a matching game pack setup.");
                 var result = plugin.ApplyControllerAction(_active, action == "nbaFeedback" ? "feedback" : args.Text("action"), args);
                 Save(result.Profile); return result.Result;

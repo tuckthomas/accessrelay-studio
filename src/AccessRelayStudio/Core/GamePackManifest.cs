@@ -2,9 +2,10 @@ using System.Collections.Immutable;
 
 namespace EliteScriptStudio.Core;
 
-public enum GamePackAssetKind { Lua, Model, VisionManifest }
+public enum GamePackAssetKind { Lua, Model, VisionManifest, Runtime, Ui, Workflow, CaptureModel, Data }
 public enum GamePackTuningKind { Range, Choice }
 public sealed record GamePackAsset(string Path, GamePackAssetKind Kind, long Bytes, string Sha256);
+public sealed record GamePackRuntime(string Assembly, string Factory, string UiEntry, string TrainingEntry, string ModelDirectory, int ContractVersion = 1, string AuditEntry = "", string ExperimentsEntry = "");
 public sealed record GamePackChoice(string Label, double Value);
 public sealed record GamePackTuning(string Id, string Label, GamePackTuningKind Kind, double Minimum,
     double Maximum, double Step, double Default, ImmutableArray<GamePackChoice> Choices);
@@ -31,6 +32,7 @@ public sealed record GamePackManifest
     public string VisionAdapter { get; init; } = "none";
     public string GameId { get; init; } = "";
     public string TrainingAdapter { get; init; } = "none";
+    public GamePackRuntime? Runtime { get; init; }
     public ImmutableArray<GamePackAsset> Assets { get; init; } = [];
     public ImmutableArray<GamePackBinding> Bindings { get; init; } = [];
     public ImmutableArray<GamePackTuning> Tuning { get; init; } = [];
@@ -47,31 +49,51 @@ public sealed record GamePackManifest
     }
     internal void Validate()
     {
-        if (SchemaVersion != 1 || ApiVersion != 1 || !Identifier(Id, 60) || !Identifier(Version, 40) || !Text(Name, 80)
+        if (!((SchemaVersion == 1 && ApiVersion == 1) || (SchemaVersion == 2 && ApiVersion == 2)) || !Identifier(Id, 60) || !Identifier(Version, 40) || !Text(Name, 80)
             || !Text(Description, 1000) || !Text(License, 300) || VisionAdapter is not ("none" or "temporal-release-v1"))
             throw new InvalidDataException("Unsupported game-pack schema/API, identity, metadata or typed vision adapter.");
         if (GameId is null || (GameId.Length != 0 && !Identifier(GameId, 60)) || !Identifier(TrainingAdapter, 80)
             || (TrainingAdapter != "none" && (GameId.Length == 0 || VisionAdapter == "none" || Bindings.IsDefaultOrEmpty == false)))
-            throw new InvalidDataException("A training plugin must identify its game and reviewed adapter, independently of controller bindings.");
+            throw new InvalidDataException("A training plugin must identify its game and adapter independently of controller bindings.");
+        if ((SchemaVersion == 1 && Runtime is not null) || (SchemaVersion == 2 && (Runtime is null || GameId.Length == 0)))
+            throw new InvalidDataException("An implementation plugin requires schema/API 2, a game identity and a runtime declaration.");
         if (Assets.IsDefault || Assets.Length > 40 || Assets.Any(asset => asset is null) || Assets.Select(asset => asset.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Assets.Length)
             throw new InvalidDataException("A game pack needs at most 40 uniquely named resources.");
         long total = 0;
         foreach (var asset in Assets)
         {
-            string extension = asset.Kind switch { GamePackAssetKind.Lua => ".lua", GamePackAssetKind.Model => ".onnx", GamePackAssetKind.VisionManifest => ".json", _ => throw new InvalidDataException("Only Lua, ONNX and JSON vision manifests are allowed.") };
-            string prefix = asset.Kind == GamePackAssetKind.Lua ? "scripts/" : "models/";
+            var (prefix, extension, limit) = asset.Kind switch {
+                GamePackAssetKind.Lua => ("scripts/", ".lua", 128L * 1024),
+                GamePackAssetKind.Model => ("models/", ".onnx", 128L * 1024 * 1024),
+                GamePackAssetKind.VisionManifest => ("models/", ".json", 256L * 1024),
+                GamePackAssetKind.Runtime when SchemaVersion == 2 => ("runtime/", ".dll", 16L * 1024 * 1024),
+                GamePackAssetKind.Ui when SchemaVersion == 2 => ("ui/", ".js", 1024L * 1024),
+                GamePackAssetKind.Workflow when SchemaVersion == 2 => ("training/", ".py", 1024L * 1024),
+                GamePackAssetKind.CaptureModel when SchemaVersion == 2 => ("capture-models/", ".onnx", 128L * 1024 * 1024),
+                GamePackAssetKind.Data when SchemaVersion == 2 => ("data/", "", 512L * 1024),
+                _ => throw new InvalidDataException("Unsupported resource kind for this package API.") };
             if (asset.Path is null || asset.Path.Length > 180 || !asset.Path.StartsWith(prefix, StringComparison.Ordinal)
-                || !asset.Path.EndsWith(extension, StringComparison.Ordinal) || asset.Path.Split('/').Any(segment => !Identifier(segment, 80)
+                || !asset.Path.EndsWith(extension, StringComparison.Ordinal) || asset.Path.Split('/').Any(segment => !Identifier(SchemaVersion == 2 ? segment.ToLowerInvariant() : segment, 80)
                     || segment is "." or ".." || segment.EndsWith('.') || segment.Split('.')[0] is "con" or "prn" or "aux" or "nul"
                     || (segment.Length >= 4 && (segment.StartsWith("com") || segment.StartsWith("lpt")) && char.IsDigit(segment[3])))
-                || !Hash(asset.Sha256) || asset.Bytes <= 0 || asset.Bytes > (asset.Kind == GamePackAssetKind.Model ? 128L * 1024 * 1024 : asset.Kind == GamePackAssetKind.Lua ? 128 * 1024 : 256 * 1024))
-                throw new InvalidDataException("Invalid resource path, size, type or SHA-256. Native plugins and traversal paths are unsupported.");
+                || (asset.Kind == GamePackAssetKind.Data && Path.GetExtension(asset.Path) is not (".json" or ".txt" or ".md"))
+                || !Hash(asset.Sha256) || asset.Bytes <= 0 || asset.Bytes > limit)
+                throw new InvalidDataException("Invalid resource path, size, type or SHA-256.");
             total += asset.Bytes;
         }
         if (total > 256L * 1024 * 1024 || Assets.Count(asset => asset.Kind == GamePackAssetKind.Lua) > 32
             || Assets.Count(asset => asset.Kind == GamePackAssetKind.Model) > 4 || Assets.Count(asset => asset.Kind == GamePackAssetKind.VisionManifest) > 4
-            || (VisionAdapter == "none" && Assets.Any(asset => asset.Kind != GamePackAssetKind.Lua)))
+            || Assets.Count(asset => asset.Kind == GamePackAssetKind.CaptureModel) > 8
+            || (VisionAdapter == "none" && Assets.Any(asset => asset.Kind is GamePackAssetKind.Model or GamePackAssetKind.VisionManifest or GamePackAssetKind.CaptureModel)))
             throw new InvalidDataException("Game pack exceeds resource limits or supplies models without a vision adapter.");
+        if (Runtime is { } runtime && (runtime.ContractVersion != 1 || !Text(runtime.Factory, 240)
+            || runtime.Factory.Split('.').Any(part => part.Length == 0 || !part.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+            || !Assets.Any(a => a.Kind == GamePackAssetKind.Runtime && a.Path == runtime.Assembly)
+            || !Assets.Any(a => a.Kind == GamePackAssetKind.Ui && a.Path == runtime.UiEntry)
+            || !Assets.Any(a => a.Kind == GamePackAssetKind.Workflow && a.Path == runtime.TrainingEntry)
+            || new[] { runtime.AuditEntry, runtime.ExperimentsEntry }.Any(path => path.Length != 0 && !Assets.Any(a => a.Kind == GamePackAssetKind.Workflow && a.Path == path))
+            || runtime.ModelDirectory != "capture-models"))
+            throw new InvalidDataException("The runtime must declare a supported contract, factory and checked implementation resources.");
         if (Bindings.IsDefault || Bindings.Length > ControlMap.All.Count || Bindings.Any(binding => binding is null || !Enum.IsDefined(binding.Control)
                 || !Assets.Any(asset => asset.Path == binding.Script && asset.Kind == GamePackAssetKind.Lua))
             || Bindings.Select(binding => binding.Control).Distinct().Count() != Bindings.Length)

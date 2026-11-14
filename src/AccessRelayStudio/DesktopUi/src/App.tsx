@@ -12,6 +12,7 @@ import { MarketplacePage } from './pages/MarketplacePage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
 import { currentTheme, saveTheme, type Theme } from './theme';
 import { SwitchNavigation } from './SwitchNavigation';
+import { GamePluginProvider } from './game-plugins/registry';
 
 type Page = 'workspace' | 'controller' | 'vision' | 'training' | 'voice' | 'marketplace' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
@@ -80,7 +81,7 @@ export function App() {
     <p>{bootError || 'Opening your workspace…'}</p>
     {bootError ? <Button variant="primary" onClick={() => void bootstrap()}>Try again</Button> : <Icon name="loader" className="spin" />}
   </div></main>;
-  return <AnnouncementContext.Provider value={announcement}><div className="app-shell">
+  return <GamePluginProvider descriptors={state.gamePlugins}><AnnouncementContext.Provider value={announcement}><div className="app-shell">
     <LiveAnnouncements />
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand"><img src="./brand.png" alt="" /><div className="brand-name">AccessRelay<span>Studio</span></div></div>
@@ -131,5 +132,5 @@ export function App() {
       description="There are edits or controller recordings that have not been saved. Keep editing to save them before you close."
       footer={<><Button variant="danger" busy={closing} onClick={async () => { setClosing(true); try { await appCommand('close', { discard: true }); } catch { setClosing(false); } }}>Close and discard</Button>
         <Button variant="primary" disabled={closing} onClick={() => setCloseRequested(false)}>Keep editing</Button></>} />
-  </div></AnnouncementContext.Provider>;
+  </div></AnnouncementContext.Provider></GamePluginProvider>;
 }

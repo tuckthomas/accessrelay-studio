@@ -1,4 +1,3 @@
-using EliteScriptStudio.Packs.Nba2K27;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -108,7 +107,6 @@ static void InvalidModels()
     (VisionSettings.Default with { CameraView = "2K Low" }).Validate();
     (VisionSettings.Default with { CameraView = "Another pack camera" }).Validate();
     Throws(() => (VisionSettings.Default with { CameraView = "Invalid\nview" }).Validate());
-    Throws(() => new Nba2K27ShotProfile(Guid.NewGuid(), "Camera test", 78, 80, "Base", "One", "Two", CameraView: "Unsupported view").Validate());
     (Manifest() with { UncertaintySemantics = "gaussian-95-half-width-v1" }).Validate();
     Throws(() => (Manifest() with { UncertaintySemantics = "unversioned-sigma" }).Validate());
     Throws(() => (Manifest() with { OutputContract = "another-task" }).Validate());

@@ -6,7 +6,7 @@ import { VisionPage } from './VisionPage';
 
 afterEach(cleanup);
 const state = {
-  plugins: [{ id: 'nba2k27', name: 'NBA 2K27' }], selectedPluginId: '',
+  plugins: [], selectedPluginId: '',
   sources: [{ id: 'game-window', title: 'A different game' }], selectedSourceId: 'game-window',
   profiles: [], settings: {}, status: {}
 };
@@ -22,18 +22,6 @@ it('previews any game without an NBA profile, training controls, or an idle tag'
   await waitFor(() => expect(command).toHaveBeenCalledWith('start', { loadModel: false }));
 });
 
-it('shows NBA configuration only after the host selects the NBA plugin', async () => {
-  const command = vi.fn().mockResolvedValue(null);
-  const view = render(<VisionPage state={state} status={{}} command={command} />);
-  selectValue(screen.getByRole('combobox', { name: 'Game plugin' }), 'nba2k27');
-  await waitFor(() => expect(command).toHaveBeenCalledWith('pluginSelect', { id: 'nba2k27' }));
-  expect(screen.queryByRole('combobox', { name: 'Shot profile' })).toBeNull();
-  view.rerender(<VisionPage state={{ ...state, selectedPluginId: 'nba2k27' }} status={{}} command={command} />);
-  expect(screen.getByRole('combobox', { name: 'Shot profile' })).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Record training clip' })).toBeNull();
-  expect(screen.getByRole('heading', { name: 'Live analysis' })).toBeTruthy();
-  expect(screen.queryByText('Ready when you are')).toBeNull();
-});
 
 it('does not require an installed game plugin and locks selection during capture', () => {
   const command = vi.fn();
@@ -43,19 +31,6 @@ it('does not require an installed game plugin and locks selection during capture
   expect(command).not.toHaveBeenCalled();
 });
 
-it('keeps training and assistance on separate plugin surfaces', () => {
-  const command = vi.fn().mockResolvedValue(null);
-  const view = render(<VisionPage state={{ ...state, selectedPluginId: 'nba2k27' }} status={{}} command={command} mode="training" />);
-  expect(screen.getByRole('heading', { name: 'Model Training' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Record training clip' })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: 'Live analysis' })).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Detach' })).toBeNull();
-  view.rerender(<VisionPage state={{ ...state, selectedPluginId: 'nba2k27' }} status={{}} command={command} mode="live" />);
-  expect(screen.getByRole('heading', { name: 'Live Gameplay' })).toBeTruthy();
-  expect(screen.queryByRole('tab', { name: 'Record clips' })).toBeNull();
-  expect(screen.getByRole('heading', { name: 'Live analysis' })).toBeTruthy();
-  expect(command).not.toHaveBeenCalled();
-});
 
 it('detaches through the host and renders the preview in only one window', async () => {
   const command = vi.fn().mockResolvedValue(null), detach = vi.fn().mockResolvedValue(null), attach = vi.fn().mockResolvedValue(null);

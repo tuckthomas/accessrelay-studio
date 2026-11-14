@@ -31,6 +31,7 @@ public sealed partial class DesktopWindow : Window
     private DesktopVoiceService? _voice;
     private DesktopAssistantService? _assistant;
     private DesktopMarketplaceService? _marketplace;
+    private InstalledGamePlugins? _gamePlugins;
     private DesktopGameplayWindow? _gameplayWindow;
     private readonly SystemPerformanceMonitor _performance = new();
     private readonly DesktopPreferenceStore _preferences = new(DesktopEnvironment.DataDirectory("Preferences"));
@@ -81,11 +82,11 @@ public sealed partial class DesktopWindow : Window
         {
             if (!_started)
             {
-                var gamePlugins = new EliteScriptStudio.Packs.InstalledVisionPlugins(DesktopEnvironment.GamePackDirectory, DesktopEnvironment.DataDirectory);
+                var gamePlugins = _gamePlugins = new InstalledGamePlugins(DesktopEnvironment.GamePackDirectory, DesktopEnvironment.DataDirectory);
                 gamePlugins.Reload();
                 _controller ??= new DesktopControllerService(AppWindow.Id, () => _runtime, StopAllAsync,
                     path => _vision?.ImportGamePackModelAsync(path) ?? throw new InvalidOperationException("Vision is unavailable."),
-                    EliteScriptStudio.Packs.InstalledVisionPlugins.ControllerAdapters(DesktopEnvironment.DataDirectory));
+                    () => gamePlugins.ControllerAdapters);
                 try
                 {
                     if (_runtime is null)
@@ -104,9 +105,9 @@ public sealed partial class DesktopWindow : Window
                 }
                 catch (Exception error) { _startupError = "Controller monitoring is unavailable: " + error.Message; }
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
-                _marketplace ??= new DesktopMarketplaceService(_controller, gamePlugins);
+                _marketplace ??= new DesktopMarketplaceService(_controller, gamePlugins, () => _vision?.RequirePluginIdle());
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync(),
-                    () => gamePlugins.Plugins);
+                    () => gamePlugins.Plugins, gamePlugins);
                 _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
                     () => _runtime, () => _hasUnsavedChanges);
                 _started = true;
@@ -152,6 +153,7 @@ public sealed partial class DesktopWindow : Window
                 core.PermissionRequested += (_, args) => args.State = CoreWebView2PermissionState.Deny;
                 core.WebMessageReceived += MessageReceivedAsync;
                 core.AddWebResourceRequestedFilter(MediaOrigin + "/*", CoreWebView2WebResourceContext.All);
+                core.AddWebResourceRequestedFilter("https://plugins.accessrelay.test/plugins/*", CoreWebView2WebResourceContext.All);
                 core.WebResourceRequested += MediaRequestedAsync;
                 core.ProcessFailed += InterfaceProcessFailed;
                 core.NavigationCompleted += (_, args) =>
@@ -291,7 +293,7 @@ public sealed partial class DesktopWindow : Window
 
     private object Snapshot() => new
     {
-        version = BuildInfo.Version, controller = _controller!.GetState(), vision = _vision!.GetState(), voice = _voice!.GetState(), marketplace = _marketplace!.GetState(),
+        version = BuildInfo.Version, controller = _controller!.GetState(), vision = _vision!.GetState(), voice = _voice!.GetState(), marketplace = _marketplace!.GetState(), gamePlugins = _gamePlugins!.Presentations,
         settings = new { driverAvailable = VirtualMicDriver.IsAvailable, buildFolder = AppContext.BaseDirectory, appDirectory = AppContext.BaseDirectory,
             profileDirectory = _controller!.ProfileDirectory,
             engine = "C# / .NET", interfaceTechnology = "React / WebView2 · local bundled files", platform = "Windows x64",
@@ -372,6 +374,7 @@ public sealed partial class DesktopWindow : Window
         await DesktopMediaResponse.SendAsync(sender, args, uri =>
         {
             if (_closing) return null;
+            if (uri.Host == "plugins.accessrelay.test" && _gamePlugins?.ReadUi(uri) is { } module) return new(module, "text/javascript; charset=utf-8");
             if (uri.AbsolutePath.StartsWith("/vision/", StringComparison.Ordinal)) return _vision?.ReadMedia(uri.AbsolutePath[8..]);
             if (uri.AbsolutePath.StartsWith("/voice/", StringComparison.Ordinal)) return _voice?.ReadMedia(uri.AbsolutePath[7..]);
             return null;

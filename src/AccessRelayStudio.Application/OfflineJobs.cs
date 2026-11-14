@@ -17,7 +17,7 @@ sealed class OfflineJob(string id, string kind, string directory, AssistantGrant
 }
 
 /// <summary>Owns explicitly registered paths and fixed argv builders; external clients receive IDs only.</summary>
-public sealed class OfflineJobManager(AssistantSession access, string trainingTools) : IAsyncDisposable
+public sealed class OfflineJobManager(AssistantSession access, string trainingTools, Func<string, string>? resolveWorkflow = null) : IAsyncDisposable
 {
     private readonly object _gate = new();
     private readonly Dictionary<string, (RegisteredTrainingInput View, string Path, string? Digest)> _inputs = [];
@@ -104,7 +104,7 @@ public sealed class OfflineJobManager(AssistantSession access, string trainingTo
                 }).ToArray();
             }
             if (kind == "audit")
-            { arguments.AddRange(["-S", System.IO.Path.Combine(trainingTools, "Audit-VisionDataset.py"), "--sessions"]); arguments.AddRange(Resolve("datasetIds", "dataset")); }
+            { arguments.AddRange(["-S", resolveWorkflow?.Invoke("audit") ?? System.IO.Path.Combine(trainingTools, "Audit-VisionDataset.py"), "--sessions"]); arguments.AddRange(Resolve("datasetIds", "dataset")); }
             else
             {
                 string[] train = Resolve("trainingIds", "dataset"), validation = Resolve("validationIds", "dataset");
@@ -115,7 +115,7 @@ public sealed class OfflineJobManager(AssistantSession access, string trainingTo
                 int epochs = request.Arguments.GetProperty("epochs").GetInt32(), seed = request.Arguments.GetProperty("seed").GetInt32();
                 if (epochs is < 1 or > 10 || seed < 0) throw new AssistantException("experimentBounds", "Choose 1–10 epochs and a nonnegative seed.");
                 bool planOnly = request.Arguments.GetProperty("planOnly").GetBoolean();
-                arguments.AddRange([System.IO.Path.Combine(trainingTools, "Run-VisionExperiments.py"), "--train"]); arguments.AddRange(train);
+                arguments.AddRange([resolveWorkflow?.Invoke("experiments") ?? System.IO.Path.Combine(trainingTools, "Run-VisionExperiments.py"), "--train"]); arguments.AddRange(train);
                 arguments.Add("--validation"); arguments.AddRange(validation);
                 arguments.AddRange(["--locked-thresholds", thresholds.Path, "--seeds", seed.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     "--epochs", epochs.ToString(System.Globalization.CultureInfo.InvariantCulture), "--cpu-threads", "1", "--device", "cpu",

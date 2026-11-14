@@ -7,7 +7,6 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../../games/nba2k27/src/Nba*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />
     <ProjectReference Include="../../AccessRelayStudio.Engine/AccessRelayStudio.Engine.csproj" />
   </ItemGroup>
 </Project>

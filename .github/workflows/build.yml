@@ -38,9 +38,9 @@ jobs:
           $required = @('AccessRelayStudio.exe', 'AccessRelayStudio.Engine.dll', 'AccessRelayStudio.Runtime.dll',
             'Microsoft.ML.OnnxRuntime.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_providers_cuda.dll',
             'NAudio.Wasapi.dll', 'System.Speech.dll', 'DesktopUi/index.html', 'Scene/Viewer/index.html',
-            'Scene/Viewer/viewer.bundle.js', 'Scene/Model/XboxOne.glb', 'GamePacks/nba2k27/pack.json', 'GamePacks/switch-demo/pack.json',
+            'Scene/Viewer/viewer.bundle.js', 'Scene/Model/XboxOne.glb',
             'AccessRelayStudio.Application.dll', 'Mcp/AccessRelayStudio.Mcp.exe', 'Mcp/AccessRelayStudio.Mcp.dll',
-            'Mcp/TrainingTools/Audit-VisionDataset.py', 'Mcp/TrainingTools/Run-VisionExperiments.py', 'Mcp/Notices/ModelContextProtocol-LICENSE.txt')
+            'Mcp/Notices/ModelContextProtocol-LICENSE.txt')
           foreach ($relative in $required) {
             if (-not (Test-Path -LiteralPath (Join-Path ./artifacts/Run $relative) -PathType Leaf)) {
               throw "Published asset is missing: $relative"
@@ -65,7 +65,7 @@ jobs:
         shell: pwsh
         run: dotnet run --project ./tools/assistant/Verification/AssistantVerification.csproj -c Release -- --bridge ./artifacts/Run/Mcp/AccessRelayStudio.Mcp.exe --python (Get-Command python).Source
       - name: Check offline dataset provenance guards
-        run: python -S -m unittest discover -s ./tools/vision -p 'test_*.py' -v
+        run: python tools/architecture/check_game_ownership.py
       - name: Check desktop binary media and evidence integrity
         run: dotnet run --project ./tools/desktop/Verification/DesktopEvidenceVerification.csproj -c Release
       - name: Check vision contracts, model library and performance imports

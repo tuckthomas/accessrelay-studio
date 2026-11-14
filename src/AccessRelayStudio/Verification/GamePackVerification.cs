@@ -8,11 +8,10 @@ internal static class GamePackVerification
     internal static void Run()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "games", "switch-demo", "pack.json"))) root = root.Parent;
-        if (root is null) throw new Exception("Cannot locate bundled game-pack fixtures.");
-        var nba = GamePackDefinition.Read(Path.Combine(root.FullName, "games/nba2k27/pack.json"));
-        var demo = GamePackDefinition.Read(Path.Combine(root.FullName, "games/switch-demo/pack.json"));
-        if (nba.Manifest.VisionAdapter != "temporal-release-v1" || demo.Manifest.VisionAdapter != "none") throw new Exception("Typed vision adapter identities changed.");
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "src/AccessRelayStudio/Verification/Fixtures/switch-pack/pack.json"))) root = root.Parent;
+        if (root is null) throw new Exception("Cannot locate test pack fixtures.");
+        var demo = GamePackDefinition.Read(Path.Combine(root.FullName, "src/AccessRelayStudio/Verification/Fixtures/switch-pack/pack.json"));
+        if (demo.Manifest.VisionAdapter != "none") throw new Exception("Typed vision adapter identities changed.");
         string directory = Path.Combine(Path.GetTempPath(), "AccessRelay.Packs." + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
@@ -56,7 +55,7 @@ internal static class GamePackVerification
             };
             foreach (var candidate in candidates) Expect<InvalidDataException>(candidate.Validate);
             using var canceled = new CancellationTokenSource(); canceled.Cancel();
-            Expect<OperationCanceledException>(() => library.Import(Path.Combine(nba.DirectoryPath, "pack.json"), canceled.Token));
+            Expect<OperationCanceledException>(() => library.Import(Path.Combine(demo.DirectoryPath, "pack.json"), canceled.Token));
             Equal(false, Directory.EnumerateDirectories(Path.Combine(directory, "library"), ".import-*").Any());
             string modifiedRoot = Path.Combine(directory, "modified"); Directory.CreateDirectory(modifiedRoot); demo.CopyTo(modifiedRoot, CancellationToken.None);
             File.AppendAllText(Path.Combine(modifiedRoot, script.Path), "\n-- changed");

@@ -1,30 +1,15 @@
-using EliteScriptStudio.Packs.Nba2K27;
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
-if (args is ["--inspect-acquisition", var bitmap, var observation, var report])
+if (args.Length is 3 or 4 && args[0] == "--installed-plugin")
 {
-    AutomaticIdentityChecks.InspectAcquisition(bitmap, observation, report);
+    InstalledPluginVerification.Run(args[1], args[2], args.Length == 4 ? args[3] : null);
     return;
 }
 
-if (args is ["--inspect-calibration", var takeDirectory, var outputPath])
-{
-    AutomaticIdentityChecks.InspectCalibration(takeDirectory, outputPath);
-    return;
-}
 
-if (args is ["--capture-anchors"])
-{
-    NbaCaptureAnchorChecks.Run();
-    return;
-}
 
-if (args is ["--court-only"])
-{
-    AutomaticIdentityChecks.CheckCourt();
-    return;
-}
+
 
 if (args is ["--marketplace", var marketplaceOutput])
 {
@@ -32,12 +17,6 @@ if (args is ["--marketplace", var marketplaceOutput])
     return;
 }
 
-if (args is ["--game-plugin"])
-{
-    Nba2K27ShotProfileVerification.Run();
-    Console.WriteLine("SUCCESS Game plugin profile contracts and saved-profile compatibility.");
-    return;
-}
 
 var tests = new (string Name, Action Run)[]
 {
@@ -50,7 +29,6 @@ var tests = new (string Name, Action Run)[]
     ("Elapsed-time stick smoothing, independent axes, neutralization and persistence", StickSmoothingVerification.Run),
     ("Sticky button edges, resets, manual composition and legacy profile compatibility", StickyButtonVerification.Run),
     ("Vision deadlines, manual cancellation, release latch, generations, freshness and ownership", VisionVerification.Run),
-    ("NBA 2K27 player shot profile CRUD, selection, configuration hashes and bounded storage", Nba2K27ShotProfileVerification.Run),
     ("Lua timing, live input, state, cancellation, budgets and profile compatibility", LuaVerification.Run),
     ("Default bindings and manual passthrough", Defaults),
     ("Preview and runtime agree for all five variants", AllTrajectories),
@@ -68,7 +46,6 @@ var tests = new (string Name, Action Run)[]
     ("Recording replacement at capacity and selective deletion persist", RecordingReplacementAndDeletion),
     ("Recording interval and frame edits preserve timing and manual input", RecordingEdits),
     ("Recorded right-stick phases use exact frame boundaries", RecordedRightStickPhases),
-    ("NBA 2K27 feedback retimes the selected shot and preserves recorded input", Nba2K27Feedback),
     ("Version 2 recording masks keep both axes for legacy stick aliases", LegacyRecordingMasks),
     ("Live input retains quick presses and projects both sticks", LiveFeedback),
     ("Stick output returns to zero at center while preserving movement and buttons", CenteredStickOutput),
@@ -529,12 +506,13 @@ static void RecordingDuplication()
         Sequence(source.Frames, savedCopy.Frames);
         Sequence(original.Bindings.OrderBy(binding => binding.Key), saved.Bindings.OrderBy(binding => binding.Key));
 
-        var retimed = Nba2K27Tuning.Apply(savedCopy, new Nba2K27Adjustment(-16, 0));
+        var hold = savedCopy.FindRightStickIntervals().DownHold!.Value;
+        var retimed = savedCopy.WithIntervalDuration(hold.Start, hold.End, 64);
         store.SaveRecordingEdit(saved, saved.WithRecording(retimed));
         var edited = store.Load(original.Id);
         Sequence(source.Frames, edited.Recordings[source.Id].Frames);
         Equal(source.DurationMs, edited.Recordings[source.Id].DurationMs);
-        Equal(new Nba2K27Intervals(64, 32), Nba2K27Tuning.GetIntervals(edited.Recordings[copy.Id]));
+        Equal(64, edited.Recordings[copy.Id].IntervalDuration(edited.Recordings[copy.Id].FindRightStickIntervals().DownHold!.Value));
 
         var renamed = edited.RenameRecording(source.Id, "Standing three")
             .RenameRecording(copy.Id, "Midrange pull-up");
@@ -747,57 +725,6 @@ static void RecordedRightStickPhases()
         Equal<RecordedInterval?>(expected, actual);
         Equal(duration, take.IntervalDuration(actual!.Value));
     }
-}
-
-static void Nba2K27Feedback()
-{
-    var lateAndSlow = Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.Late, Nba2K27TempoFeedback.Slow);
-    Equal(new Nba2K27Adjustment(-16, -8), lateAndSlow);
-    Equal(new Nba2K27Adjustment(16, 8), Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.Early, Nba2K27TempoFeedback.Fast));
-    Equal(new Nba2K27Adjustment(8, 4), Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.SlightlyEarly, Nba2K27TempoFeedback.SlightlyFast));
-    Equal(new Nba2K27Adjustment(-8, -4), Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.SlightlyLate, Nba2K27TempoFeedback.SlightlySlow));
-    Equal(default, Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.Excellent, Nba2K27TempoFeedback.None));
-    Equal(default, Nba2K27Tuning.Suggest(Nba2K27TimingFeedback.None, Nba2K27TempoFeedback.Excellent));
-
-    var timing = new ScriptTiming(StartDelay: 20, DownHold: 80, UpSweep: 33);
-    Equal(timing with { DownHold = 64, UpSweep = 25 }, Nba2K27Tuning.Apply(timing, lateAndSlow));
-    Equal(true, ReferenceEquals(timing, Nba2K27Tuning.Apply(timing, default)));
-    Equal(timing with { DownHold = 1, UpSweep = ScriptTiming.MaxMs },
-        Nba2K27Tuning.Apply(timing, new(int.MinValue, int.MaxValue)));
-
-    var recording = new MacroRecording(Guid.NewGuid(), "Test shot", RecordingChannels.RightStickY | RecordingChannels.A,
-        [Frame(0, 0), Frame(20, -25000, ControlId.A), Frame(30, -30000), Frame(100, -10000), Frame(116, 15000),
-            Frame(133, 32000), Frame(155, 0)], 175);
-    Equal(new Nba2K27Intervals(80, 33), Nba2K27Tuning.GetIntervals(recording));
-    var adjusted = Nba2K27Tuning.Apply(recording, lateAndSlow);
-    Equal(recording.Id, adjusted.Id);
-    Equal(recording.Channels, adjusted.Channels);
-    Equal(151, adjusted.DurationMs);
-    Equal(new Nba2K27Intervals(64, 25), Nba2K27Tuning.GetIntervals(adjusted));
-    Sequence(recording.Frames.Select(frame => frame.State), adjusted.Frames.Select(frame => frame.State));
-    Equal(true, ReferenceEquals(recording, Nba2K27Tuning.Apply(recording, default)));
-    Equal(new Nba2K27Intervals(2, 2),
-        Nba2K27Tuning.GetIntervals(Nba2K27Tuning.Apply(recording, new(int.MinValue, int.MinValue))));
-
-    var atLimit = Nba2K27Tuning.Apply(recording with { DurationMs = InputRecorder.MaxDurationMs }, new(16, -8));
-    Equal(InputRecorder.MaxDurationMs, atLimit.DurationMs);
-    Equal(new Nba2K27Intervals(88, 25), Nba2K27Tuning.GetIntervals(atLimit));
-
-    var snap = recording with { Frames = [Frame(0, -30000), Frame(100, 30000), Frame(150, 0)] };
-    Equal(new Nba2K27Intervals(100, null), Nba2K27Tuning.GetIntervals(snap));
-    Equal(new Nba2K27Intervals(84, null), Nba2K27Tuning.GetIntervals(Nba2K27Tuning.Apply(snap, lateAndSlow)));
-
-    var multiShot = recording with
-    {
-        Frames = [.. recording.Frames, Frame(170, -30000), Frame(200, 30000)],
-        DurationMs = 220
-    };
-    Equal(default, Nba2K27Tuning.GetIntervals(multiShot));
-    Equal(true, ReferenceEquals(multiShot, Nba2K27Tuning.Apply(multiShot, lateAndSlow)));
-    Equal(default, Nba2K27Tuning.GetIntervals(recording with { Frames = [Frame(0, -30000), Frame(150, 0)] }));
-
-    static RecordedFrame Frame(int time, short rightY, ControlId button = 0) =>
-        new(time, default(ControllerState) with { RightY = rightY, Buttons = (ushort)button });
 }
 
 static void LegacyRecordingMasks()

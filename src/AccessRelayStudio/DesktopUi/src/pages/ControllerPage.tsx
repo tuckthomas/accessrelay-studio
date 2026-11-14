@@ -3,7 +3,7 @@ import { isDesignPreview } from '../api';
 import { CoPilotInput } from '../CoPilotInput';
 import { ProfilePicker } from '../ui';
 import { GamePacks } from '../GamePacks';
-import { gameControllerTuning } from '../game-plugins/registry';
+import { useGameControllerTuning } from '../game-plugins/registry';
 import { currentTheme, themeChanged } from '../theme';
 import { Select, SelectOption, Input, Slider, Checkbox, Textarea, ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
 
@@ -289,7 +289,7 @@ function RecordPanel({state,status,command}:PageProps){
 }
 
 function TimingEditor({state,status,command}:PageProps){
-  const Tuning = gameControllerTuning(state.activeProfile?.gamePack?.id);
+  const Tuning = useGameControllerTuning(state.activeProfile?.gamePack?.id);
   const timings=state.activeProfile?.timings||[],[variant,setVariant]=useState(timings[0]?.variant||'rhythm');
   const item=timings.find((entry:any)=>entry.variant===variant)||timings[0];
   const [draft,setDraft]=useState<any>(item?.timing||INITIAL_TIMING),[chart,setChart]=useState<any>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
@@ -328,7 +328,7 @@ export function TrajectoryChart({data,recording}:{data?:any;recording?:any}){
 }
 
 function RecordingEditor({id,pluginId,command,onClose}:{id:string;pluginId?:string;command:PageProps['command'];onClose:()=>void}){
-  const Tuning = gameControllerTuning(pluginId);
+  const Tuning = useGameControllerTuning(pluginId);
   const [recording,setRecording]=useState<any>(null),[original,setOriginal]=useState<any>(null),[index,setIndex]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [trimStart,setTrimStart]=useState(0),[trimEnd,setTrimEnd]=useState(0),[intervalStart,setIntervalStart]=useState(0),[intervalEnd,setIntervalEnd]=useState(1),[intervalMs,setIntervalMs]=useState(100);
   const load=useCallback(async()=>{const value=await command('recordGet',{id});setRecording(value);setOriginal(value);setTrimEnd(Math.max(0,value.frames.length-1));},[id,command]);

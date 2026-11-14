@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace EliteScriptStudio.Core;
 
 internal sealed record MarketplaceEntry(string Id, string Name, string Description, string Author, string Version,
-    string Kind, string License, string ManifestPath, string ManifestSha256, string[] Tags, string GameId = "");
+    string Kind, string License, string ManifestPath, string ManifestSha256, string[] Tags, string GameId = "", bool NativeCode = false);
 internal sealed record MarketplaceCatalog(int SchemaVersion, MarketplaceEntry[] Entries)
 {
     internal void Validate()
@@ -51,6 +51,7 @@ internal sealed class MarketplaceClient(HttpClient http)
             throw new InvalidDataException("The package does not match its listing.");
         if (entry.GameId != manifest.GameId || (entry.Kind == "training-plugin") != (manifest.TrainingAdapter != "none"))
             throw new InvalidDataException("The package capabilities or game do not match its listing.");
+        if (entry.NativeCode != (manifest.Runtime is not null)) throw new InvalidDataException("The package runtime does not match its listing.");
         string prefix = entry.ManifestPath[..^"pack.json".Length];
         foreach (var asset in manifest.Assets)
         {

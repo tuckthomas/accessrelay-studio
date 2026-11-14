@@ -21,6 +21,7 @@ internal sealed class DesktopVisionService : IDesktopModule
     private readonly Func<StudioProfile> _activeProfile;
     private readonly Func<Task> _connectOutput;
     private readonly Func<IReadOnlyList<IVisionGamePlugin>> _plugins;
+    private readonly InstalledGamePlugins? _installedPlugins;
     private IVisionGamePlugin? _plugin;
     private IVisionCaptureProfile? _profile => _plugin?.SelectedProfile;
     private readonly VisionSettingsStore _settingsStore = new(DesktopEnvironment.DataDirectory("Vision"));
@@ -51,9 +52,9 @@ internal sealed class DesktopVisionService : IDesktopModule
         (_session?.Status.Running == true, _session?.Status.ModelReady == true, _session?.Status.CanArm == true, _session?.Status.SourceStale == true);
 
     internal DesktopVisionService(WindowId owner, Func<StudioRuntime?> runtime, Func<StudioProfile> activeProfile,
-        Func<Task> connectOutput, Func<IReadOnlyList<IVisionGamePlugin>> plugins)
+        Func<Task> connectOutput, Func<IReadOnlyList<IVisionGamePlugin>> plugins, InstalledGamePlugins? installedPlugins = null)
     {
-        _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput; _plugins = plugins;
+        _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput; _plugins = plugins; _installedPlugins = installedPlugins;
         LoadSettings(); RefreshSources();
         var context = _settings;
         _ = Task.Run(() => _library.Discover(context)).ContinueWith(task =>
@@ -68,11 +69,16 @@ internal sealed class DesktopVisionService : IDesktopModule
 
     public object GetState()
     {
+        if (_plugin is not null && !AssistantBusy && _session?.Status.Running != true)
+        {
+            var installed = _plugins().FirstOrDefault(item => item.Id == _plugin.Id);
+            if (!ReferenceEquals(installed, _plugin)) { _plugin = installed; _version++; LoadSettings(); }
+        }
         if (_profile is null && _settingsProfile != _activeProfile().Id) LoadSettings();
         var selectedModel = _models.FirstOrDefault(m => m.ManifestPath == _settings.ModelManifestPath);
         return new
         {
-            plugins = _plugins().Select(plugin => new { plugin.Id, plugin.Name, plugin.OutputContract }), selectedPluginId = _plugin?.Id ?? "",
+            plugins = _plugins().Select(plugin => new { plugin.Id, plugin.Name, plugin.OutputContract }), pluginErrors = _installedPlugins?.Errors ?? [], selectedPluginId = _plugin?.Id ?? "",
             profiles = _plugin?.Profiles.Select(profile => profile.ExportProfile()) ?? [],
             selectedProfile = _profile?.ExportProfile(), selectedFingerprint = _profile?.ConfigurationFingerprint,
             sources = _sources.Select(s => new { id = SourceId(s), s.Title, s.ProcessId }), selectedSourceId = _selectedSourceId,
@@ -152,7 +158,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                     RequireStopped(); var plugin = RequirePlugin(); var profile = _profile ?? throw new InvalidOperationException("Choose the shot profile to train.");
                     int epochs = args.Number("epochs", 20); string device = args.Text("device", "cpu");
                     if (epochs is < 1 or > 200 || device is not ("cpu" or "cuda")) throw new InvalidDataException("Choose CPU/CUDA and 1–200 epochs.");
-                    _trainingJob.Start(plugin.TrainingWorkflowFile ?? throw new InvalidOperationException("This plugin has no training workflow."),
+                    _trainingJob.Start(_installedPlugins?.WorkflowPath(plugin.Id) ?? throw new InvalidOperationException("This plugin has no installed training workflow."),
                         JsonSerializer.SerializeToElement(new { epochs, device, profile = profile.ExportProfile(), targetProvider = _settings.ExecutionProviderName,
                             _settings.MinimumConfidence, _settings.MaximumUncertaintyMs, _settings.MaximumFrameAgeMs }, DesktopJson.Options));
                     return null;
@@ -304,6 +310,8 @@ internal sealed class DesktopVisionService : IDesktopModule
     }
 
     private IVisionGamePlugin RequirePlugin() => _plugin ?? throw new InvalidOperationException("Choose a game plugin for this action.");
+    internal string OfflineWorkflow(string role) => _installedPlugins?.WorkflowPath(RequirePlugin().Id, role)
+        ?? throw new InvalidOperationException("Choose an installed training plugin.");
     private void SelectProfile(Guid id)
     {
         string? previous = _profile?.ConfigurationFingerprint;
@@ -359,6 +367,11 @@ internal sealed class DesktopVisionService : IDesktopModule
         if (_session?.Status.Running == true || _session?.IsStopping == true)
             throw new InvalidOperationException("Stop live view before changing its plugin, profile, source, model or timing settings.");
     }
+    internal void RequirePluginIdle()
+    {
+        RequireStopped();
+        if (AssistantBusy) throw new InvalidOperationException("Finish the active vision operation before installing a game implementation.");
+    }
     private void Start(bool loadModel)
     {
         if (_trainingJob.Running) throw new InvalidOperationException("Stop the offline training job before starting gameplay capture.");
@@ -383,7 +396,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
         var captureProvider = _settings.ExecutionProvider;
-        _session.Start(source.Hwnd, _settings, loadModel, _profile?.CreateRegionTracker(_settings, models => new VisionAnalysisModels(models, captureProvider))); _lastObservedSourceId = _selectedSourceId;
+        _session.Start(source.Hwnd, _settings, loadModel, _profile?.CreateRegionTracker(_settings, models => new VisionAnalysisModels(models, captureProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id)))); _lastObservedSourceId = _selectedSourceId;
         _notice = loadModel && _settings.ModelManifestPath.Length != 0
             ? "Preparing live analysis. Assistance remains disarmed until you arm it."
             : "Preview is live. Frames are not being saved.";
@@ -645,7 +658,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                 {
                     folder = await Task.Run(() => VisionTrainingPreparation.Prepare(folder, profile, settings, cancellation,
                         (done, total) => _notice = $"Preparing player and HUD regions: {done * 100 / total}%.",
-                        models => new VisionAnalysisModels(models, settings.ExecutionProvider)), cancellation);
+                        models => new VisionAnalysisModels(models, settings.ExecutionProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id))), cancellation);
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
                 { preparationError = "The raw gameplay is available for review. Player-region preparation failed: " + error.Message; }

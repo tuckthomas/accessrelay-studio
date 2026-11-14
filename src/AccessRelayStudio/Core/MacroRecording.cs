@@ -24,16 +24,16 @@ public enum RecordingChannels : uint
 
 public readonly record struct RecordedFrame(int TimeMs, ControllerState State);
 
-internal readonly record struct RecordedInterval(int Start, int End);
+public readonly record struct RecordedInterval(int Start, int End);
 
 public sealed record MacroRecording(Guid Id, string Name, RecordingChannels Channels,
     ImmutableArray<RecordedFrame> Frames, int DurationMs)
 {
     public const int MaxFrames = 4096;
     public const int MaxRecordingsPerProfile = 8;
-    internal const int RightStickHoldThreshold = 24576;
+    public const int RightStickHoldThreshold = 24576;
 
-    internal (RecordedInterval? DownSweep, RecordedInterval? DownHold,
+    public (RecordedInterval? DownSweep, RecordedInterval? DownHold,
         RecordedInterval? UpSweep, RecordedInterval? UpHold) FindRightStickIntervals()
     {
         if (!Channels.HasFlag(RecordingChannels.RightStickY) || Frames.IsDefaultOrEmpty)
@@ -69,7 +69,7 @@ public sealed record MacroRecording(Guid Id, string Name, RecordingChannels Chan
         return (downSweep, downHold, upSweep, new RecordedInterval(up, upEnd));
     }
 
-    internal int IntervalDuration(RecordedInterval interval) =>
+    public int IntervalDuration(RecordedInterval interval) =>
         (interval.End == Frames.Length ? DurationMs : Frames[interval.End].TimeMs) - Frames[interval.Start].TimeMs;
 
     public MacroRecording WithIntervalDuration(int startFrame, int endFrame, int durationMs)

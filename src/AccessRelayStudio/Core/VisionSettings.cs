@@ -3,10 +3,10 @@ using System.Text.Json.Serialization;
 
 namespace EliteScriptStudio.Core;
 
-internal enum VisionExecutionProvider { Cpu, Cuda }
-internal enum VisionPreprocessingBackend { Cpu, D3D11Cuda }
+public enum VisionExecutionProvider { Cpu, Cuda }
+public enum VisionPreprocessingBackend { Cpu, D3D11Cuda }
 
-internal readonly record struct VisionCrop(double Left, double Top, double Width, double Height)
+public readonly record struct VisionCrop(double Left, double Top, double Width, double Height)
 {
     public void Validate()
     {
@@ -16,7 +16,7 @@ internal readonly record struct VisionCrop(double Left, double Top, double Width
     }
 }
 
-internal sealed record VisionSettings
+public sealed record VisionSettings
 {
     public static VisionSettings Default { get; } = new();
     public VisionCrop Crop { get; init; } = new(0, 0, 1, 1);

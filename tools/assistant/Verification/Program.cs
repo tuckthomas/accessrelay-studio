@@ -22,7 +22,7 @@ StudioAssistantService.RequireIdle(host.State.Runtime with { NavigationActive = 
 Reject(() => StudioAssistantService.RequireIdle(host.State.Runtime with { ProcessingTransition = true }), "processingActive");
 Console.WriteLine("PASS shared diagnostic projection, monotonic expiry, permission scopes, revocation and actual Lua contract.");
 await AssistantIntegrationChecks.Run(args);
-await OfflineWorkflowChecks.Run(args);
+
 
 static void Check(bool value, string message) { if (!value) throw new Exception(message); }
 static void Reject(Action call, string code) { try { call(); } catch (AssistantException error) when (error.Code == code) { return; } throw new Exception("Expected " + code); }

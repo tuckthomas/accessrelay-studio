@@ -29,7 +29,7 @@ internal sealed class DesktopAssistantService : IStudioApplicationContext, IAsyn
     {
         _owner = owner; _dispatcher = dispatcher; _controller = controller; _vision = vision; _voice = voice; _runtime = runtime; _dirty = dirty;
         Service = new(this, _access) { Rehearsal = File.Exists(_bridgePath) ? new IsolatedLuaRehearsal(_bridgePath) : null };
-        _offline = new(_access, Path.Combine(AppContext.BaseDirectory, "Mcp", "TrainingTools"));
+        _offline = new(_access, "", _vision.OfflineWorkflow);
         Service.OfflineDispatch = async (request, cancellation) =>
         {
             long foreground = _offline.ForegroundGeneration;

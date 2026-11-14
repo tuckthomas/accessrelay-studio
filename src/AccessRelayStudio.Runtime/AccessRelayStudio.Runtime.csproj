@@ -14,13 +14,12 @@
     <Compile Include="../AccessRelayStudio/Output/*.cs" Link="Output/%(Filename)%(Extension)" />
     <Compile Include="../AccessRelayStudio/Audio/*.cs;../AccessRelayStudio/Audio/VirtualMicDriver/VirtualMicDriver.cs" Link="Audio/%(Filename)%(Extension)" />
     <Compile Include="../AccessRelayStudio/Vision/*.cs" Link="Vision/%(Filename)%(Extension)" />
-    <Compile Include="../../games/nba2k27/src/*.cs" Link="GamePacks/Nba2K27/%(Filename)%(Extension)" />
-    <Compile Include="../../games/BuiltInVisionPlugins.cs" Link="GamePacks/BuiltInVisionPlugins.cs" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.31.1" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.Speech" Version="10.0.0" />
     <InternalsVisibleTo Include="AccessRelayStudio" />
     <InternalsVisibleTo Include="WindowsVerification" />
     <InternalsVisibleTo Include="EliteInputProbe" />
+    <InternalsVisibleTo Include="AccessRelay.PluginVerification" />
   </ItemGroup>
 </Project>

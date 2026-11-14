@@ -8,47 +8,12 @@ if (args is ["--capture-cadence", var cadenceEvidence, var savedTake])
     return;
 }
 
-if (args is ["--prepare-recorded-scene", var sceneRuntime, var sceneAssets, var sceneDirectory])
-{
-    AutomaticCaptureModelChecks.PrepareScene(sceneRuntime, sceneAssets, sceneDirectory);
-    return;
-}
 
-if (args is ["--trace-recorded-scene", var traceRuntime, var traceAssets, var traceDirectory, var traceOutput])
-{
-    AutomaticCaptureModelChecks.TraceScene(traceRuntime, traceAssets, traceDirectory, traceOutput);
-    return;
-}
 
-if (args is ["--pose-suppression-only"])
-{
-    AutomaticCaptureModelChecks.CheckPoseSuppression();
-    return;
-}
 
-if (args is ["--acquisition-worker", var acquisitionEvidence])
-{
-    TrainingPluginChecks.CheckAcquisitionWorker(acquisitionEvidence);
-    return;
-}
 
-if (args is ["--automatic-gameplay-frame", var gameRuntime, var gameAssets, var gameImage, var gameOutput])
-{
-    AutomaticCaptureModelChecks.ProbeFrame(gameRuntime, gameAssets, gameImage, gameOutput);
-    return;
-}
 
-if (args is ["--automatic-capture-models", var runtimeRoot, var assets, var fixtureDirectory, var provider])
-{
-    AutomaticCaptureModelChecks.Run(runtimeRoot, assets, fixtureDirectory, provider);
-    return;
-}
 
-if (args is ["--training-plugin-only", var trainingEvidence])
-{
-    TrainingPluginChecks.Run(trainingEvidence);
-    return;
-}
 
 if (args.Contains("--cuda-preprocessing-probe", StringComparer.Ordinal))
 {
@@ -97,7 +62,6 @@ if (args.Contains("--gpu-capture-only", StringComparer.Ordinal))
 }
 if (!args.Contains("--buffer-only", StringComparer.Ordinal))
 {
-    DatasetChecks.Run();
     RuntimeTrainingChecks.Run();
     RuntimeAccessibilityChecks.Run();
     if (!args.Contains("--no-capture", StringComparer.Ordinal))

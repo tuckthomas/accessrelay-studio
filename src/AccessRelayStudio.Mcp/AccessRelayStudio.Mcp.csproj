@@ -6,6 +6,5 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
     <Content Include="Notices/*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../AccessRelayStudio/Assets/MoonSharp-LICENSE.md" TargetPath="Notices/MoonSharp-LICENSE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="../../games/nba2k27/training/*.py" TargetPath="TrainingTools/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

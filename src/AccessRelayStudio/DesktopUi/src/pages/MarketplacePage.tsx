@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Card, EmptyState, Field, Icon, Input, Notice, SectionHeader, Select, SelectOption } from '../ui';
 
-type Entry = { id: string; name: string; description: string; author: string; version: string; kind: 'script' | 'plugin' | 'controller-profile' | 'training-plugin'; gameId?: string; license: string; tags: string[]; installed: boolean; trainingPluginId?: string };
+type Entry = { id: string; name: string; description: string; author: string; version: string; kind: 'script' | 'plugin' | 'controller-profile' | 'training-plugin'; gameId?: string; license: string; tags: string[]; installed: boolean; trainingPluginId?: string; nativeCode?: boolean };
 const kinds = { script: 'Game scripts', 'controller-profile': 'Controller profiles', plugin: 'Game plugins', 'training-plugin': 'Model training plugins' };
 export function MarketplacePage({ state, command, openTraining }: { state: any; command: (action: string, args?: any) => Promise<any>; openTraining?: (pluginId: string) => Promise<any> }) {
   const [catalog, setCatalog] = useState(state), [query, setQuery] = useState(''), [kind, setKind] = useState('all'), [game, setGame] = useState('all');
@@ -40,13 +40,13 @@ export function MarketplacePage({ state, command, openTraining }: { state: any; 
       <Field label="Content type"><Select aria-label="Marketplace content type" value={kind} onValueChange={setKind}><SelectOption value="all">All types</SelectOption>
         {Object.entries(kinds).map(([id, label]) => <SelectOption key={id} value={id}>{label}</SelectOption>)}</Select></Field>
       <Field label="Game"><Select aria-label="Marketplace game" value={game} onValueChange={setGame}><SelectOption value="all">All games</SelectOption>
-        {[...new Set<string>((catalog?.entries ?? []).flatMap((entry: Entry) => entry.gameId ? [entry.gameId] : []))].map(id => <SelectOption key={id} value={id}>{id.toUpperCase().replace(/^NBA2K/, 'NBA 2K')}</SelectOption>)}
+        {[...new Set<string>((catalog?.entries ?? []).flatMap((entry: Entry) => entry.gameId ? [entry.gameId] : []))].map(id => <SelectOption key={id} value={id}>{id}</SelectOption>)}
       </Select></Field></div>
     {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
     {busy === 'refresh' && !catalog?.loaded ? <Card><p>Loading marketplace…</p></Card> : entries.length ? <div className="marketplace-grid">{entries.map(entry => <Card key={entry.id + entry.version} className="marketplace-item">
       <div className="row"><Icon name={entry.kind === 'script' ? 'code' : entry.kind === 'training-plugin' ? 'camera' : 'gamepad'} size={24} /><span className="subtle">{kinds[entry.kind]}</span></div>
       <h2 title={entry.name}>{entry.name}</h2><p className="marketplace-item-description" title={entry.description}>{entry.description}</p>
-      <div className="marketplace-item-meta"><p className="subtle" title={`${entry.author} · ${entry.version}`}>{entry.author} · {entry.version}</p><p className="subtle" title={entry.license}>{entry.license}</p></div>
+      <div className="marketplace-item-meta"><p className="subtle" title={`${entry.author} · ${entry.version}`}>{entry.author} · {entry.version}</p><p className="subtle" title={entry.license}>{entry.license}</p>{entry.nativeCode && <details><summary>Plugin runtime</summary><p>Runs .NET and interface code on this PC with your user permissions. Review its source before installing.</p></details>}</div>
       <div className="marketplace-item-actions">
         {entry.installed && entry.trainingPluginId && openTraining && <Button variant="primary" disabled={!!busy} busy={busy === entry.id + ':training'} onClick={() => void train(entry)}><Icon name="camera" size={17} />Open training</Button>}
         {!(entry.installed && entry.trainingPluginId && openTraining) && <Button variant="primary" disabled={!!busy || entry.installed} busy={busy === entry.id} onClick={() => void run('install', { id: entry.id, version: entry.version })}>

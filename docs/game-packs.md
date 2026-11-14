@@ -1,6 +1,6 @@
 # Game pack API 1
 
-Controller → Game packs lists bundled and imported packs. Review the description,
+Controller → Plugins lists installed packs. Review the description,
 license, resource list and integrity hash, set tuning, then **Create setup from pack**.
 This creates a new controller setup and pauses sequences; existing setups remain
 available. Enable sequences explicitly when ready. Tuning an existing linked setup
@@ -15,29 +15,11 @@ Preview does not start inference, recording or controller output. Select an inst
 game plugin to open its training and assistance workspace. Changing plugins requires
 capture and clip finalization to stop; switching never starts processing or arms output.
 
-The host accepts `IVisionGamePlugin` / `IVisionCaptureProfile` contracts. Each reviewed
-plugin owns profile fields, persistence, camera choices, capture validation and its
-animation identity. Capture, inference execution, freshness, cancellation and final
-output ownership remain in the host. The shared temporal-release tracker is not an NBA
-profile dependency. Native adapters are registered in `games/BuiltInVisionPlugins.cs`;
-UI adapters are registered in `DesktopUi/src/game-plugins/registry.ts`. A pack manifest
-cannot load a DLL or execute arbitrary UI code. Other vision tasks still require a
-reviewed typed contract; this does not create a marketplace or a universal model.
+Game implementations use the installed package contract documented in
+[Installed game implementations](installed-game-plugins.md). They belong in the
+separate Marketplace repository. Studio contains no built-in game adapters.
 
-NBA setup, meter/feedback regions and shot review live in its optional workspace.
-Existing NBA profile files, selection, configuration fingerprints and recorded metadata
-remain compatible. The NBA controller feedback action and controls are available only
-on controller setups linked to that pack; ordinary sequence editors do not show them.
-The Remote Play plugin choice starts at None and does not infer a game from saved NBA
-profiles. Selecting NBA restores its saved profile without editing the stored data.
-
-Bundled examples:
-
-- [`games/nba2k27/pack.json`](../games/nba2k27/pack.json): optional rhythm Lua/tuning,
-  plus the compiled NBA adapter source and offline tools in that folder. No trained
-  model is bundled. Existing shot-profile JSON/fingerprints remain compatible.
-- [`games/switch-demo/pack.json`](../games/switch-demo/pack.json): game-neutral bumper
-  to A-button pulse, with a choice of press durations. It has no vision dependency.
+The remainder of this document describes the schema/API 1 Lua/controller contract.
 
 Import selects a file named `pack.json` alongside its declared resources. The host
 copies only those resources into local storage, verifies hashes before/after copying,
@@ -88,8 +70,7 @@ model library, compatible profile/camera selection and validation/calibration ga
 It never arms assistance or supplies accuracy evidence. GPU models can consume
 substantial resources: import code and weights only from sources you trust. Hashes
 establish byte integrity, not publisher authenticity, model correctness, licensing
-rights or protection from resource exhaustion. No marketplace or third-party model
-distribution is provided by this migration.
+rights or protection from resource exhaustion. Marketplace delivery is documented separately.
 
 Profile format 5 records pack identity/hash/tuning and Lua numeric tuning. Legacy
 formats 1–4 still load with their defaults and keep their existing version on save
@@ -99,7 +80,7 @@ format 5; keep an exported original setup if using an older app.
 Authors can validate a local folder without loading the desktop app:
 
 ```sh
-dotnet run --project tools/packs/PackTool.csproj -- games/switch-demo/pack.json
+dotnet run --project tools/packs/PackTool.csproj -- src/AccessRelayStudio/Verification/Fixtures/switch-pack/pack.json
 ```
 
 Validation parses Lua without executing it and checks declared resource integrity.

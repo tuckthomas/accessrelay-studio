@@ -1,11 +1,10 @@
 using System.Net.Http;
 using System.Text.Json;
 using EliteScriptStudio.Core;
-using EliteScriptStudio.Packs;
 
 namespace EliteScriptStudio.Desktop;
 
-internal sealed class DesktopMarketplaceService(DesktopControllerService controller, InstalledVisionPlugins visionPlugins) : IDisposable
+internal sealed class DesktopMarketplaceService(DesktopControllerService controller, InstalledGamePlugins visionPlugins, Action? requirePluginIdle = null) : IDisposable
 {
     private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
     private readonly CancellationTokenSource _stop = new();
@@ -13,7 +12,7 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
     private bool _busy;
     internal object GetState() => new { repositoryUrl = MarketplaceClient.RepositoryUrl, loaded = _catalog is not null,
         entries = (_catalog?.Entries ?? []).Select(entry => new { entry.Id, entry.Name, entry.Description, entry.Author, entry.Version,
-            entry.Kind, entry.GameId, entry.License, entry.Tags, installed = controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256),
+            entry.Kind, entry.GameId, entry.License, entry.Tags, entry.NativeCode, installed = controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256),
             trainingPluginId = entry.Kind == "training-plugin" && controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256)
                 ? visionPlugins.Plugins.FirstOrDefault(plugin => plugin.Id == entry.GameId)?.Id : null }) };
     internal async Task<object?> InvokeAsync(string action, JsonElement args)
@@ -35,16 +34,19 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
             string id = args.Text("id"), version = args.Text("version");
             var entry = _catalog?.Entries.FirstOrDefault(item => item.Id == id && item.Version == version)
                 ?? throw new InvalidOperationException("Refresh the marketplace and choose a listed package.");
+            if (entry.NativeCode) requirePluginIdle?.Invoke();
             string cache = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "MarketplaceCache"));
             string staging = Path.GetFullPath(Path.Combine(cache, Guid.NewGuid().ToString("N")));
             try
             {
                 var path = await client.DownloadPackAsync(entry, staging, _stop.Token);
+                if (entry.NativeCode) requirePluginIdle?.Invoke();
                 var pack = GamePackDefinition.Read(path);
-                if (entry.Kind == "training-plugin" && !InstalledVisionPlugins.Supports(pack.Manifest))
-                    throw new InvalidOperationException("This training plugin requires an adapter supported by a newer Studio version.");
+                if (entry.Kind == "training-plugin" && !InstalledGamePlugins.Supports(pack.Manifest))
+                    throw new InvalidOperationException("This package has no compatible game implementation. Choose an updated implementation plugin.");
                 await controller.ImportMarketplacePackAsync(path, _stop.Token);
                 visionPlugins.Reload();
+                if (visionPlugins.Errors.Length != 0) throw new InvalidOperationException(string.Join("\n", visionPlugins.Errors));
                 return GetState();
             }
             finally

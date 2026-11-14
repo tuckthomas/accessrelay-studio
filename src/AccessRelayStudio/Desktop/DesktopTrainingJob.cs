@@ -49,16 +49,16 @@ internal sealed class DesktopTrainingJob : IDisposable
             string workspace = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Configuration.WorkspaceRoot));
             if (workspace.Equals(data, StringComparison.OrdinalIgnoreCase) || workspace.StartsWith(data + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Keep model outputs outside the original training data folder.");
-            string tools = Path.Combine(AppContext.BaseDirectory, "Mcp", "TrainingTools");
-            if (Path.GetFileName(script) != script || !File.Exists(Path.Combine(tools, script)))
-                throw new InvalidOperationException("The selected plugin's reviewed training workflow is unavailable.");
+            script = Path.GetFullPath(script);
+            if (!File.Exists(script) || Path.GetExtension(script) != ".py")
+                throw new InvalidOperationException("The selected plugin's training workflow is unavailable.");
             _directory = Path.Combine(workspace, "training-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
             Directory.CreateDirectory(_directory);
             string request = Path.Combine(_directory, "request.json");
             File.WriteAllBytes(request, JsonSerializer.SerializeToUtf8Bytes(new { Configuration.DatasetRoot, outputRoot = _directory, options }, DesktopJson.Options));
             _stop?.Dispose(); _stop = new CancellationTokenSource(TimeSpan.FromMinutes(30));
             _state = "running"; _message = "Preparing reviewed clips, training and evaluating the candidate."; _result = null;
-            _task = RunAsync(Configuration.Python, Path.Combine(tools, script), request, _directory, _stop.Token);
+            _task = RunAsync(Configuration.Python, script, request, _directory, _stop.Token);
         }
     }
     private async Task RunAsync(string python, string script, string request, string directory, CancellationToken cancellation)

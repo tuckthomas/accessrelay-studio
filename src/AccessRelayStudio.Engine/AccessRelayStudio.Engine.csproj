@@ -17,5 +17,6 @@
     <InternalsVisibleTo Include="VisionModelVerification" />
     <InternalsVisibleTo Include="DesktopEvidenceVerification" />
     <InternalsVisibleTo Include="PackTool" />
+    <InternalsVisibleTo Include="AccessRelay.PluginVerification" />
   </ItemGroup>
 </Project>

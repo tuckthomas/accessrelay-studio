@@ -79,7 +79,7 @@ internal static class PerformanceVerification
     }
 
     private static VisionPerformanceContext Context(string provider = "CUDAExecutionProvider") =>
-        new(provider, provider == "Capture only" ? null : new('a', 64), "nba2k27:test", "2K",
+        new(provider, provider == "Capture only" ? null : new('a', 64), "fixture:test", "2K",
             new(0, 0, 1, 1), 2560, 1440, new('b', 64));
 
     private static VisionPerformanceFrame Frame(int sequence, bool decision = true,

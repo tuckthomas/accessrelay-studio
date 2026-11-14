@@ -3,7 +3,7 @@ export interface SystemStatus { cpuPercent?: number | null; memoryUsedBytes?: nu
   appCpuPercent?: number | null; appMemoryBytes?: number | null; appPrivateBytes?: number | null; appThreadCount?: number | null;
   logicalProcessors?: number; sampledAtUtc?: string | null; samplesCollected?: number; isSampling?: boolean; error?: string | null;
   history?: { atUtc: string; cpuPercent?: number | null; gpuPercent?: number | null; appCpuPercent?: number | null }[] | null }
-export interface StudioState { version: string; controller: any; vision: any; voice: any; settings: any; marketplace?: any; system?: SystemStatus; gameplayWindow?: { detached: boolean } }
+export interface StudioState { version: string; controller: any; vision: any; voice: any; settings: any; marketplace?: any; gamePlugins?: import('./game-plugins/api').GameUiDescriptor[]; system?: SystemStatus; gameplayWindow?: { detached: boolean } }
 export interface StudioStatus { controller?: any; vision?: any; voice?: any; system?: SystemStatus; gameplayWindow?: { detached: boolean }; theme?: 'light' | 'dark' }
 type HostMessage = { type: 'snapshot'; state: StudioState } | { type: 'status'; status: StudioStatus }
   | { type: 'closeRequested' }
@@ -86,7 +86,7 @@ export const previewState: StudioState = {
     recordingChannels: [['rightStick', 'Right stick'], ['leftStick', 'Left stick'], ['buttons', 'Buttons'], ['leftTrigger', 'Left trigger'], ['rightTrigger', 'Right trigger']].map(([id, label]) => ({ id, label })),
     driverAvailable: true, profileDirectory: 'Local profile storage', status: disconnected
   },
-  vision: { plugins: [{ id: 'nba2k27', name: 'NBA 2K27', outputContract: 'temporal-release-v1' }], selectedPluginId: '', sources: [], profiles: [], shotProfiles: [], models: [], selectedProfileId: null,
+  vision: { plugins: [], selectedPluginId: '', sources: [], profiles: [], shotProfiles: [], models: [], selectedProfileId: null,
     selectedShotProfileId: null, selectedSource: null, settings: {}, status: { running: false, message: 'Choose your Remote Play window to begin.' } },
   voice: { devices: { microphones: [], outputs: [] }, models: [], profiles: [], selectedProfileId: null, selectedModelId: null,
     microphoneId: '', outputId: '', destination: 'virtual', settings: { preset: 'clean', pitchSemitones: 0, gainDb: 0, muted: false },

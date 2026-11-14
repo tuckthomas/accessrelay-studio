@@ -3,17 +3,17 @@ using System.Text.Json;
 
 namespace EliteScriptStudio.Core;
 
-internal interface ITrainingCaptureProfile
+public interface ITrainingCaptureProfile
 {
     void Validate();
     bool UsesSupervisionOverlay { get; }
 }
 
-internal enum VisionTrainingPurpose { MeterSupervisedTraining, MeterOffValidation }
-internal enum VisionEvidenceMode { FixedRegions, SceneFirst, Anchored, Automatic }
+public enum VisionTrainingPurpose { MeterSupervisedTraining, MeterOffValidation }
+public enum VisionEvidenceMode { FixedRegions, SceneFirst, Anchored, Automatic }
 
 /// <summary>Reviewed automatic or manually configured evidence regions, in normalized coordinates of the captured window.</summary>
-internal sealed record VisionTrainingCaptureSettings
+public sealed record VisionTrainingCaptureSettings
 {
     public bool Configured { get; init; }
     public int SourceWidth { get; init; }
@@ -44,7 +44,7 @@ internal sealed record VisionTrainingCaptureSettings
                 throw new InvalidDataException("Meter and feedback regions must be inside the gameplay region.");
     }
 
-    internal static bool Contains(VisionCrop outer, VisionCrop inner) => inner.Left >= outer.Left && inner.Top >= outer.Top
+    public static bool Contains(VisionCrop outer, VisionCrop inner) => inner.Left >= outer.Left && inner.Top >= outer.Top
         && inner.Left + inner.Width <= outer.Left + outer.Width + 1e-9
         && inner.Top + inner.Height <= outer.Top + outer.Height + 1e-9;
 
