@@ -342,3 +342,11 @@ tracking acceptance. New installed-path recording validation remains to be done.
 Prepared evidence:
 `AccessRelayStudio-Beta/TrainingData/take-20261114-021533-00487316-tracked-v1-84192f9a`.
 Review images and integrity results are under `artifacts/AutoCaptureModels`.
+
+Beta.24 is installed from `cd2be64` at the existing project-local executable and
+pushed to main. Publish completed with the existing unrelated voice nullability
+warning. Startup opened normally. Through the installed interface, opening the
+original 538-frame raw clip reused its prepared evidence and displayed 207 usable
+frames, all four synchronized streams and a player image on the review timeline.
+No shot labels were saved and no candidate was trained. The next manual take is
+pending the user's shooting readiness; capture and controller output remain off.
