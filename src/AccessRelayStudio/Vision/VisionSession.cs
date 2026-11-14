@@ -386,12 +386,17 @@ internal sealed class VisionSession : IDisposable
         File.WriteAllText(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    internal void StartTraining(string directory, IVisionCaptureProfile profile, string sourceTitle)
+    internal void StartTraining(string directory, IVisionCaptureProfile profile, string sourceTitle, VisionSettings? captureOverride = null)
     {
         lock (_gate)
         {
             if (_stopping) throw new InvalidOperationException("Live view is stopping. Record a training clip after it has stopped.");
             if (!_status.Running || _activeSettings is null) throw new InvalidOperationException("Start live view before recording training data.");
+            var recordingSettings = captureOverride ?? _activeSettings;
+            if (captureOverride is not null && (_model is not null || recordingSettings.AnimationProfile != _activeSettings.AnimationProfile
+                || recordingSettings.CameraView != _activeSettings.CameraView || recordingSettings.Crop != _activeSettings.Crop
+                || recordingSettings.TrainingCapture.EvidenceMode != VisionEvidenceMode.SceneFirst))
+                throw new InvalidOperationException("Calibration capture requires a capture-only session with matching source/profile geometry.");
             if (_runtime.ScriptsEnabled || _runtime.Recording.IsRecording)
                 throw new InvalidOperationException("Turn off macro scripts and finish macro recording before capturing manual gameplay training data.");
             if (_recorder?.IsRecording == true) throw new InvalidOperationException("A training take is already recording.");
@@ -399,11 +404,11 @@ internal sealed class VisionSession : IDisposable
                 throw new InvalidOperationException("Restart observation using the selected game plugin profile before recording.");
             if (_activeSettings.CameraView != profile.CameraView)
                 throw new InvalidOperationException("Restart observation using the selected camera view before recording.");
-            profile.ValidateCapture(_activeSettings.TrainingCapture);
-            if (_activeSettings.TrainingCapture.EvidenceMode is VisionEvidenceMode.Anchored or VisionEvidenceMode.Automatic && Tracking is not { Valid: true })
+            profile.ValidateCapture(recordingSettings.TrainingCapture);
+            if (recordingSettings.TrainingCapture.EvidenceMode is VisionEvidenceMode.Anchored or VisionEvidenceMode.Automatic && Tracking is not { Valid: true })
                 throw new InvalidOperationException(Tracking?.Message ?? "Start preview and acquire the NBA capture anchors before recording.");
-            if (_status.CaptureWidth != _activeSettings.TrainingCapture.SourceWidth ||
-                _status.CaptureHeight != _activeSettings.TrainingCapture.SourceHeight)
+            if (_status.CaptureWidth != recordingSettings.TrainingCapture.SourceWidth ||
+                _status.CaptureHeight != recordingSettings.TrainingCapture.SourceHeight)
                 throw new InvalidOperationException("Wait for a fresh live preview and confirm training capture setup for the current window size.");
             _runtime.SetVisionTrainingRecording(true);
             _trainingInhibited = true;
@@ -413,7 +418,7 @@ internal sealed class VisionSession : IDisposable
             {
                 var trace = new VisionTrainingTrace();
                 _runtime.SetVisionTrainingTrace(trace);
-                _recorder = new VisionTrainingRecorder(directory, profile, _activeSettings, sourceTitle,
+                _recorder = new VisionTrainingRecorder(directory, profile, recordingSettings, sourceTitle,
                     controllerTrace: trace, detachControllerTrace: () => _runtime.SetVisionTrainingTrace(null));
             }
             catch

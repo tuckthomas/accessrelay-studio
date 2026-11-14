@@ -423,25 +423,38 @@ internal sealed class DesktopVisionService : IDesktopModule
     {
         try { await DetectAreasAsync(version, cancellation); }
         catch (OperationCanceledException) { if (!_disposed) _notice = "Capture area detection stopped."; }
-        catch (Exception error) { if (!_disposed) _notice = error.Message; }
+        catch (Exception error) { if (!_disposed) _notice = (_session?.TrainingSnapshot is { IsComplete: true } ? "Calibration clip saved. " : "") + error.Message; }
     }
     private async Task<object> DetectAreasAsync(int version, CancellationToken cancellation)
     {
         RequireStopped(); var profile = _profile ?? throw new InvalidOperationException("Choose a shot profile with your displayed gamertag.");
         if (!Path.IsPathFullyQualified(_trainingJob.Configuration.WorkspaceRoot)) throw new InvalidOperationException("Choose the model output folder before detecting capture areas.");
+        if (!Path.IsPathFullyQualified(_trainingJob.Configuration.DatasetRoot)) throw new InvalidOperationException("Choose the training data folder before detecting capture areas.");
         var previous = _settings; bool proposed = false;
         _settings = profile.PrepareAutomaticCapture(_settings); var acquisitionSettings = _settings;
         string diagnostics = Path.Combine(_trainingJob.Configuration.WorkspaceRoot, "acquisition-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         var savedPhases = new HashSet<string>(StringComparer.Ordinal);
+        bool calibrationStarted = false;
         try
         {
             Start(loadModel: false); _session!.SetPreviewEnabled(true);
-            _notice = "Return to gameplay and take one manual shot. Detecting your gamertag, pose, meter, court and shot feedback.";
+            _notice = "Return to gameplay and take one manual shot. Its full gameplay clip is saved when controller input or a raised-hands pose triggers capture.";
             long began = Stopwatch.GetTimestamp(); PreviewImage? image;
             while (true)
             {
                 CheckOperation(version, cancellation); _session.SetPreviewEnabled(true); UpdatePreview(force: true);
                 image = Volatile.Read(ref _preview);
+                if (!calibrationStarted && _session.Status is { CaptureWidth: > 0, CaptureHeight: > 0 } source)
+                {
+                    ControllerState? physical = _runtime()?.Latest?.Input is { IsConnected: true } connected ? connected.State : null;
+                    if (profile.CalibrationTriggered(physical, _session.Tracking))
+                    {
+                        var calibration = profile.PrepareCalibrationCapture(_settings, source.CaptureWidth, source.CaptureHeight);
+                        _session.StartTraining(_trainingJob.Configuration.DatasetRoot, profile, SelectedSource().Title, calibration);
+                        calibrationStarted = true;
+                        _notice = "Saving the full calibration clip, including the shot and feedback, while detecting capture areas.";
+                    }
+                }
                 if (image?.Tracking is { } snapshot)
                 {
                     string phase = snapshot.AcquisitionComplete ? "complete" : snapshot.Feedback is not null ? "feedback" : snapshot.MeterDetected ? "meter" : snapshot.Valid ? "identity" : "acquiring";
@@ -452,11 +465,11 @@ internal sealed class DesktopVisionService : IDesktopModule
                 }
                 if (image?.Tracking is { Valid: true, AcquisitionComplete: true } && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1) break;
                 if (_session.Status.CaptureFailed) throw new InvalidOperationException(_session.Status.Message);
-                if (Stopwatch.GetElapsedTime(began).TotalSeconds >= 90)
+                if (Stopwatch.GetElapsedTime(began).TotalSeconds >= 120 && _session.TrainingSnapshot is not { IsRecording: true })
                     throw new InvalidOperationException("Capture areas were not all detected. " + (_session.Tracking?.Message ?? "Keep the game visible and the configured gamertag displayed."));
                 await Task.Delay(40, cancellation);
             }
-            _session.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
+            _session.StopTraining(); _session.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
             var proposal = profile.CompleteAutomaticCapture(_settings, image.Tracking!, image.SourceWidth, image.SourceHeight);
             var frozen = new FrozenImage(Guid.NewGuid().ToString("N"), image, _selectedSourceId, profile.Id, profile.ConfigurationFingerprint, _settings, previous, proposal);
             lock (_mediaGate) _frozen = frozen;
@@ -469,7 +482,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         {
             if (!proposed)
             {
-                _session?.Stop(); await WaitStoppedAsync(CancellationToken.None);
+                _session?.StopTraining(); _session?.Stop(); await WaitStoppedAsync(CancellationToken.None);
                 if (!_disposed && _settings == acquisitionSettings && _profile?.Id == profile.Id) { _settings = previous; SaveSettings(); }
             }
         }

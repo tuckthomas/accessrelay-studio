@@ -146,7 +146,8 @@ internal sealed class DesktopVisionDataset : IDisposable
             throw new InvalidDataException("The gameplay scene exceeds its dimension limit.");
         var expected = new List<Region> { player, new("scene", sceneFirst || anchored ? "Gameplay scene" : "Court", "scene.bgra", sceneFirst || anchored ? scene!.Width : 640, sceneFirst || anchored ? scene!.Height : 360) };
         if (!sceneFirst && evidence.Purpose == "meterSupervisedTraining") expected.Add(new("meter", "Meter", "meter.bgra", 256, 256));
-        expected.Add(new("feedback", "Shot feedback", "feedback.bgra", 640, 192));
+        if (!sceneFirst || evidence.Streams?.Any(stream => stream?.Name == "feedback") == true)
+            expected.Add(new("feedback", "Shot feedback", "feedback.bgra", 640, 192));
         if (evidence.Streams is null || evidence.Streams.Length != expected.Count)
             throw new InvalidDataException("The clip has missing evidence streams.");
         var names = new HashSet<string>(StringComparer.Ordinal);

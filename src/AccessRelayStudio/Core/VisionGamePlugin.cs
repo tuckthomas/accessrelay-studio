@@ -17,6 +17,8 @@ internal interface IVisionCaptureProfile : ITrainingCaptureProfile
     VisionSettings PrepareAutomaticCapture(VisionSettings settings) => throw new NotSupportedException("This plugin does not provide automatic capture acquisition.");
     VisionSettings CompleteAutomaticCapture(VisionSettings settings, VisionRegionObservation observation, int width, int height) =>
         throw new NotSupportedException("This plugin does not provide automatic capture acquisition.");
+    VisionSettings PrepareCalibrationCapture(VisionSettings settings, int width, int height) => throw new NotSupportedException("This plugin has no calibration capture policy.");
+    bool CalibrationTriggered(ControllerState? input, VisionRegionObservation? observation) => input is { } state && ReferenceTriggered(state);
     VisionTrainingCaptureSettings ConfigureCapture(VisionTrainingCaptureSettings settings, ReadOnlySpan<byte> referenceBitmap) => settings;
     bool ReferenceTriggered(ControllerState input) => false;
     int ReferenceDelayMs => 0;

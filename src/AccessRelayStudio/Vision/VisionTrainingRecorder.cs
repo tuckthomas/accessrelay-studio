@@ -8,7 +8,7 @@ using EliteScriptStudio.Core;
 namespace EliteScriptStudio.Vision;
 
 internal readonly record struct VisionTrainingStatus(bool HasTake, bool IsRecording, bool IsFinalized,
-    bool IsComplete, string DirectoryPath, long StoredFrames, long DroppedFrames, string Message);
+    bool IsComplete, string DirectoryPath, long StoredFrames, long DroppedFrames, string Message, bool AcquisitionOnly = false);
 
 /// <summary>Opt-in, bounded synchronized visual/controller evidence writer. Observations are not target labels.</summary>
 internal sealed class VisionTrainingRecorder : IDisposable
@@ -46,6 +46,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
     private bool _finished, _complete = true, _metadataComplete;
     private string _message = "Recording a 10-second manual training take.";
     internal string DirectoryPath { get; }
+    private bool AcquisitionOnly => _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst && _settings.TrainingCapture.FeedbackRegion is null;
     internal string Message { get { lock (_gate) return _message; } }
     internal bool IsRecording { get { lock (_gate) return !_finished; } }
     internal bool IsFinalized => _writer.IsCompleted;
@@ -54,7 +55,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
         get
         {
             lock (_gate) return new(true, !_finished, _writer.IsCompleted, _metadataComplete && _writer.IsCompleted,
-                DirectoryPath, Interlocked.Read(ref _storedFrames), Interlocked.Read(ref _dropped), _message);
+                DirectoryPath, Interlocked.Read(ref _storedFrames), Interlocked.Read(ref _dropped), _message, AcquisitionOnly);
         }
     }
 
@@ -91,12 +92,13 @@ internal sealed class VisionTrainingRecorder : IDisposable
         DirectoryPath = Path.Combine(parent, "take-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(DirectoryPath);
         _profile = profile; _settings = settings; _sourceTitle = sourceTitle;
+        if (AcquisitionOnly) _message = "Recording the full gameplay calibration clip.";
         // Metadata is written immediately as incomplete, and replaced after the writer finishes.
         WriteMetadata(complete: false);
         _writer = Task.Run(WriteAsync);
         _timeout = new Timer(_ =>
         {
-            lock (_gate) FinishLocked("Training take complete. Review and label the recorded frames before training.", true);
+            lock (_gate) FinishLocked(AcquisitionOnly ? "Calibration clip saved. Review the full gameplay to validate capture areas." : "Training take complete. Review and label the recorded frames before training.", true);
         }, null, _durationLimit, Timeout.InfiniteTimeSpan);
     }
 
@@ -113,7 +115,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
                     || tracking.Keypoints is not { Length: 17 } || tracking.Court.Length < 3))
             { FinishLocked("Player identity, pose or court evidence was lost. Take is incomplete.", false); return; }
             if (Stopwatch.GetElapsedTime(_started) >= _durationLimit)
-            { FinishLocked("Training take complete. Review and label the recorded frames before training.", true); return; }
+            { FinishLocked(AcquisitionOnly ? "Calibration clip saved. Review the full gameplay to validate capture areas." : "Training take complete. Review and label the recorded frames before training.", true); return; }
             if (_settings.TrainingCapture.Configured && (frame.Width != _settings.TrainingCapture.SourceWidth ||
                 frame.Height != _settings.TrainingCapture.SourceHeight))
             { FinishLocked("Capture size changed since HUD setup. Take marked incomplete; confirm the regions on a fresh preview.", false); return; }
@@ -127,7 +129,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
             int offset = 0;
             foreach (var region in _regions)
             {
-                VisionCrop? resolved = region.Name == "player" ? tracking?.Player : region.Name == "meter" ? tracking?.Meter : null;
+                bool dynamicRegions = _settings.TrainingCapture.EvidenceMode is VisionEvidenceMode.Anchored or VisionEvidenceMode.Automatic;
+                VisionCrop? resolved = dynamicRegions ? region.Name == "player" ? tracking?.Player : region.Name == "meter" ? tracking?.Meter : null : null;
                 ResizeCrop(frame, buffer.AsSpan(offset, region.ByteLength), region, resolved);
                 offset += region.ByteLength;
             }
@@ -255,6 +258,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
             {
                 version = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? 4 : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored ? 3 : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? 2 : 1,
                 purpose = _settings.TrainingCapture.Purpose, layout = _settings.TrainingCapture,
+                acquisitionOnly = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst && _settings.TrainingCapture.FeedbackRegion is null,
                 tracking = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? "identity-pose-v1" : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored ? "visual-anchors-v1" : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? "unannotated-scene" : "fixed-region",
                 streams = _regions.Select(region => new { region.Name, region.File, region.Width, region.Height,
                     stride = region.Width * 4, pixelFormat = "BGRA8", region.Crop }),

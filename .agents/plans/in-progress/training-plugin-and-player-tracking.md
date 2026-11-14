@@ -201,3 +201,15 @@ initial live acquisition only: moving/occluded identity, court accuracy, shot me
 and feedback correctness have not passed acceptance. No user training take or
 trained user timing model has been produced. A physical shot/feedback result is
 pending. Receipt: `artifacts/AutoCaptureModels/installation20.json`.
+
+
+The user confirmed the manual shot and feedback finished. Saved beta.20 diagnostics
+contained only identity/pose/floor acquisition, with no meter or feedback detection
+and no full take; this did not pass HUD acquisition. The timing of the shot relative
+to the acquisition timeout is not established. Beta.21 adds one bounded full-scene
+calibration recording triggered by physical shot input or the NBA raised-hands pose
+policy. A failed region detector cannot discard or crop that raw scene. Unknown
+HUD regions are absent, not fabricated; calibration-only scene data stays rejected
+by release-model conversion until reviewed per-frame regions are generated.
+Native writer/reader checks cover preservation through detector failure. Live
+recording and actual meter/feedback diagnosis remain pending.

@@ -61,7 +61,28 @@ internal static class TrainingPluginChecks
             "Full scene or synchronized frame pixels were lost.");
         AnchoredRoundTrip(root, profile);
         AutomaticRoundTrip(root, profile);
+        CalibrationRoundTrip(root, profile);
         Console.WriteLine($"SUCCESS: installation gating, unsupported-adapter rejection, scene geometry, persistence and actual scene writer. Evidence: {root}");
+    }
+    private static void CalibrationRoundTrip(string root, Nba2K27ShotProfile profile)
+    {
+        var settings = ((IVisionCaptureProfile)profile).PrepareCalibrationCapture(VisionSettings.Default, 64, 64);
+        var pixels = new byte[64 * 64 * 4]; pixels[0] = 11; pixels[^4] = 123;
+        using var recorder = new VisionTrainingRecorder(root, profile, settings, "Full scene calibration");
+        for (int i = 1; i <= 2; i++)
+        {
+            using var frame = new CapturedVisionFrame(pixels, 64, 64, Stopwatch.GetTimestamp(), i, 1, () => { });
+            // Even a failed/incorrect region detector must not alter or discard raw acquisition pixels.
+            recorder.Capture(frame, default, new(i, false, new(.3, .3, .2, .2), null, [], 0, "No meter detected"));
+        }
+        recorder.Stop(complete: true); recorder.Dispose();
+        Check(recorder.Snapshot is { IsComplete: true, AcquisitionOnly: true, StoredFrames: 2 }, "Detector loss discarded the calibration clip.");
+        byte[] primary = File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "frames.bgra"));
+        byte[] scene = File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "scene.bgra"));
+        Check(primary[0] == 11 && scene[0] == 11 && scene[64 * 64 * 4 - 4] == 123, "A detected player crop replaced full-scene acquisition.");
+        Check(!File.Exists(Path.Combine(recorder.DirectoryPath, "feedback.bgra")), "An unknown feedback area was represented as a known crop.");
+        File.WriteAllText(Path.Combine(root, "calibration-clip-path.txt"), recorder.DirectoryPath);
+        Console.WriteLine("SUCCESS: full calibration scene survives detector failure, with no fabricated meter/feedback regions. " + recorder.DirectoryPath);
     }
     private static void AutomaticRoundTrip(string root, Nba2K27ShotProfile initial)
     {

@@ -3,6 +3,15 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using EliteScriptStudio.Desktop;
 
+if (args is ["--read-calibration-clip", var calibrationDirectory])
+{
+    using var dataset = new DesktopVisionDataset(calibrationDirectory);
+    if (dataset.Regions.Length != 2 || dataset.ReadFrame("scene", 0).Bytes[54] != 11)
+        throw new InvalidDataException("Calibration scene did not round-trip without fabricated HUD regions.");
+    Console.WriteLine("SUCCESS: raw full-scene calibration clip is reviewable with no meter/feedback region prerequisite.");
+    return;
+}
+
 if (args is ["--read-automatic-clip", var clipDirectory])
 {
     using var dataset = new DesktopVisionDataset(clipDirectory);

@@ -50,7 +50,7 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
     void IVisionCaptureProfile.ValidateCapture(VisionTrainingCaptureSettings settings)
     {
         settings.Validate(); Validate();
-        if (!settings.Configured || settings.FeedbackRegion is null)
+        if (!settings.Configured || (settings.FeedbackRegion is null && settings.EvidenceMode != VisionEvidenceMode.SceneFirst))
             throw new InvalidDataException("Mark the gameplay scene and fixed shot feedback panel first.");
         if (settings.Purpose == VisionTrainingPurpose.MeterSupervisedTraining && (!UsesShotMeter ||
             (settings.EvidenceMode == VisionEvidenceMode.FixedRegions && settings.MeterRegion is null)))
@@ -109,6 +109,18 @@ internal sealed record Nba2K27ShotProfile(Guid Id, string Name, int HeightInches
             Configured = false, EvidenceMode = VisionEvidenceMode.Automatic, GameplayRegion = new(0, 0, 1, 1),
             Purpose = UsesShotMeter ? VisionTrainingPurpose.MeterSupervisedTraining : VisionTrainingPurpose.MeterOffValidation,
             MeterRegion = null, FeedbackRegion = null, PluginConfiguration = JsonSerializer.SerializeToElement(configuration, Nba2K27CaptureConfiguration.Json) } };
+    }
+    VisionSettings IVisionCaptureProfile.PrepareCalibrationCapture(VisionSettings settings, int width, int height) => settings with {
+        Crop = new(0, 0, 1, 1), TrainingCapture = settings.TrainingCapture with {
+            Configured = true, SourceWidth = width, SourceHeight = height, EvidenceMode = VisionEvidenceMode.SceneFirst,
+            GameplayRegion = new(0, 0, 1, 1), MeterRegion = null, FeedbackRegion = null, HudName = "Full gameplay calibration" } };
+    bool IVisionCaptureProfile.CalibrationTriggered(ControllerState? input, VisionRegionObservation? observation)
+    {
+        if (input is { } state && (Math.Abs((int)state.RightY) > 16000 || ControlMap.IsPressed(ControlId.X, state, PaddleButtons.None))) return true;
+        if (observation is not { Valid: true, Keypoints.Length: 17, BodyBounds: { } body } frame) return false;
+        var p = frame.Keypoints;
+        return p[5].Confidence >= .5 && p[6].Confidence >= .5 && p[9].Confidence >= .5 && p[10].Confidence >= .5
+            && p[9].Y < p[5].Y + body.Height * .12 && p[10].Y < p[6].Y + body.Height * .12;
     }
     VisionSettings IVisionCaptureProfile.CompleteAutomaticCapture(VisionSettings settings, VisionRegionObservation observation, int width, int height)
     {
