@@ -2,6 +2,7 @@ using EliteScriptStudio.Core;
 using EliteScriptStudio.Packs.Nba2K27;
 using System.Text.Json;
 using System.Buffers.Binary;
+using System.Diagnostics;
 
 internal static class AutomaticIdentityChecks
 {
@@ -67,13 +68,20 @@ internal static class AutomaticIdentityChecks
         var models = new Models { People = [player], Text = [new("DrakulaVlad2", .98, new(.4, .78, .14, .025)),
             new("TIMING", .98, new(.7, .05, .1, .025)), new("TEMPO", .98, new(.7, .1, .1, .025))] };
         using var tracker = new Nba2K27AutomaticTracker(new() { Gamertag = "DrakulaVlad2" }, () => models);
-        Check(!tracker.Track(pixels, width, height, width * 4, 1, 1).Valid, "One observation was treated as repeated identity confirmation.");
-        Thread.Sleep(360);
-        var acquired = tracker.Track(pixels, width, height, width * 4, 2, 1);
+        long at = Stopwatch.Frequency;
+        Check(!tracker.Track(pixels, width, height, width * 4, 1, 1, at).Valid, "One observation was treated as repeated identity confirmation.");
+        var acquired = tracker.Track(pixels, width, height, width * 4, 2, 1, at + Stopwatch.Frequency * 36 / 100);
         Check(acquired.Valid && acquired.Identity?.ObservedTag == "DrakulaVlad2" && acquired.Keypoints?.Length == 17, "Automatic tag/pose acquisition failed.");
         Check(acquired.Player.Top < .26 && acquired.Court.Length >= 3 && acquired.AcquisitionComplete, "Raised-hand padding or automatic court/HUD proposal failed.");
         models.People = [player, player with { Bounds = player.Bounds with { Left = .401 } }];
-        Check(!tracker.Track(pixels, width, height, width * 4, 3, 1).Valid, "Two ambiguous bodies silently retained a player identity.");
+        Check(!tracker.Track(pixels, width, height, width * 4, 3, 1, at + Stopwatch.Frequency * 4 / 10).Valid, "Two ambiguous bodies silently retained a player identity.");
+        using var clocked = new Nba2K27AutomaticTracker(new() { Gamertag = "DrakulaVlad2" }, () => models);
+        models.People = [player];
+        clocked.Track(pixels, width, height, width * 4, 1, 1, at);
+        Check(clocked.Track(pixels, width, height, width * 4, 2, 1, at + Stopwatch.Frequency * 36 / 100).Valid, "Saved frame time did not schedule the second OCR confirmation.");
+        models.Text = [];
+        Check(clocked.Track(pixels, width, height, width * 4, 3, 1, at + Stopwatch.Frequency * 72 / 100).Valid, "One missing OCR observation discarded uniquely associated, recently verified pose continuity.");
+        Check(!clocked.Track(pixels, width, height, width * 4, 4, 1, at + Stopwatch.Frequency * 11 / 10).Valid, "Offline replay retained expired identity based on processing wall time.");
         Check(!Nba2K27AutomaticTracker.MatchesTag("drakulavlad2", "DrakulaVlad2")
             && !Nba2K27AutomaticTracker.MatchesTag("OtherDrakulaVlad2", "DrakulaVlad2")
             && Nba2K27AutomaticTracker.MatchesTag("★ DrakulaVlad2", "DrakulaVlad2"), "Tag capitalization or token-boundary rules failed.");

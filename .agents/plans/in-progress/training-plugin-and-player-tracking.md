@@ -310,3 +310,35 @@ source selected before loading the NBA plugin; the installed UI showed all four
 saved capture-area checks and an enabled recording control. No trained shot model
 or full-motion tracking acceptance is implied by that saved setup. The interface
 needed one recovery click on relaunch, after which navigation succeeded.
+
+## Full-scene recording and offline crop preparation
+
+Capture-only automatic sessions now retain the complete scene independently of
+sampled live pose/OCR analysis, including after the capture layout is configured.
+The recording API selects the plugin's scene-first policy using the current
+source dimensions. Opening a raw clip runs native exact-frame annotation offline
+and creates a separate tracked take; original footage and controller samples are
+unchanged. Failure still permits review of the raw scene. No Python live worker
+or controller activation is introduced.
+
+OCR cadence and identity expiry use original captured timestamps during replay.
+A single missed OCR result can retain a uniquely associated, recently verified
+pose, but the 700 ms identity expiry and ambiguous-body rejection remain. Player
+crop trimming preserves confident joints with limb/head margins; it never masks
+HUD pixels. Frames with lost identity, insufficient regions or HUD overlap are
+excluded from the derived take and retained in the raw clip and per-frame report.
+Both raw source identity and exact frame/timestamp mapping are checked by the
+offline converter; inspected build 2.0.0.12 remains bound to the original metadata.
+
+Native replay of `take-20261114-021533-00487316` produced **207 of 538** usable
+player crops. The longest contiguous run is 44 source frames. The report retains
+144 HUD-overlap exclusions and 187 unconfirmed/expired-identity frames. Sample
+raised-hand/ball crops were visually inspected. Modified source timestamps,
+acquisition hashes and source indices were rejected by the actual converter.
+Focused identity-clock/ambiguity checks and the interface build passed. These
+are region-preparation results, not target labels, model accuracy or full-motion
+tracking acceptance. New installed-path recording validation remains to be done.
+
+Prepared evidence:
+`AccessRelayStudio-Beta/TrainingData/take-20261114-021533-00487316-tracked-v1-84192f9a`.
+Review images and integrity results are under `artifacts/AutoCaptureModels`.

@@ -619,10 +619,30 @@ internal sealed class DesktopVisionService : IDesktopModule
         }
         else folder = (await new FolderPicker(_owner).PickSingleFolderAsync())?.Path;
         CheckOperation(version, cancellation); if (folder is null) return null;
+        string? preparationError = null;
+        using (var raw = await Task.Run(() => new DesktopVisionDataset(folder), cancellation))
+        {
+            if (raw.RequiresPlayerPreparation)
+            {
+                var profile = _profile ?? throw new InvalidOperationException("Choose the player profile used for this clip before preparing its training regions.");
+                var settings = _settings;
+                _session?.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
+                _notice = "Preparing player and HUD regions from the saved gameplay.";
+                try
+                {
+                    folder = await Task.Run(() => VisionTrainingPreparation.Prepare(folder, profile, settings, cancellation,
+                        (done, total) => _notice = $"Preparing player and HUD regions: {done * 100 / total}%.",
+                        models => new VisionAnalysisModels(models, settings.ExecutionProvider)), cancellation);
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                { preparationError = "The raw gameplay is available for review. Player-region preparation failed: " + error.Message; }
+                CheckOperation(version, cancellation);
+            }
+        }
         var dataset = await Task.Run(() => new DesktopVisionDataset(folder), cancellation);
         try { CheckOperation(version, cancellation); }
         catch { dataset.Dispose(); throw; }
-        var previous = _review; _review = dataset; previous?.Dispose(); _notice = "Clip opened. Review each shot and its feedback on the shared timeline.";
+        var previous = _review; _review = dataset; previous?.Dispose(); _notice = preparationError ?? "Clip opened. Review each shot and its feedback on the shared timeline.";
         return dataset.Snapshot();
     }
     private async Task<object?> SavePerformanceAsync(string label, int version, CancellationToken cancellation)

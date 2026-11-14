@@ -201,6 +201,43 @@ def validate_source(session, directory=None):
         if trace != "controller-trace.json": raise ValueError("Unexpected controller trace filename")
         expected_files[trace] = None
         if directory is not None and child(directory, trace).stat().st_size > 16 * 1024 ** 2: raise ValueError("Controller trace exceeds 16 MiB")
+    preparation = session.get("preparation")
+    if preparation is not None:
+        if (not automatic or not isinstance(preparation, dict) or preparation.get("version") != 1
+                or preparation.get("cropPolicy") != "pose-envelope-hud-disjoint-v1"
+                or preparation.get("rawMetadataFile") != "acquisition-session.json" or preparation.get("frameReportFile") != "frame-results.json"
+                or preparation.get("retainedFrameCount") != len(frames)):
+            raise ValueError("Unsupported offline player preparation")
+        expected_files.update({"acquisition-session.json": None, "frame-results.json": None})
+        if directory is not None:
+            raw_path = child(directory, "acquisition-session.json")
+            raw, report = read_json(raw_path), read_json(child(directory, "frame-results.json"))
+            if (digest(raw_path) != preparation.get("sourceSessionSha256") or raw.get("complete") is not True
+                    or raw.get("sessionId") != preparation.get("sourceSessionId") or raw.get("captureEvidence", {}).get("version") != 2
+                    or raw.get("shotProfile") != session["shotProfile"] or raw.get("stopwatchFrequency") != session["stopwatchFrequency"]):
+                raise ValueError("Offline player crops lost their original acquisition identity")
+            version_file = preparation.get("gameVersionFile")
+            if version_file is not None:
+                if version_file != "source-game-version.json": raise ValueError("Unexpected inspected game-version filename")
+                version = read_json(child(directory, version_file))
+                if (version.get("sessionSha256") != preparation["sourceSessionSha256"]
+                        or layout["gameBuild"] != f"{version.get('installedGameVersion')} ({version.get('platform')})"):
+                    raise ValueError("Inspected game build differs from the original recording's bound observation")
+            elif raw.get("captureEvidence", {}).get("layout", {}).get("gameBuild") != layout["gameBuild"]:
+                raise ValueError("Preparation changed the recorded game build without an inspected version")
+            original_frames, results = raw.get("frames", []), report.get("frames", [])
+            if len(original_frames) != preparation.get("sourceFrameCount") or len(results) != len(original_frames):
+                raise ValueError("Offline tracking report does not account for every original frame")
+            for frame in frames:
+                index = integer(frame.get("sourceFrameIndex"), "original frame index")
+                if index >= len(original_frames): raise ValueError("Prepared frame refers outside the raw recording")
+                original, result = original_frames[index], results[index]
+                if any(frame.get(key) != original.get(key) for key in ("sequence", "captureTicks", "sourceGeneration", "compositorTicks")):
+                    raise ValueError("Prepared frame changed source sequence, clock or generation")
+                observation = result.get("observation", {}) | {"textRegions": None, "detectedPeople": None}
+                if result.get("sourceIndex") != index or result.get("usable") is not True or observation != frame["tracking"]:
+                    raise ValueError("A rejected or mismatched observation entered the prepared clip")
+        if preparation.get("gameVersionFile") is not None: expected_files["source-game-version.json"] = None
     return expected_files
 
 

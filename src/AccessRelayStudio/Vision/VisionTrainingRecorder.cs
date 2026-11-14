@@ -92,13 +92,13 @@ internal sealed class VisionTrainingRecorder : IDisposable
         DirectoryPath = Path.Combine(parent, "take-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(DirectoryPath);
         _profile = profile; _settings = settings; _sourceTitle = sourceTitle;
-        if (AcquisitionOnly) _message = "Recording the full gameplay calibration clip.";
+        if (AcquisitionOnly) _message = "Recording full gameplay for offline player/HUD preparation.";
         // Metadata is written immediately as incomplete, and replaced after the writer finishes.
         WriteMetadata(complete: false);
         _writer = Task.Run(WriteAsync);
         _timeout = new Timer(_ =>
         {
-            lock (_gate) FinishLocked(AcquisitionOnly ? "Calibration clip saved. Review the full gameplay to validate capture areas." : "Training take complete. Review and label the recorded frames before training.", true);
+            lock (_gate) FinishLocked(AcquisitionOnly ? "Gameplay clip saved. Open it to prepare and review player/HUD regions." : "Training take complete. Review and label the recorded frames before training.", true);
         }, null, _durationLimit, Timeout.InfiniteTimeSpan);
     }
 
@@ -115,7 +115,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
                     || tracking.Keypoints is not { Length: 17 } || tracking.Court.Length < 3))
             { FinishLocked("Player identity, pose or court evidence was lost. Take is incomplete.", false); return; }
             if (Stopwatch.GetElapsedTime(_started) >= _durationLimit)
-            { FinishLocked(AcquisitionOnly ? "Calibration clip saved. Review the full gameplay to validate capture areas." : "Training take complete. Review and label the recorded frames before training.", true); return; }
+            { FinishLocked(AcquisitionOnly ? "Gameplay clip saved. Open it to prepare and review player/HUD regions." : "Training take complete. Review and label the recorded frames before training.", true); return; }
             if (_settings.TrainingCapture.Configured && (frame.Width != _settings.TrainingCapture.SourceWidth ||
                 frame.Height != _settings.TrainingCapture.SourceHeight))
             { FinishLocked("Capture size changed since HUD setup. Take marked incomplete; confirm the regions on a fresh preview.", false); return; }

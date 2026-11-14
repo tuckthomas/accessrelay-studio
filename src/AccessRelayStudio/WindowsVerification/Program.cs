@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--prepare-recorded-scene", var sceneRuntime, var sceneAssets, var sceneDirectory])
+{
+    AutomaticCaptureModelChecks.PrepareScene(sceneRuntime, sceneAssets, sceneDirectory);
+    return;
+}
+
 if (args is ["--acquisition-worker", var acquisitionEvidence])
 {
     TrainingPluginChecks.CheckAcquisitionWorker(acquisitionEvidence);

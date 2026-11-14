@@ -42,7 +42,7 @@ internal static class TrainingPluginChecks
     private sealed class BlockedTracker : IVisionRegionTracker
     {
         internal readonly ManualResetEventSlim Started = new(), Release = new();
-        public VisionRegionObservation Track(ReadOnlySpan<byte> pixels, int width, int height, int stride, long sequence, long generation)
+        public VisionRegionObservation Track(ReadOnlySpan<byte> pixels, int width, int height, int stride, long sequence, long generation, long captureTicks = 0)
         { Started.Set(); Release.Wait(); return new(sequence, true, new(0, 0, 1, 1), null, [], 1, "Synthetic blocked analysis"); }
         public void RequestStop() => Release.Set();
         public void Dispose() { Release.Set(); Started.Dispose(); Release.Dispose(); }

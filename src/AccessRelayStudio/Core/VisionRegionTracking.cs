@@ -22,7 +22,7 @@ internal sealed record VisionRegionObservation(long Sequence, bool Valid, Vision
 /// <summary>The game adapter resolves regions; the host owns the frame lease and capture lifecycle.</summary>
 internal interface IVisionRegionTracker : IDisposable
 {
-    VisionRegionObservation Track(ReadOnlySpan<byte> bgra, int width, int height, int stride, long sequence, long generation);
+    VisionRegionObservation Track(ReadOnlySpan<byte> bgra, int width, int height, int stride, long sequence, long generation, long captureTicks = 0);
     void RequestStop() { }
     void IDisposable.Dispose() { }
 }

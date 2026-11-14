@@ -8,6 +8,23 @@ using Microsoft.ML.OnnxRuntime;
 
 internal static class AutomaticCaptureModelChecks
 {
+    internal static void PrepareScene(string runtimeRoot, string assets, string directory)
+    {
+        runtimeRoot = Path.GetFullPath(runtimeRoot);
+        var paths = new[] { runtimeRoot }.Concat(Directory.EnumerateFiles(Path.Combine(runtimeRoot, "CudaRuntime"), "*.dll", SearchOption.AllDirectories)
+            .Select(Path.GetDirectoryName).OfType<string>().Distinct());
+        Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, paths) + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"));
+        OrtEnv.DisableDllImportResolver = true;
+        NativeLibrary.SetDllImportResolver(typeof(OrtEnv).Assembly, (name, _, _) => name is "onnxruntime" or "onnxruntime.dll" ? NativeLibrary.Load(Path.Combine(runtimeRoot, "onnxruntime.dll")) : 0);
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
+        using var session = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "session.json")));
+        var profile = session.RootElement.GetProperty("shotProfile").Deserialize<Nba2K27ShotProfile>(json)!;
+        int previous = -1;
+        string prepared = VisionTrainingPreparation.Prepare(directory, profile, VisionSettings.Default,
+            progress: (done, total) => { int percent = done * 100 / total; if (percent / 10 != previous) { previous = percent / 10; Console.WriteLine($"Preparing saved evidence: {percent}%"); } },
+            models: set => new VisionAnalysisModels(set, VisionExecutionProvider.Cuda, assets));
+        Console.WriteLine("Prepared recorded gameplay: " + prepared);
+    }
     internal static void ProbeFrame(string runtimeRoot, string assets, string imagePath, string outputPath)
     {
         runtimeRoot = Path.GetFullPath(runtimeRoot);

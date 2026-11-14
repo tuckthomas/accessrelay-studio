@@ -24,6 +24,7 @@ internal sealed class DesktopVisionDataset : IDisposable
     private readonly object _gate = new();
     private readonly string _directory;
     private readonly SessionInfo _session;
+    private readonly JsonElement? _preparation;
     private string? _labelsHash, _openRegion;
     private FileStream? _stream;
     private byte[] _pixels = [];
@@ -32,12 +33,14 @@ internal sealed class DesktopVisionDataset : IDisposable
     internal Region[] Regions { get; }
     internal LabelDocument Labels { get; private set; }
     internal int FrameCount => _session.Frames.Length;
+    internal bool RequiresPlayerPreparation => _session.CaptureEvidence?.Version == 2;
 
     internal DesktopVisionDataset(string directory)
     {
         _directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
         byte[] metadata = ReadBounded(Child("session.json"));
         using var doc = JsonDocument.Parse(metadata, new JsonDocumentOptions { MaxDepth = 32 });
+        _preparation = doc.RootElement.TryGetProperty("preparation", out var preparation) ? preparation.Clone() : null;
         if (doc.RootElement.TryGetProperty("captureEvidence", out var marker) && marker.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException("This clip has malformed evidence metadata.");
         _session = JsonSerializer.Deserialize<SessionInfo>(metadata, DesktopJson.Options)
@@ -73,6 +76,7 @@ internal sealed class DesktopVisionDataset : IDisposable
         lock (_gate) return new
         {
             token = Token, sessionId = _session.SessionId, directory = _directory, frameCount = FrameCount,
+            preparation = _preparation,
             enriched = _session.CaptureEvidence is not null, purpose = _session.CaptureEvidence?.Purpose,
             tracking = _session.CaptureEvidence?.Tracking,
             regions = Regions.Select(r => new { r.Name, r.Label, r.Width, r.Height }), labels = Labels,

@@ -141,9 +141,9 @@ internal sealed class VisionSession : IDisposable
     private void Run(nint hwnd, VisionSettings settings, CancellationToken cancellation, bool loadModel, IVisionRegionTracker? regionTracker)
     {
         VisionModel? model = null;
-        // Automatic setup saves an unannotated scene. Its analysis can sample independently;
-        // configured dynamic-crop recording still requires an observation for the exact frame.
-        VisionAcquisitionWorker? acquisition = !loadModel && regionTracker is not null && !settings.TrainingCapture.Configured
+        // Capture-only automatic sessions retain the full scene. Analysis samples independently;
+        // exact-frame player/HUD crops are generated offline from the retained recording.
+        VisionAcquisitionWorker? acquisition = !loadModel && regionTracker is not null
             && settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? new(regionTracker, cancellation) : null;
         bool modelLoadFailed = false;
         try
@@ -244,7 +244,7 @@ internal sealed class VisionSession : IDisposable
                         }
                         else
                         {
-                            regions = regionTracker?.Track(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.SourceGeneration);
+                            regions = regionTracker?.Track(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.SourceGeneration, frame.CaptureTicks);
                             Volatile.Write(ref _tracking, regions);
                         }
                         frame.PlayerCrop = regions is { Valid: true } ? regions.Player : null;
@@ -421,9 +421,11 @@ internal sealed class VisionSession : IDisposable
         {
             if (_stopping) throw new InvalidOperationException("Live view is stopping. Record a training clip after it has stopped.");
             if (!_status.Running || _activeSettings is null) throw new InvalidOperationException("Start live view before recording training data.");
+            if (captureOverride is null && _model is null && _activeSettings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic)
+                captureOverride = profile.PrepareCalibrationCapture(_activeSettings, _status.CaptureWidth, _status.CaptureHeight);
             var recordingSettings = captureOverride ?? _activeSettings;
             if (captureOverride is not null && (_model is not null || recordingSettings.AnimationProfile != _activeSettings.AnimationProfile
-                || recordingSettings.CameraView != _activeSettings.CameraView || recordingSettings.Crop != _activeSettings.Crop
+                || recordingSettings.CameraView != _activeSettings.CameraView
                 || recordingSettings.TrainingCapture.EvidenceMode != VisionEvidenceMode.SceneFirst))
                 throw new InvalidOperationException("Calibration capture requires a capture-only session with matching source/profile geometry.");
             if (_runtime.ScriptsEnabled || _runtime.Recording.IsRecording)

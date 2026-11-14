@@ -47,17 +47,19 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
     private VisionPlayerIdentity? _identity;
     private VisionCrop? _relativeMeter = configuration.RelativeMeter, _feedback = configuration.Feedback;
     private volatile bool _stopping;
-    public VisionRegionObservation Track(ReadOnlySpan<byte> bgra, int width, int height, int stride, long sequence, long generation)
+    public VisionRegionObservation Track(ReadOnlySpan<byte> bgra, int width, int height, int stride, long sequence, long generation, long captureTicks = 0)
     {
         if (_stopping) throw new OperationCanceledException();
+        // Identity expiry and OCR cadence follow the observed frame, including during offline replay.
+        long now = captureTicks > 0 ? captureTicks : Stopwatch.GetTimestamp();
         if ((_generation >= 0 && (generation != _generation || width != _width || height != _height)) || sequence <= _sequence)
         { ResetIdentity(); _feedback = null; _relativeMeter = null; }
         _generation = generation; _sequence = sequence; _width = width; _height = height;
         _models ??= createModels(); if (_stopping) { _models.RequestStop(); throw new OperationCanceledException(); }
-        bool freshText = _lastOcr == 0 || Stopwatch.GetElapsedTime(_lastOcr).TotalMilliseconds >= 350;
+        bool freshText = _lastOcr == 0 || (now - _lastOcr) * 1000d / Stopwatch.Frequency >= 350;
         if (freshText)
         {
-            _text = _models.ReadText(bgra, width, height, stride); _lastOcr = Stopwatch.GetTimestamp();
+            _text = _models.ReadText(bgra, width, height, stride); _lastOcr = now;
             _feedback ??= FindFeedback(_text);
         }
         var namedTags = _text.Where(t => t.Confidence >= .8 && MatchesTag(t.Text, configuration.Gamertag)).ToArray();
@@ -75,24 +77,25 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
         }
         var people = _people = _models.DetectPeople(bgra, width, height, stride, search);
         VisionPersonPose? selected;
-        if (freshText || _identity is null)
+        if (namedTags.Length > 1) return Missing(sequence, "The displayed gamertag is ambiguous.");
+        if ((freshText || _identity is null) && namedTags.Length == 1)
         {
             var tags = namedTags;
-            if (tags.Length != 1) return Missing(sequence, tags.Length > 1 ? "The displayed gamertag is ambiguous." : "Looking for the exact displayed gamertag: " + configuration.Gamertag);
             var ranked = people.Select(person => (Person: person, Distance: AssociationDistance(person, tags[0].Bounds)))
                 .Where(item => double.IsFinite(item.Distance)).OrderBy(item => item.Distance).ToArray();
             if (ranked.Length == 0 || ranked[0].Distance > 1.25 || (ranked.Length > 1 && ranked[1].Distance - ranked[0].Distance < .3))
                 return Missing(sequence, "The gamertag cannot be assigned uniquely to a detected player's feet.");
             selected = ranked[0].Person;
             if (_previous is not null && CenterDistance(selected.Bounds, _previous.Bounds) > .8) _confirmations = 0;
-            _confirmations++; _verifiedAt = Stopwatch.GetTimestamp(); _verifiedSequence = sequence;
+            _confirmations++; _verifiedAt = now; _verifiedSequence = sequence;
             string recognized = tags[0].Text.Normalize(NormalizationForm.FormC).Trim();
             int tagStart = recognized.IndexOf(configuration.Gamertag, StringComparison.Ordinal);
             _identity = new(configuration.Gamertag, recognized.Substring(tagStart, configuration.Gamertag.Length), true, tags[0].Confidence, sequence, tags[0].Text);
         }
         else
         {
-            if (_previous is null || Stopwatch.GetElapsedTime(_verifiedAt).TotalMilliseconds > 700) return Missing(sequence, "Player identity needs a fresh gamertag confirmation.");
+            if (_identity is null || _previous is null || (now - _verifiedAt) * 1000d / Stopwatch.Frequency > 700)
+                return Missing(sequence, "Player identity needs a fresh gamertag confirmation.");
             var ranked = people.Select(person => (Person: person, Distance: CenterDistance(person.Bounds, _previous.Bounds)))
                 .OrderBy(item => item.Distance).ToArray();
             if (ranked.Length == 0 || ranked[0].Distance > .5 || (ranked.Length > 1 && ranked[1].Distance - ranked[0].Distance < .3))
@@ -113,6 +116,13 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
         if (meter is { } found) _relativeMeter = new((found.Left - body.Left) / body.Width, (found.Top - body.Top) / body.Height, found.Width / body.Width, found.Height / body.Height);
         VisionCrop? meterArea = _relativeMeter is { } relative ? Clip(body.Left + relative.Left * body.Width, body.Top + relative.Top * body.Height,
             body.Left + (relative.Left + relative.Width) * body.Width, body.Top + (relative.Top + relative.Height) * body.Height) : null;
+        // Detector boxes include background and sometimes the adjacent meter. Preserve the
+        // confident skeleton plus limb/head margins when trimming that optional background.
+        double jointMarginX = body.Height * height / width * .035, jointMarginY = body.Height * .07;
+        var required = Clip(visible.Min(p => p.X) - jointMarginX, visible.Min(p => p.Y) - jointMarginY,
+            visible.Max(p => p.X) + jointMarginX, visible.Max(p => p.Y) + jointMarginY);
+        foreach (var overlay in new[] { meterArea, _feedback })
+            if (overlay is { } hud) crop = TrimPadding(crop, required, hud, width, height) ?? crop;
         var (court, courtConfidence) = FindCourt(bgra, width, height, stride, body);
         bool complete = _feedback is not null && (!configuration.MeterOn || meterArea is not null) && court.Length >= 3;
         var missing = new List<string>();
@@ -124,6 +134,20 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
                 : "Player identity and pose acquired. Waiting for " + string.Join(", ", missing) + ".",
             _identity with { VerifiedSequence = _verifiedSequence }, selected.Keypoints, _feedback, meter is not null, courtConfidence, complete, body, _models.ExecutionProvider,
             _diagnostic ? _text : null, _diagnostic ? people : null);
+    }
+    internal static VisionCrop? TrimPadding(VisionCrop crop, VisionCrop required, VisionCrop hud, int width, int height)
+    {
+        static bool Overlap(VisionCrop a, VisionCrop b) => a.Left < b.Left + b.Width && b.Left < a.Left + a.Width
+            && a.Top < b.Top + b.Height && b.Top < a.Top + a.Height;
+        if (!Overlap(crop, hud)) return crop;
+        if (Overlap(required, hud)) return null;
+        double l = crop.Left, t = crop.Top, r = l + crop.Width, b = t + crop.Height;
+        if (hud.Left + hud.Width <= required.Left) l = Math.Max(l, hud.Left + hud.Width + 2d / width);
+        else if (hud.Left >= required.Left + required.Width) r = Math.Min(r, hud.Left - 2d / width);
+        else if (hud.Top + hud.Height <= required.Top) t = Math.Max(t, hud.Top + hud.Height + 2d / height);
+        else if (hud.Top >= required.Top + required.Height) b = Math.Min(b, hud.Top - 2d / height);
+        if (l > required.Left || t > required.Top || r < required.Left + required.Width || b < required.Top + required.Height) return null;
+        return new(l, t, r - l, b - t);
     }
     private void ResetIdentity() { _identity = null; _previous = null; _confirmations = 0; _lastOcr = 0; }
     private VisionRegionObservation Missing(long sequence, string message, bool reset = true)

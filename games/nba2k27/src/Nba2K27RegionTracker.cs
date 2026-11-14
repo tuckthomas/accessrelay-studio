@@ -30,7 +30,7 @@ internal sealed class Nba2K27RegionTracker : IVisionRegionTracker
         SeedCourtFeatures(_previous);
     }
 
-    public VisionRegionObservation Track(ReadOnlySpan<byte> bgra, int width, int height, int stride, long sequence, long generation)
+    public VisionRegionObservation Track(ReadOnlySpan<byte> bgra, int width, int height, int stride, long sequence, long generation, long captureTicks = 0)
     {
         if (_lost) return Lost(sequence, "Visual anchor lock was lost. Stop preview and reacquire the intended player.");
         if ((_generation >= 0 && _generation != generation) || sequence <= _sequence || bgra.Length < (long)stride * height)

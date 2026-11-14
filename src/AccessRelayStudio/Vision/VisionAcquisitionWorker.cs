@@ -25,7 +25,7 @@ internal sealed class VisionAcquisitionWorker(IVisionRegionTracker tracker, Canc
             {
                 try
                 {
-                    var observation = tracker.Track(pixels.AsSpan(0, length), width, height, stride, sequence, generation);
+                    var observation = tracker.Track(pixels.AsSpan(0, length), width, height, stride, sequence, generation, ticks);
                     if (observation.Sequence != sequence) throw new InvalidDataException("Capture analysis returned a different frame sequence.");
                     return new Result(new(pixels, width, height, stride, sequence, ticks, observation), generation);
                 }
