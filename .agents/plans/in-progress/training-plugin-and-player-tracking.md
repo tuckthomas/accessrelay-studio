@@ -213,3 +213,8 @@ HUD regions are absent, not fabricated; calibration-only scene data stays reject
 by release-model conversion until reviewed per-frame regions are generated.
 Native writer/reader checks cover preservation through detector failure. Live
 recording and actual meter/feedback diagnosis remain pending.
+
+Setup also retains up to 300 timestamped preview reference frames at 2.5 Hz under
+the M: model-output acquisition directory. This bounded reference sequence remains
+available even if the physical/pose recording trigger misses. It is diagnostic
+acquisition footage, not a high-rate timing dataset or an accepted player crop.

@@ -435,6 +435,8 @@ internal sealed class DesktopVisionService : IDesktopModule
         string diagnostics = Path.Combine(_trainingJob.Configuration.WorkspaceRoot, "acquisition-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         var savedPhases = new HashSet<string>(StringComparer.Ordinal);
         bool calibrationStarted = false;
+        long lastReferenceAt = 0, lastReferenceSequence = -1;
+        int referenceCount = 0;
         try
         {
             Start(loadModel: false); _session!.SetPreviewEnabled(true);
@@ -444,6 +446,18 @@ internal sealed class DesktopVisionService : IDesktopModule
             {
                 CheckOperation(version, cancellation); _session.SetPreviewEnabled(true); UpdatePreview(force: true);
                 image = Volatile.Read(ref _preview);
+                if (image is not null && image.Sequence != lastReferenceSequence && referenceCount < 300
+                    && (lastReferenceAt == 0 || Stopwatch.GetElapsedTime(lastReferenceAt).TotalMilliseconds >= 400))
+                {
+                    // Retain the entire setup interval even if the shot trigger or a region detector misses.
+                    string reference = Path.Combine(diagnostics, "frames", (referenceCount++).ToString("D4"));
+                    var retained = image;
+                    await Task.Run(() => { Directory.CreateDirectory(Path.GetDirectoryName(reference)!);
+                        File.WriteAllBytes(reference + ".bmp", retained.Media.Bytes);
+                        File.WriteAllBytes(reference + ".json", JsonSerializer.SerializeToUtf8Bytes(new { retained.Sequence, retained.SourceCaptureTicks,
+                            retained.SourceWidth, retained.SourceHeight, retained.Tracking }, DesktopJson.Options)); }, cancellation);
+                    lastReferenceAt = Stopwatch.GetTimestamp(); lastReferenceSequence = image.Sequence;
+                }
                 if (!calibrationStarted && _session.Status is { CaptureWidth: > 0, CaptureHeight: > 0 } source)
                 {
                     ControllerState? physical = _runtime()?.Latest?.Input is { IsConnected: true } connected ? connected.State : null;
