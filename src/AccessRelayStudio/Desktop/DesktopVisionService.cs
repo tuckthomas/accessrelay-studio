@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Vision;
@@ -595,19 +596,31 @@ internal sealed class DesktopVisionService : IDesktopModule
             throw new InvalidOperationException("The plugin profile or source changed while selecting a folder. Review the setup and try again.");
         RefreshSources(); var source = SelectedSource();
         if (_session?.Status.Running != true) Start(loadModel: false);
-        long began = Stopwatch.GetTimestamp();
-        while (_session!.Status is not { Frames: > 0, CaptureWidth: > 0, CaptureHeight: > 0 })
+        if (!SetForegroundWindow(source.Hwnd))
+            throw new InvalidOperationException("The gameplay window could not receive focus. Return to Studio and start the recording again.");
+        _notice = "Waiting for the gameplay capture size to settle.";
+        long began = Stopwatch.GetTimestamp(), stableAt = began, initialFrames = _session!.Status.Frames;
+        int width = 0, height = 0;
+        while (true)
         {
             CheckOperation(version, cancellation);
-            if (!_session.Status.Running || _session.Status.CaptureFailed || Stopwatch.GetElapsedTime(began).TotalSeconds > 4)
-                throw new InvalidOperationException("The gameplay window could not be captured. Check the preview before recording.");
+            var captured = _session.Status;
+            if (!captured.Running || captured.CaptureFailed || Stopwatch.GetElapsedTime(began).TotalSeconds > 4)
+                throw new InvalidOperationException("The gameplay capture did not settle. Keep its window at a stable size before recording.");
+            if (captured.CaptureWidth != width || captured.CaptureHeight != height)
+            { width = captured.CaptureWidth; height = captured.CaptureHeight; stableAt = Stopwatch.GetTimestamp(); }
+            if (width > 0 && height > 0 && captured.Frames >= initialFrames + 3 && Stopwatch.GetElapsedTime(stableAt).TotalMilliseconds >= 500)
+                break;
             await Task.Delay(40, cancellation);
         }
         CheckOperation(version, cancellation);
         _session.StartTraining(folderPath, profile, source.Title);
-        _notice = "Recording up to 10 seconds. Return focus to gameplay to capture the action.";
+        _notice = "Recording up to 10 seconds in the selected gameplay window.";
         return null;
     }
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint window);
     private async Task<object?> ReviewOpenAsync(JsonElement args, int version, CancellationToken cancellation)
     {
         string? folder = null;
