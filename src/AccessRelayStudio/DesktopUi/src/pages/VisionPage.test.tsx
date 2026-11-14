@@ -1,7 +1,7 @@
 import { selectValue } from '../select-test-helper';
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { VisionPage } from './VisionPage';
 import { hasUnsavedChanges } from '../ui';
 
@@ -21,6 +21,50 @@ function fixture(overrides: any = {}) {
 }
 
 describe('vision workflows', () => {
+  it('updates the recorded image during continuous dragging without waiting for pointer release', () => {
+    vi.useFakeTimers();
+    try {
+      const review = { token: 'scrub-live', sessionId: 'scrub-live', frameCount: 40,
+        regions: [{ name: 'player', label: 'Player' }], frames: Array.from({ length: 40 }, (_, i) => ({ ticks: 1000 + i * 100, timeMs: i * 10 })),
+        labels: { split: 'train', shots: [] } };
+      render(<VisionPage mode="training" state={fixture({ review })} status={null} command={vi.fn().mockResolvedValue(null)} />);
+      fireEvent.click(screen.getByRole('tab', { name: 'Clips & review' }));
+      fireEvent.load(screen.getByRole('img', { name: 'player capture, frame 1' }));
+      const shown = new Set<string>();
+      for (let value = 1; value <= 16; value++) {
+        fireEvent.change(screen.getByRole('slider', { name: 'Recorded clip frame' }), { target: { value } });
+        act(() => { vi.advanceTimersByTime(10); });
+        const image = screen.getByRole('img', { name: /player capture, frame/ });
+        shown.add(image.getAttribute('src')!); fireEvent.load(image);
+      }
+      expect(shown.size).toBeGreaterThan(2);
+      expect(screen.getByRole('slider', { name: 'Recorded clip frame' }).getAttribute('value')).toBe('16');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('coalesces scrubbing while a frame loads and recovers after a failed image without enabling labels', () => {
+    vi.useFakeTimers();
+    try {
+      const review = { token: 'scrub-pending', sessionId: 'scrub-pending', frameCount: 40,
+        regions: [{ name: 'player', label: 'Player' }], frames: Array.from({ length: 40 }, (_, i) => ({ ticks: 1000 + i * 100, timeMs: i * 10 })),
+        labels: { split: 'train', shots: [] } };
+      render(<VisionPage mode="training" state={fixture({ review })} status={null} command={vi.fn().mockResolvedValue(null)} />);
+      fireEvent.click(screen.getByRole('tab', { name: 'Clips & review' }));
+      fireEvent.load(screen.getByRole('img', { name: 'player capture, frame 1' }));
+      const slider = screen.getByRole('slider', { name: 'Recorded clip frame' });
+      fireEvent.change(slider, { target: { value: 3 } }); act(() => { vi.advanceTimersByTime(34); });
+      const pending = screen.getByRole('img', { name: 'player capture, frame 4' });
+      fireEvent.change(slider, { target: { value: 15 } }); act(() => { vi.advanceTimersByTime(100); });
+      fireEvent.change(slider, { target: { value: 30 } }); act(() => { vi.advanceTimersByTime(100); });
+      expect(screen.getByRole('img', { name: 'player capture, frame 4' })).toBe(pending);
+      fireEvent.error(pending); act(() => { vi.advanceTimersByTime(34); });
+      const latest = screen.getByRole('img', { name: 'player capture, frame 31' });
+      expect((screen.getByRole('button', { name: 'Mark target game phase at current frame' }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.load(latest);
+      expect((screen.getByRole('button', { name: 'Mark target game phase at current frame' }) as HTMLButtonElement).disabled).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('defaults to CPU preparation and saves experimental GPU as an inactive reviewed setting', async () => {
     const command = vi.fn().mockResolvedValue(null), state = fixture();
     const view = render(<VisionPage mode="live" state={state} status={null} command={command} />);

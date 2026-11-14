@@ -241,7 +241,25 @@ function ClipReview({ review, busy, save }: { review: any; busy: boolean; save: 
     setIsTarget(next.isTarget); setIdentity(next.identity); setReviewed(next.reviewed); setCropReviewed(next.cropReviewed); setCleanForm(JSON.stringify(next));
   }
   const frames: any[] = review.frames ?? [], imageKey = `${review.token}:${region}:${renderFrame}`, canMark = loaded === imageKey && frame === renderFrame;
-  useEffect(() => { const timer = setTimeout(() => setRenderFrame(frame), 70); return () => clearTimeout(timer); }, [frame]);
+  const scrub = useRef({ latest: frame, requested: renderFrame, ready: false, failed: '', timer: null as ReturnType<typeof setTimeout> | null });
+  scrub.current.latest = frame; scrub.current.requested = renderFrame;
+  function queueFrame() {
+    const current = scrub.current;
+    if (!current.ready || current.timer !== null || current.latest === current.requested) return;
+    current.timer = setTimeout(() => {
+      current.timer = null;
+      if (!current.ready || current.latest === current.requested) return;
+      current.ready = false;
+      setRenderFrame(current.latest);
+    }, 33);
+  }
+  useEffect(() => { queueFrame(); }, [frame]);
+  useEffect(() => { scrub.current.ready = loaded === imageKey || scrub.current.failed === imageKey; queueFrame(); }, [loaded, imageKey]);
+  useEffect(() => {
+    if (scrub.current.timer !== null) clearTimeout(scrub.current.timer);
+    scrub.current.timer = null; scrub.current.ready = false;
+    return () => { if (scrub.current.timer !== null) clearTimeout(scrub.current.timer); };
+  }, [review.token, region]);
   const time = (index: number | null) => index === null ? 'Not marked' : `${num(frames[index]?.timeMs)} ms`;
   async function persist(next: any[], success: string) {
     const result = await save({ schemaVersion: 1, sessionId: review.sessionId, split, labelTimeBasis: 'captured-target-game-phase', shots: next });
@@ -257,7 +275,10 @@ function ClipReview({ review, busy, save }: { review: any; busy: boolean; save: 
   }
   return <><div className="vision-review-grid"><Card title="Look before you label" description={`${review.frameCount.toLocaleString()} frames · ${review.enriched ? 'Synchronized evidence clip' : 'Player capture'}`}><div className="stack">
     <div className="vision-review-regions">{(review.regions ?? []).map((item: any) => <Button key={item.name} variant={item.name === region ? 'primary' : 'ghost'} onClick={() => setRegion(item.name)}>{item.label}</Button>)}</div>
-    <div className="vision-review-frame"><img src={`https://media.accessrelay.test/vision/review/${review.token}/${region}/${renderFrame}`} alt={`${region} capture, frame ${renderFrame + 1}`} onLoad={() => setLoaded(imageKey)} onError={() => { setLoaded(''); setMessage('This image could not be read. Reopen the clip to check its files.'); }} /></div>
+    <div className="vision-review-frame"><img src={`https://media.accessrelay.test/vision/review/${review.token}/${region}/${renderFrame}`} alt={`${region} capture, frame ${renderFrame + 1}`} onLoad={event => {
+      const expected = `https://media.accessrelay.test/vision/review/${review.token}/${region}/${renderFrame}`;
+      if (!event.currentTarget.currentSrc || event.currentTarget.currentSrc === expected) { scrub.current.failed = ''; setLoaded(imageKey); }
+    }} onError={() => { setLoaded(''); scrub.current.failed = imageKey; scrub.current.ready = true; queueFrame(); setMessage('This image could not be read. Reopen the clip to check its files.'); }} /></div>
     <div className="vision-review-position"><span>Frame {renderFrame + 1} of {review.frameCount}</span><strong>{num(frames[renderFrame]?.timeMs)} ms</strong></div><Slider type="range" aria-label="Recorded clip frame" min={0} max={review.frameCount - 1} step={1} value={frame} onChange={e => setFrame(+e.target.value)} />
     <div className="vision-frame-controls"><Button aria-label="Previous frame" disabled={frame <= 0} onClick={() => setFrame(Math.max(0, frame - 1))}><Icon name="chevronLeft" size={18} /></Button><span className="subtle">All regions share this timeline.</span><Button aria-label="Next frame" disabled={frame >= review.frameCount - 1} onClick={() => setFrame(Math.min(review.frameCount - 1, frame + 1))}><Icon name="chevronRight" size={18} /></Button></div>
     {review.enriched && <p className="subtle">Review the tracked player crop, meter, court and feedback before preparing training data. Target phases still require reviewed evidence.</p>}
