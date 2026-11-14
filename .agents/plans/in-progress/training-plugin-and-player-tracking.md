@@ -190,3 +190,14 @@ limit), allowing time to return to gameplay and finish an attempt without the
 30-second command timeout. A completed proposal opens once through status updates;
 cancelling it consumes that token and restores the prior configuration. This does
 not start a training take or controller output.
+
+
+Beta.20 installed at the existing project-local executable from `9a512f0`.
+Both saved NBA shot profiles now contain the observed `DrakulaVlad2` gamertag;
+original profile files were backed up under `artifacts/AutoCaptureModels`.
+Actual live acquisition then produced exact-case identity evidence, 17 joints and
+an estimated 13-vertex court polygon, on CUDA with CPU operator support. This is
+initial live acquisition only: moving/occluded identity, court accuracy, shot meter
+and feedback correctness have not passed acceptance. No user training take or
+trained user timing model has been produced. A physical shot/feedback result is
+pending. Receipt: `artifacts/AutoCaptureModels/installation20.json`.
