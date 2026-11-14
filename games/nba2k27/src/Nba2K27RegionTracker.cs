@@ -3,7 +3,7 @@ using EliteScriptStudio.Core;
 namespace EliteScriptStudio.Packs.Nba2K27;
 
 /// <summary>Short-range visual anchor tracker for acquisition. Ambiguity loses the lock;
-/// it never substitutes a different player. This is independent of the release model.</summary>
+/// a confident wrong match can still change identity. This is independent of the release model.</summary>
 internal sealed class Nba2K27RegionTracker : IVisionRegionTracker
 {
     private readonly Nba2K27CaptureConfiguration _configuration;

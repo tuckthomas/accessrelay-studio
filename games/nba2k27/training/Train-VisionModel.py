@@ -272,7 +272,7 @@ def main() -> int:
         validate_independent(training_footage, validation_footage)
         if train[3] != validation[3]:
             raise ValueError("Train/validation sessions use different shot-profile configurations")
-        policies = {"visual-anchors-v1" if session.get("captureEvidence", {}).get("version") == 3 else "fixed-region-v1"
+        policies = {"identity-pose-v1" if session.get("captureEvidence", {}).get("version") == 4 else "visual-anchors-v1" if session.get("captureEvidence", {}).get("version") == 3 else "fixed-region-v1"
                     for _, session in train[0] + validation[0]}
         if len(policies) != 1: raise ValueError("Do not mix fixed and tracked player inputs in one model")
         input_region_policy = policies.pop()

@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--automatic-capture-models", var runtimeRoot, var assets, var fixtureDirectory, var provider])
+{
+    AutomaticCaptureModelChecks.Run(runtimeRoot, assets, fixtureDirectory, provider);
+    return;
+}
+
 if (args is ["--training-plugin-only", var trainingEvidence])
 {
     TrainingPluginChecks.Run(trainingEvidence);

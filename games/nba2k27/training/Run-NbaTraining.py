@@ -27,7 +27,8 @@ def collect(root, profile):
     for path in sorted(candidates):
         session = read_json(path)
         if not equivalent(session.get("shotProfile", {}), profile): continue
-        if session.get("complete") is not True or session.get("captureEvidence", {}).get("version") != 3: continue
+        if session.get("captureEvidence", {}).get("version") == 4 and session.get("shotProfile", {}).get("gamertag") != profile.get("gamertag"): continue
+        if session.get("complete") is not True or session.get("captureEvidence", {}).get("version") not in (3, 4): continue
         labels_path = path.with_name("labels.json")
         if not labels_path.is_file(): continue
         labels = read_json(labels_path)
@@ -80,7 +81,7 @@ def run(request_path):
     tools = Path(__file__).resolve().parent
     candidate = output / "candidate"
     argv = [sys.executable, str(tools / "Train-VisionModel.py"), "--train", *map(str, prepared["train"]),
-        "--validation", *map(str, prepared["validation"]), "--out", str(candidate), "--epochs", str(epochs), "--device", device, "--cpu-threads", "1"]
+        "--validation", *map(str, prepared["validation"]), "--out", str(candidate), "--epochs", str(epochs), "--device", device, "--cpu-threads", "1", "--head", "ordered-head", "--history", "16", "--interval-ms", "50"]
     subprocess.run(argv, check=True)
     manifest = read_json(candidate / "manifest.json")
     thresholds = {"schemaVersion": 1, "datasetId": "nba-" + output.name, "animationProfile": manifest["animationProfile"],

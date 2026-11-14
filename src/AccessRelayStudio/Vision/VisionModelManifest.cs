@@ -51,7 +51,7 @@ internal sealed record VisionModelManifest
     internal void Validate()
     {
         if (OutputContract != "temporal-release-v1") throw new InvalidDataException("Unsupported typed vision output contract. This adapter requires temporal-release-v1.");
-        if (InputRegionPolicy is not ("fixed-region-v1" or "visual-anchors-v1")) throw new InvalidDataException("Unsupported model input-region policy.");
+        if (InputRegionPolicy is not ("fixed-region-v1" or "visual-anchors-v1" or "identity-pose-v1")) throw new InvalidDataException("Unsupported model input-region policy.");
         if (UncertaintySemantics is not ("absolute-error-estimate-v1" or "gaussian-95-half-width-v1")) throw new InvalidDataException("Unsupported uncertainty semantics. Re-export/revalidate the model with a supported contract.");
         if (SchemaVersion != 1 || string.IsNullOrWhiteSpace(DisplayName) || DisplayName.Length > 120 ||
             string.IsNullOrWhiteSpace(ModelVersion) || ModelVersion.Length > 80 ||
@@ -79,7 +79,7 @@ internal sealed record VisionModelManifest
     internal string CheckArmingEvidence(string manifestPath, VisionSettings settings, out VisionValidationReport? acceptedReport)
     {
         acceptedReport = null;
-        if (InputRegionPolicy == "visual-anchors-v1")
+        if (InputRegionPolicy != "fixed-region-v1")
             return "Observation only: visual-anchor tracking has not passed gameplay and hardware acceptance.";
         if (settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda)
             return "Observation only: experimental GPU preprocessing has not passed matching hardware acceptance. Existing CPU-preprocessing evidence cannot authorize it.";

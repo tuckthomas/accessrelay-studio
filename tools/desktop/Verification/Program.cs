@@ -3,6 +3,17 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using EliteScriptStudio.Desktop;
 
+if (args is ["--read-automatic-clip", var clipDirectory])
+{
+    using var dataset = new DesktopVisionDataset(clipDirectory);
+    using var snapshot = JsonDocument.Parse(JsonSerializer.Serialize(dataset.Snapshot(), DesktopJson.Options));
+    if (snapshot.RootElement.GetProperty("tracking").GetString() != "identity-pose-v1"
+        || snapshot.RootElement.GetProperty("frames")[0].GetProperty("tracking").GetProperty("keypoints").GetArrayLength() != 17
+        || dataset.ReadFrame("player", 0).Bytes[54] != 37) throw new InvalidDataException("Actual automatic recording did not round-trip through the desktop reader.");
+    Console.WriteLine("SUCCESS: completed native v4 recording read through the desktop dataset reader with exact pixels, identity and pose.");
+    return;
+}
+
 string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
 string directory = Path.Combine(root, "AccessRelayDesktopEvidence-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(directory);

@@ -129,7 +129,8 @@ internal sealed class DesktopVisionDataset : IDisposable
     private Region[] ValidateEvidence(long primaryLength)
     {
         bool sceneFirst = _session.CaptureEvidence?.Version == 2;
-        bool anchored = _session.CaptureEvidence?.Version == 3;
+        bool automatic = _session.CaptureEvidence?.Version == 4;
+        bool anchored = _session.CaptureEvidence?.Version is 3 or 4;
         var player = new Region("player", sceneFirst ? "Overview" : "Player", "frames.bgra", 256, 256);
         if (_session.CaptureEvidence is not { } evidence)
         {
@@ -137,8 +138,8 @@ internal sealed class DesktopVisionDataset : IDisposable
                 throw new InvalidDataException("Region frames have no matching evidence metadata.");
             return [player];
         }
-        if (evidence.Version is not (1 or 2 or 3) || evidence.Purpose is not ("meterSupervisedTraining" or "meterOffValidation")
-            || (sceneFirst && evidence.Tracking != "unannotated-scene") || (anchored && evidence.Tracking != "visual-anchors-v1"))
+        if (evidence.Version is not (1 or 2 or 3 or 4) || evidence.Purpose is not ("meterSupervisedTraining" or "meterOffValidation")
+            || (sceneFirst && evidence.Tracking != "unannotated-scene") || (anchored && evidence.Tracking != (automatic ? "identity-pose-v1" : "visual-anchors-v1")))
             throw new InvalidDataException("This clip's evidence format is not supported.");
         var scene = evidence.Streams?.FirstOrDefault(s => s?.Name == "scene");
         if ((sceneFirst || anchored) && (scene is null || scene.Width is < 1 or > 1280 || scene.Height is < 1 or > 1280))
@@ -178,6 +179,12 @@ internal sealed class DesktopVisionDataset : IDisposable
                     || observation.Court.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
                     throw new InvalidDataException("The clip contains malformed tracking geometry.");
             }
+            if (automatic && (frame.Tracking?.Identity is not { CaseSensitive: true } identity || identity.ExpectedTag.Length == 0
+                || identity.ExpectedTag != identity.ObservedTag || identity.VerifiedSequence < 0 || identity.VerifiedSequence > frame.Sequence
+                || !double.IsFinite(identity.Confidence) || identity.Confidence is < 0 or > 1
+                || frame.Tracking.Keypoints is not { Length: 17 } keypoints
+                || keypoints.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y) || !double.IsFinite(point.Confidence) || point.Confidence is < 0 or > 1)))
+                throw new InvalidDataException("The automatic clip lacks confirmed identity and pose evidence.");
             if (frame.Sequence < 0 || frame.Sequence <= sequence || frame.OffsetBytes != (long)index * player.ByteLength
                 || frame.Evidence is null || frame.Evidence.Length != expected.Count - 1)
                 throw new InvalidDataException("The evidence regions do not share a consistent frame sequence.");
@@ -207,7 +214,7 @@ internal sealed class DesktopVisionDataset : IDisposable
             if (shot is null || string.IsNullOrWhiteSpace(shot.ShotId) || shot.ShotId.Length > 80 || shot.ShotId.Any(char.IsControl)
                 || !ids.Add(shot.ShotId) || !shot.Reviewed || shot.StartTicks < first || shot.EndTicks > last || shot.EndTicks <= shot.StartTicks)
                 throw new InvalidDataException("Each interval needs a unique name, reviewed confirmation and valid start/end frames.");
-            if (_session.CaptureEvidence?.Version == 3 && !shot.PlayerRegionReviewed)
+            if (_session.CaptureEvidence?.Version is 3 or 4 && !shot.PlayerRegionReviewed)
                 throw new InvalidDataException("Review the complete player framing and overlay exclusion for this anchored interval.");
             if (shot.IsTargetShot && (!shot.PlayerIdentityConfirmed || shot.TargetReleaseTicks is not long target || target < shot.StartTicks || target > shot.EndTicks))
                 throw new InvalidDataException("A target shot needs confirmed player identity and a reviewed target phase inside the interval.");

@@ -8,7 +8,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.31.1" />
     <Compile Include="../../../games/nba2k27/src/Nba2K27ShotProfile.cs" Link="Core/Nba2K27ShotProfile.cs" />
-    <Compile Include="../../../games/nba2k27/src/Nba2K27CaptureConfiguration.cs;../../../games/nba2k27/src/Nba2K27RegionTracker.cs" />
+    <Compile Include="../../../games/nba2k27/src/Nba2K27AutomaticCapture.cs;../../../games/nba2k27/src/Nba2K27CaptureConfiguration.cs;../../../games/nba2k27/src/Nba2K27RegionTracker.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/CapturedVisionFrame.cs" Link="Vision/CapturedVisionFrame.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/LatestFrameBuffer.cs" Link="Vision/LatestFrameBuffer.cs" />
     <Compile Include="../../../src/AccessRelayStudio/Vision/FramePreprocessor.cs" Link="Vision/FramePreprocessor.cs" />

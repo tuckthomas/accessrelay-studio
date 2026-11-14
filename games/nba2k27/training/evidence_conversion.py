@@ -80,10 +80,11 @@ def validate_source(session, directory=None):
     profile, evidence = session.get("shotProfile"), session.get("captureEvidence")
     if isinstance(evidence, dict) and evidence.get("version") == 2:
         raise ValueError("Scene-first footage needs reviewed per-frame player/meter tracking before release-model conversion; a scene overview is not a player crop")
-    if not isinstance(profile, dict) or not isinstance(evidence, dict) or evidence.get("version") not in (1, 3):
+    if not isinstance(profile, dict) or not isinstance(evidence, dict) or evidence.get("version") not in (1, 3, 4):
         raise ValueError("Conversion requires original fixed-region or anchored evidence")
-    anchored = evidence["version"] == 3
-    if anchored and evidence.get("tracking") != "visual-anchors-v1":
+    automatic = evidence["version"] == 4
+    anchored = evidence["version"] in (3, 4)
+    if anchored and evidence.get("tracking") != ("identity-pose-v1" if automatic else "visual-anchors-v1"):
         raise ValueError("Anchored evidence has an unsupported region policy")
     purpose = evidence.get("purpose")
     if purpose not in ("meterSupervisedTraining", "meterOffValidation") or type(profile.get("usesShotMeter")) is not bool:
@@ -123,8 +124,8 @@ def validate_source(session, directory=None):
     if anchored:
         config = layout.get("pluginConfiguration")
         if (not isinstance(config, dict) or config.get("version") != 1 or config.get("camera") != profile["cameraView"]
-                or config.get("playerAnchor") != "torso-appearance-v1" or config.get("meterAnchor") != "player-relative-region-v1"
-                or config.get("courtAnchor") != "floor-homography-v1"):
+                or (automatic and (config.get("policy") != "gamertag-pose-v1" or not profile.get("gamertag") or config.get("gamertag") != profile["gamertag"] or config.get("meterOn") != profile["usesShotMeter"]))
+                or (not automatic and (config.get("playerAnchor") != "torso-appearance-v1" or config.get("meterAnchor") != "player-relative-region-v1" or config.get("courtAnchor") != "floor-homography-v1"))):
             raise ValueError("Missing recorded NBA anchor configuration")
         _, _, vw, vh = rectangle(scene)
         scale = min(1, 1280 / max(width * vw, height * vh))
@@ -165,8 +166,17 @@ def validate_source(session, directory=None):
             if type(confidence) not in (int, float) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
                 raise ValueError("Invalid anchor confidence")
             court = tracking.get("court")
-            if not isinstance(court, list) or len(court) != 4 or any(not isinstance(p, dict) or any(type(p.get(axis)) not in (int, float) or not math.isfinite(p[axis]) or not -.2 <= p[axis] <= 1.2 for axis in ("x", "y")) for p in court):
+            if not isinstance(court, list) or (not 3 <= len(court) <= 64 if automatic else len(court) != 4) or any(not isinstance(p, dict) or any(type(p.get(axis)) not in (int, float) or not math.isfinite(p[axis]) or not -.2 <= p[axis] <= 1.2 for axis in ("x", "y")) for p in court):
                 raise ValueError("Missing per-frame court projection")
+            if automatic:
+                identity, keypoints = tracking.get("identity"), tracking.get("keypoints")
+                if (not isinstance(identity, dict) or identity.get("expectedTag") != profile.get("gamertag")
+                        or identity.get("observedTag") != profile.get("gamertag") or identity.get("caseSensitive") is not True
+                        or type(identity.get("confidence")) not in (int, float) or not math.isfinite(identity["confidence"]) or not 0 <= identity["confidence"] <= 1
+                        or not 1 <= integer(identity.get("verifiedSequence"), "identity sequence", 1) <= sequence):
+                    raise ValueError("Automatic capture lost exact player identity")
+                if not isinstance(keypoints, list) or len(keypoints) != 17 or any(not isinstance(p, dict) or any(type(p.get(axis)) not in (int, float) or not math.isfinite(p[axis]) for axis in ("x", "y", "confidence")) or not 0 <= p["confidence"] <= 1 for p in keypoints):
+                    raise ValueError("Automatic capture lacks finite 17-joint pose evidence")
         if ticks <= previous or sequence <= previous_sequence: raise ValueError("Evidence frame times/sequences must increase")
         previous, previous_sequence = ticks, sequence
         if (frame.get("file"), frame.get("offsetBytes"), frame.get("byteLength")) != ("frames.bgra", index * 256 * 256 * 4, 256 * 256 * 4):
@@ -208,7 +218,7 @@ def validate_labels(labels, source):
         if (not isinstance(shot, dict) or not isinstance(shot.get("shotId"), str) or not shot["shotId"] or shot["shotId"] in identities
                 or shot.get("reviewed") is not True or type(shot.get("isTargetShot")) is not bool or type(shot.get("playerIdentityConfirmed")) is not bool):
             raise ValueError("Every shot needs unique identity, target status and explicit human review")
-        if source["captureEvidence"]["version"] == 3 and shot.get("playerRegionReviewed") is not True:
+        if source["captureEvidence"]["version"] in (3, 4) and shot.get("playerRegionReviewed") is not True:
             raise ValueError("Review player identity, complete body framing and overlay exclusion for every anchored interval")
         identities.add(shot["shotId"])
         start, end = integer(shot.get("startTicks"), "shot start"), integer(shot.get("endTicks"), "shot end")
@@ -228,9 +238,11 @@ def validate_mapping(source, student):
         if isinstance(first, str) and isinstance(second, str):
             first, second = unicodedata.normalize("NFC", first.strip()), unicodedata.normalize("NFC", second.strip())
         if first != second: raise ValueError("Teacher/student animation or camera mismatch: " + field)
-    if source["captureEvidence"]["version"] == 3:
-        if student["captureEvidence"]["version"] != 3 or source["captureEvidence"]["layout"]["gameBuild"] != student["captureEvidence"]["layout"]["gameBuild"]:
+    if source["captureEvidence"]["version"] in (3, 4):
+        if student["captureEvidence"]["version"] != source["captureEvidence"]["version"] or source["captureEvidence"]["layout"]["gameBuild"] != student["captureEvidence"]["layout"]["gameBuild"]:
             raise ValueError("Anchored teacher/student policy or game build differs")
+        if source["captureEvidence"]["version"] == 4 and source["shotProfile"].get("gamertag") != student["shotProfile"].get("gamertag"):
+            raise ValueError("Automatic teacher/student player identity differs")
         return
     if (source["captureWidth"], source["captureHeight"], source["crop"], source["captureEvidence"]["layout"]["gameBuild"]) != (student["captureWidth"], student["captureHeight"], student["crop"], student["captureEvidence"]["layout"]["gameBuild"]):
         raise ValueError("Teacher/student capture geometry or game build differs")
@@ -264,7 +276,7 @@ def verify_conversion(directory, session):
     paths = {key: child(directory, filename) for key, filename in FILES.items()}
     source, labels, student, review = [read_json(paths[key]) for key in FILES]
     expected_files = validate_source(source, directory); validate_source(student)
-    expected_policy = "tracked-player-roi-disjoint-overlay-v1" if source["captureEvidence"]["version"] == 3 else "player-roi-disjoint-overlay-v1"
+    expected_policy = "tracked-player-roi-disjoint-overlay-v1" if source["captureEvidence"]["version"] in (3, 4) else "player-roi-disjoint-overlay-v1"
     if conversion["pixelPolicy"] != expected_policy: raise ValueError("Converted pixel policy differs from acquisition")
     validate_mapping(source, student); validate_labels(labels, source)
     hashes = {"sourceSessionSha256": digest(paths["sourceMetadataFile"]), "labelsSha256": digest(paths["sourceLabelsFile"]), "studentReferenceSha256": digest(paths["studentReferenceFile"])}
@@ -306,7 +318,7 @@ def convert(source_directory, student_directory, review_file, destination, prefe
         for original, filename in [(source_path, FILES["sourceMetadataFile"]), (labels_path, FILES["sourceLabelsFile"]), (student_path, FILES["studentReferenceFile"]), (Path(review_file), FILES["reviewFile"]), (labels_path, "labels.json")]:
             shutil.copyfile(original, staging / filename)
         conversion = {"version": 1, "sourceSessionId": source["sessionId"], "studentReferenceSessionId": student["sessionId"],
-                      "pixelPolicy": "tracked-player-roi-disjoint-overlay-v1" if source["captureEvidence"]["version"] == 3 else "player-roi-disjoint-overlay-v1", "validationPassed": False, **FILES, **hashes,
+                      "pixelPolicy": "tracked-player-roi-disjoint-overlay-v1" if source["captureEvidence"]["version"] in (3, 4) else "player-roi-disjoint-overlay-v1", "validationPassed": False, **FILES, **hashes,
                       "reviewSha256": digest(review_file), "sourceDataSha256": data_hashes}
         metadata = converted_metadata(source, student, conversion)
         (staging / "session.json").write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n", encoding="utf-8")

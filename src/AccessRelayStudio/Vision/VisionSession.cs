@@ -11,7 +11,7 @@ internal readonly record struct VisionSessionStatus(bool Running, bool ModelRead
     int CaptureWidth = 0, int CaptureHeight = 0, long ExcludedTimingFrames = 0,
     bool ModelLoadFailed = false, bool SourceStale = false, bool CaptureFailed = false);
 
-internal sealed class VisionPreview(byte[] pixels, int width, int height, int stride, long sequence, long captureTicks = 0) : IDisposable
+internal sealed class VisionPreview(byte[] pixels, int width, int height, int stride, long sequence, long captureTicks = 0, VisionRegionObservation? tracking = null) : IDisposable
 {
     public byte[] Pixels { get; } = pixels;
     public int Width { get; } = width;
@@ -19,6 +19,7 @@ internal sealed class VisionPreview(byte[] pixels, int width, int height, int st
     public int Stride { get; } = stride;
     public long Sequence { get; } = sequence;
     public long CaptureTicks { get; } = captureTicks;
+    public VisionRegionObservation? Tracking { get; } = tracking;
     public int Length => checked(Stride * Height);
     public void Dispose() => ArrayPool<byte>.Shared.Return(Pixels);
 }
@@ -33,6 +34,7 @@ internal sealed class VisionSession : IDisposable
     private VisionModel? _model;
     private VisionTrainingRecorder? _recorder;
     private VisionRegionObservation? _tracking;
+    private IVisionRegionTracker? _regionTracker;
     internal VisionRegionObservation? Tracking => Volatile.Read(ref _tracking);
     private VisionSettings? _activeSettings;
     private bool _trainingInhibited, _stopping;
@@ -123,6 +125,7 @@ internal sealed class VisionSession : IDisposable
             _performanceMissBaseline = _runtime.VisionStatus.MissedDeadlines;
             _modelHash = null; _lastModelEvents = [];
             _preview?.Dispose(); _preview = null;
+            _regionTracker = regionTracker;
             _worker = new Thread(() => Run(hwnd, settings, cancellation, loadModel, regionTracker))
                 { IsBackground = true, Name = "AccessRelay vision" };
             try { _worker.Start(); }
@@ -272,7 +275,7 @@ internal sealed class VisionSession : IDisposable
                             // UI/Stop state lock while materializing CPU pixels.
                             var copy = ArrayPool<byte>.Shared.Rent(checked(frame.Stride * frame.Height));
                             VisionPreview? nextPreview = null;
-                            try { frame.Pixels.Span.CopyTo(copy); nextPreview = new(copy, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.CaptureTicks); }
+                            try { frame.Pixels.Span.CopyTo(copy); nextPreview = new(copy, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.CaptureTicks, regions); }
                             catch { ArrayPool<byte>.Shared.Return(copy); throw; }
                             lock (_gate)
                             {
@@ -333,6 +336,9 @@ internal sealed class VisionSession : IDisposable
             }
             try { model?.Dispose(); }
             catch (Exception error) { lock (_gate) _status = _status with { Message = "Model shutdown failed: " + error.Message }; }
+            try { regionTracker?.Dispose(); }
+            catch (Exception error) { lock (_gate) _status = _status with { Message = "Capture detector shutdown failed: " + error.Message }; }
+            finally { lock (_gate) _regionTracker = null; }
         }
     }
 
@@ -343,6 +349,7 @@ internal sealed class VisionSession : IDisposable
             _stopping = true;
             _stop?.Cancel();
             _model?.RequestStop();
+            _regionTracker?.RequestStop();
             _recorder?.Stop();
             _preview?.Dispose(); _preview = null;
             _status = _status with { CanArm = false, Message = "Stopping observation…" };
@@ -393,7 +400,7 @@ internal sealed class VisionSession : IDisposable
             if (_activeSettings.CameraView != profile.CameraView)
                 throw new InvalidOperationException("Restart observation using the selected camera view before recording.");
             profile.ValidateCapture(_activeSettings.TrainingCapture);
-            if (_activeSettings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored && Tracking is not { Valid: true })
+            if (_activeSettings.TrainingCapture.EvidenceMode is VisionEvidenceMode.Anchored or VisionEvidenceMode.Automatic && Tracking is not { Valid: true })
                 throw new InvalidOperationException(Tracking?.Message ?? "Start preview and acquire the NBA capture anchors before recording.");
             if (_status.CaptureWidth != _activeSettings.TrainingCapture.SourceWidth ||
                 _status.CaptureHeight != _activeSettings.TrainingCapture.SourceHeight)

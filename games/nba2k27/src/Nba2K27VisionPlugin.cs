@@ -30,6 +30,7 @@ internal sealed class Nba2K27VisionPlugin : IVisionGamePlugin, IGameControllerPl
     public IVisionCaptureProfile SaveProfile(JsonElement data, string expectedFingerprint)
     {
         var profile = data.Deserialize<Nba2K27ShotProfile>(Format) ?? throw new InvalidDataException("The shot setup is empty.");
+        profile = profile with { Gamertag = (profile.Gamertag ?? "").Trim().Normalize() };
         if (profile.Id == Guid.Empty) profile = profile with { Id = Guid.NewGuid() };
         profile.Validate();
         if (expectedFingerprint.Length != 0 && _profiles.Any(item => item.Id == profile.Id)

@@ -10,9 +10,9 @@ internal interface ITrainingCaptureProfile
 }
 
 internal enum VisionTrainingPurpose { MeterSupervisedTraining, MeterOffValidation }
-internal enum VisionEvidenceMode { FixedRegions, SceneFirst, Anchored }
+internal enum VisionEvidenceMode { FixedRegions, SceneFirst, Anchored, Automatic }
 
-/// <summary>Manually confirmed evidence regions, in normalized coordinates of the captured window.</summary>
+/// <summary>Reviewed automatic or manually configured evidence regions, in normalized coordinates of the captured window.</summary>
 internal sealed record VisionTrainingCaptureSettings
 {
     public bool Configured { get; init; }

@@ -159,7 +159,7 @@ internal sealed class VisionModel : IDisposable
 
     private static readonly object CudaPathGate = new();
     private static bool _localCudaPrepared;
-    private static void PrepareLocalCudaRuntime()
+    internal static void PrepareLocalCudaRuntime()
     {
         lock (CudaPathGate)
         {
@@ -179,7 +179,7 @@ internal sealed class VisionModel : IDisposable
         }
     }
 
-    private static SessionOptions CreateSessionOptions(VisionExecutionProvider provider)
+    internal static SessionOptions CreateSessionOptions(VisionExecutionProvider provider)
     {
         if (provider == VisionExecutionProvider.Cpu)
         {

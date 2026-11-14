@@ -70,7 +70,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
         _regions = profile.EvidenceRegions(settings).Select(r => new StoredRegion(r.Name, r.File, r.Width, r.Height, r.Crop)).ToArray();
         _bytesPerFrame = _regions.Sum(region => region.ByteLength);
         long productionByteLimit = settings.TrainingCapture.Configured
-            ? settings.TrainingCapture.EvidenceMode is VisionEvidenceMode.SceneFirst or VisionEvidenceMode.Anchored ? SceneEvidenceByteLimit : EvidenceByteLimit
+            ? settings.TrainingCapture.EvidenceMode is VisionEvidenceMode.SceneFirst or VisionEvidenceMode.Anchored or VisionEvidenceMode.Automatic ? SceneEvidenceByteLimit : EvidenceByteLimit
             : 512L * 1024 * 1024;
         _byteLimit = byteLimit ?? productionByteLimit;
         if (_byteLimit < _bytesPerFrame || _byteLimit > productionByteLimit)
@@ -106,8 +106,12 @@ internal sealed class VisionTrainingRecorder : IDisposable
         lock (_gate)
         {
             if (_finished) return;
-            if (_settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored && (tracking is not { Valid: true } || tracking.Sequence != frame.Sequence))
+            if (_settings.TrainingCapture.EvidenceMode is VisionEvidenceMode.Anchored or VisionEvidenceMode.Automatic && (tracking is not { Valid: true } || tracking.Sequence != frame.Sequence))
             { FinishLocked("Anchor tracking lost. Take is incomplete: " + (tracking?.Message ?? "No region observation arrived."), false); return; }
+            if (_settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic &&
+                (tracking?.Identity is not { CaseSensitive: true } identity || identity.ExpectedTag != identity.ObservedTag || identity.VerifiedSequence > frame.Sequence
+                    || tracking.Keypoints is not { Length: 17 } || tracking.Court.Length < 3))
+            { FinishLocked("Player identity, pose or court evidence was lost. Take is incomplete.", false); return; }
             if (Stopwatch.GetElapsedTime(_started) >= _durationLimit)
             { FinishLocked("Training take complete. Review and label the recorded frames before training.", true); return; }
             if (_settings.TrainingCapture.Configured && (frame.Width != _settings.TrainingCapture.SourceWidth ||
@@ -249,9 +253,9 @@ internal sealed class VisionTrainingRecorder : IDisposable
             timingScope = "captureTicks marks local WGC frame receipt before image copies. compositorTicks preserves WGC metadata separately and can lead receipt. Original Xbox render time is not measured.",
             captureEvidence = _settings.TrainingCapture.Configured ? new
             {
-                version = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored ? 3 : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? 2 : 1,
+                version = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? 4 : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored ? 3 : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? 2 : 1,
                 purpose = _settings.TrainingCapture.Purpose, layout = _settings.TrainingCapture,
-                tracking = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored ? "visual-anchors-v1" : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? "unannotated-scene" : "fixed-region",
+                tracking = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? "identity-pose-v1" : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored ? "visual-anchors-v1" : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? "unannotated-scene" : "fixed-region",
                 streams = _regions.Select(region => new { region.Name, region.File, region.Width, region.Height,
                     stride = region.Width * 4, pixelFormat = "BGRA8", region.Crop }),
                 controllerTraceFile = _controllerTrace is not null ? "controller-trace.json" : null,
@@ -259,7 +263,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
                 controllerSamples = _controllerTrace?.StoredSamples ?? 0,
                 droppedControllerSamples = _controllerTrace?.DroppedSamples ?? 0,
                 maximumVisualBytes = _byteLimit,
-                labelStatus = "Raw synchronized evidence only. Meter, tempo, contest and feedback labels still require extraction and review. The current trainer does not consume enriched evidence.",
+                labelStatus = "Raw synchronized evidence only. Meter, tempo, contest and feedback labels still require extraction and review. The trainer consumes reviewed, integrity-bound converted player crops; pose and HUD streams are retained for audit and future supervision.",
                 shotTokenScope = "Diagnostic arbiter token, normally zero while manual training disarms assistance; not a gameplay shot identifier."
             } : null
         };

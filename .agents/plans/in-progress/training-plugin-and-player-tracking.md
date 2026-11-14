@@ -3,6 +3,45 @@
 Requested 2026-11-13. This supplements the platform roadmap; it does not mark the
 NBA model or physical validation complete.
 
+## Requirement correction: automatic acquisition (beta.19)
+
+The beta.18 manual player/meter/court calibration did **not** satisfy automatic
+capture-area acquisition. Its appearance confidence was not an identity guarantee;
+a confident match could switch to another player. The torso tracker did not
+recognize shot types or green-window timing. Earlier completion language must not
+be interpreted as acceptance of those requirements.
+
+- [x] Add native pretrained RTMO-t body/17-joint detection and English PaddleOCR
+      detection/recognition, with hash-pinned model assets on M:.
+- [x] Add the exact displayed gamertag to the NBA profile. Acquire through two
+      observations, case-sensitive OCR/body-foot association, periodic identity
+      checks and ambiguity rejection. Initial player boxes are not required.
+- [x] Detect capture areas and present an image for review. Keep manual setup as
+      an explicit advanced alternative. Model/body detection is separate from
+      meter-component and floor-color estimates; those are not trained NBA models.
+- [x] Store identity, joints, body/crop, meter visibility/search area, court estimate
+      and capture backend in version-4 evidence. Keep the full scene and actual
+      controller trace. Reject missing/mismatched identity/pose in conversion.
+- [x] Use an ordered 16-frame/50 ms temporal RGB model in the training workflow.
+      Pose evidence is recorded for review; that network currently consumes RGB,
+      not pose vectors, and does not output an explicit shot-type class.
+- [x] Run native CPU/CUDA pose and OCR on upstream/synthetic reference images;
+      test exact-case matching and ambiguous-body rejection. Train/export/evaluate
+      actual code on synthetic v4 data with the new temporal history. These checks
+      establish software execution, not gameplay recognition or timing accuracy.
+- [ ] Verify automatic identity, pose, meter, feedback and floor proposals on the
+      user's actual moving NBA gameplay, including similar jerseys and occlusion.
+- [ ] Collect reviewed meter-on attempts, distinct meter-off reference/validation,
+      shot-type/contest coverage and independent target-phase evidence. Fit and
+      validate the release model. No trained user timing model exists yet.
+- [ ] Validate timing/coverage separately for stationary, catch-and-shoot,
+      off-dribble, fade/leaner and contested attempts, then held-out/hardware timing.
+
+The native CUDA acquisition policy permits ORT CPU shape/NMS operators and records
+that policy. It does not relax release-model acceptance. Automatic proposals remain
+observation-only. Incorrect/missing detection is a failed acquisition to investigate,
+not permission to silently use a fixed box or call training complete.
+
 ## Plugin boundary
 
 - [x] Separate Marketplace types: game scripts, controller profiles, game plugins,
@@ -46,7 +85,7 @@ NBA model or physical validation complete.
       the calibrated region; it is not an implemented meter-outline/fill detector.
 - [x] Persist per-frame crops, court projection, confidence, sequence, failure
       reason, raw controller trajectory and timestamps in version-3 evidence.
-      Stop incomplete on identity loss rather than switching to another player.
+      Stop incomplete on low/ambiguous match scores; this legacy appearance prototype cannot guarantee identity.
 - [x] Review tracked framing/overlay exclusion and target phases. Retain original
       evidence and hash-bound conversion records. Reject meter/feedback leakage
       into player-model crops. Scene-first version-2 data is still not player data.
@@ -124,3 +163,15 @@ reported an interface failure; one Retry recovered it and subsequent navigation
 succeeded. The cause is unconfirmed. Installation receipt:
 `artifacts/AnchorSmoke/installation.json`. No gameplay reference calibration or
 user take was recorded during this installation check.
+
+
+Beta.19 software evidence: native CPU and CUDA RTMO/PaddleOCR execution passed on
+upstream/synthetic reference images, including exact-case OCR. Focused UI checks
+passed 15 cases; conversion checks passed 5 cases. Automatic identity association
+and ambiguity checks passed. The actual native recorder produced a completed
+synthetic v4 take, read through the desktop dataset reader with matching pixels and
+17 joints. The real optimization/export/evaluation workflow ran on synthetic v4
+footage using ordered 16-frame history. The synthetic candidate remains outside
+the user's model library. Evidence: `artifacts/AutoCaptureModels`,
+`artifacts/AutoCaptureRecorder` and `artifacts/AutoCaptureWorkflow`.
+Actual NBA gameplay acquisition and user-model timing remain unverified.

@@ -60,7 +60,37 @@ internal static class TrainingPluginChecks
         Check(scene[0] == 0 && scene[63 * 4] == 63 && scene[64 * 4] == 1 && scene[127 * 4] == 64,
             "Full scene or synchronized frame pixels were lost.");
         AnchoredRoundTrip(root, profile);
+        AutomaticRoundTrip(root, profile);
         Console.WriteLine($"SUCCESS: installation gating, unsupported-adapter rejection, scene geometry, persistence and actual scene writer. Evidence: {root}");
+    }
+    private static void AutomaticRoundTrip(string root, Nba2K27ShotProfile initial)
+    {
+        var profile = initial with { Gamertag = "DrakulaVlad2" };
+        var configuration = new Nba2K27AutomaticCapture { Gamertag = profile.Gamertag, MeterOn = true, Feedback = new(.7, .02, .2, .1), RelativeMeter = new(1.5, 0, .2, .4) };
+        var settings = VisionSettings.Default with { Crop = new(.2, .2, .2, .4), TrainingCapture = new() { Configured = true,
+            SourceWidth = 64, SourceHeight = 64, EvidenceMode = VisionEvidenceMode.Automatic, GameBuild = "synthetic-build",
+            MeterRegion = new(.6, .2, .05, .3), FeedbackRegion = configuration.Feedback,
+            PluginConfiguration = JsonSerializer.SerializeToElement(configuration, Nba2K27CaptureConfiguration.Json) } };
+        using var recorder = new VisionTrainingRecorder(root, profile, settings, "Synthetic automatic regions");
+        var pixels = new byte[64 * 64 * 4];
+        for (int i = 0; i < pixels.Length; i += 4) { pixels[i] = 37; pixels[i + 3] = 255; }
+        for (int i = 1; i <= 2; i++)
+        {
+            using var frame = new CapturedVisionFrame(pixels, 64, 64, Stopwatch.GetTimestamp(), i, 1, () => { });
+            var observation = new VisionRegionObservation(i, true, settings.Crop, settings.TrainingCapture.MeterRegion,
+                [new(.01, .4), new(.99, .4), new(.99, .99), new(.01, .99)], .95, "Synthetic automatic identity",
+                new(profile.Gamertag, profile.Gamertag, true, .98, i), Enumerable.Repeat(new VisionKeypoint(.3, .4, .9), 17).ToArray(),
+                configuration.Feedback, true, .9, true, settings.Crop, "synthetic");
+            recorder.Capture(frame, default, observation);
+        }
+        recorder.Stop(complete: true); recorder.Dispose();
+        Check(recorder.Snapshot.IsComplete && recorder.Snapshot.StoredFrames == 2, "Automatic recorder failed to finish a valid take.");
+        File.WriteAllText(Path.Combine(root, "automatic-clip-path.txt"), recorder.DirectoryPath);
+        using var metadata = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "session.json")));
+        Check(metadata.RootElement.GetProperty("captureEvidence").GetProperty("version").GetInt32() == 4
+            && metadata.RootElement.GetProperty("frames")[0].GetProperty("tracking").GetProperty("keypoints").GetArrayLength() == 17,
+            "Version-4 identity/pose metadata was not recorded.");
+        Console.WriteLine("SUCCESS: actual version-4 recorder stored exact identity and 17 joints; synthetic take path: " + recorder.DirectoryPath);
     }
     private static void AnchoredRoundTrip(string root, Nba2K27ShotProfile profile)
     {

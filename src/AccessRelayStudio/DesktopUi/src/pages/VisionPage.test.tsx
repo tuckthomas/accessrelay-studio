@@ -9,7 +9,7 @@ afterEach(cleanup);
 const all = { left: 0, top: 0, width: 1, height: 1 };
 const profile = { id: '4b904b4a-c48f-46e6-aa49-cd09637f2c9b', name: 'Stretch Big', heightInches: 78, threePointRating: 84,
   base: 'Current base', upperRelease1: 'Current upper one', upperRelease2: 'Current upper two', usesShotMeter: true,
-  meterReleaseType: 'Reviewed cue', shotSpeed: 4, release1Percent: 50, cameraView: '2K' };
+  meterReleaseType: 'Reviewed cue', gamertag: 'DrakulaVlad2', shotSpeed: 4, release1Percent: 50, cameraView: '2K' };
 function fixture(overrides: any = {}) {
   return { plugins: [{ id: 'nba2k27', name: 'NBA 2K27' }], selectedPluginId: 'nba2k27', profiles: [profile], selectedProfile: profile, selectedFingerprint: 'native-profile-fingerprint',
     sources: [{ id: 'window-one', title: 'Xbox Remote Play', processId: 100 }, { id: 'window-two', title: 'Another Remote Play window', processId: 200 }],
@@ -62,8 +62,8 @@ describe('vision workflows', () => {
     const record = screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement;
     expect(record.closest('.vision-preview-head')).toBeTruthy();
     expect(record.disabled).toBe(true);
-    expect(record.getAttribute('title')).toBe('Configure the NBA capture anchors before recording.');
-    expect(document.getElementById(record.getAttribute('aria-describedby')!)?.textContent).toBe('Configure the NBA capture anchors before recording.');
+    expect(record.getAttribute('title')).toBe('Detect the NBA capture areas before recording.');
+    expect(document.getElementById(record.getAttribute('aria-describedby')!)?.textContent).toBe('Detect the NBA capture areas before recording.');
     view.rerender(<VisionPage mode="training" state={state} status={{ session: { running: true }, busy: true,
       training: { hasTake: true, isRecording: true, isFinalized: false, storedFrames: 42 } }} command={command} />);
     const stop = screen.getByRole('button', { name: 'Stop training clip recording' }) as HTMLButtonElement;
@@ -80,7 +80,7 @@ describe('vision workflows', () => {
     view.rerender(<VisionPage mode="training" state={{ ...state, selectedSourceId: 'window-two', settings: { ...state.settings,
       trainingCapture: { ...state.settings.trainingCapture, configured: false } } }} status={state.status} command={command} />);
     expect((screen.getByRole('button', { name: 'Record a clip' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Configure capture anchors' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Open manual setup' }) as HTMLButtonElement).disabled).toBe(false);
     expect(command.mock.calls.some(([action]) => ['start', 'recordStart', 'connectOutput', 'armedSet'].includes(action))).toBe(false);
   });
 
@@ -94,7 +94,7 @@ describe('vision workflows', () => {
   });
 
   it('immediately reflects a closed source and invalidated layout from status without waiting for a full snapshot', () => {
-    const state = fixture(); state.settings.trainingCapture.configured = true;
+    const state = fixture(); state.settings.trainingCapture.configured = true; state.settings.trainingCapture.evidenceMode = 'automatic';
     const command = vi.fn().mockResolvedValue(null);
     const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
     expect((screen.getByRole('button', { name: 'Record training clip' }) as HTMLButtonElement).disabled).toBe(false);
@@ -131,7 +131,8 @@ describe('vision workflows', () => {
       sourceHeight: 1440, player: all, layout: state.settings.trainingCapture };
     const command = vi.fn(async (action: string) => action === 'freeze' ? frozen : null);
     render(<VisionPage mode="training" state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Configure capture anchors' }));
+    fireEvent.click(screen.getByText('Manual capture setup'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open manual setup' }));
     const dialog = await screen.findByRole('dialog', { name: 'Choose what your clip keeps' });
     const save = within(dialog).getByRole('button', { name: 'Save capture areas' }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
@@ -162,7 +163,8 @@ describe('vision workflows', () => {
       sourceWidth: 2560, sourceHeight: 1440, player: all, layout: state.settings.trainingCapture };
     const command = vi.fn(async (action: string) => action === 'freeze' ? frozen : null);
     const view = render(<VisionPage mode="training" state={state} status={null} command={command} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Configure capture anchors' }));
+    fireEvent.click(screen.getByText('Manual capture setup'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open manual setup' }));
     const editor = await screen.findByRole('dialog', { name: 'Choose what your clip keeps' });
     fireEvent.change(within(editor).getByRole('textbox', { name: 'HUD layout name' }), { target: { value: '  My unfinished HUD  ' } });
     fireEvent.click(within(editor).getByText('Keyboard / precise coordinates'));
@@ -176,6 +178,23 @@ describe('vision workflows', () => {
     expect(within(editor).getByText('1 of 5 areas marked')).toBeTruthy();
     expect(hasUnsavedChanges()).toBe(true);
     expect(command).toHaveBeenCalledTimes(1);
+  });
+
+  it('detects capture areas without manual drawing and requires review before using the proposal', async () => {
+    const state = fixture(), layout = { ...state.settings.trainingCapture, configured: true, evidenceMode: 'automatic', pluginConfiguration: { version: 1, policy: 'gamertag-pose-v1', gamertag: profile.gamertag, camera: '2K', meterOn: true } };
+    const frozen = { automatic: true, token: 'automatic-proposal', url: 'https://media.accessrelay.test/vision/frozen/automatic-proposal', sourceWidth: 2560, sourceHeight: 1440, player: all, layout,
+      tracking: { valid: true, player: all, court: [], identity: { expectedTag: profile.gamertag }, keypoints: [] } };
+    const command = vi.fn(async (action: string) => action === 'detectAreas' ? frozen : null);
+    render(<VisionPage mode="training" state={state} status={null} command={command} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Detect capture areas' }));
+    expect(command).toHaveBeenCalledWith('detectAreas', undefined);
+    const dialog = await screen.findByRole('dialog', { name: 'Review detected capture areas' });
+    const use = within(dialog).getByRole('button', { name: 'Use detected areas' }) as HTMLButtonElement;
+    expect(use.disabled).toBe(true);
+    expect(within(dialog).queryByRole('button', { name: 'Mark Player anchor area' })).toBeNull();
+    fireEvent.click(within(dialog).getByLabelText('The detected player and capture areas are correct.'));
+    fireEvent.click(use);
+    await waitFor(() => expect(command).toHaveBeenCalledWith('layoutSave', { token: 'automatic-proposal', layout, player: all }));
   });
 
   it('keeps unapplied analysis changes through native status refreshes and disallows unvalidated arming', () => {

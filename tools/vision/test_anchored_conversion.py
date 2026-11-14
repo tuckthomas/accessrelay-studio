@@ -62,4 +62,26 @@ class AnchoredConversionTests(unittest.TestCase):
             with self.assertRaises(ValueError): validate_source(invalid)
 
 
+class AutomaticConversionTests(AnchoredConversionTests):
+    def setUp(self):
+        super().setUp()
+        for directory in (self.fixture.teacher, self.fixture.student):
+            session = read_json(directory / 'session.json')
+            session['shotProfile']['gamertag'] = 'DrakulaVlad2'
+            evidence = session['captureEvidence']; evidence.update(version=4, tracking='identity-pose-v1')
+            evidence['layout']['pluginConfiguration'] = dict(version=1, policy='gamertag-pose-v1', camera='2K', gamertag='DrakulaVlad2', meterOn=session['shotProfile']['usesShotMeter'])
+            for frame in session['frames']:
+                frame['tracking']['identity'] = dict(expectedTag='DrakulaVlad2', observedTag='DrakulaVlad2', caseSensitive=True, confidence=.98, verifiedSequence=frame['sequence'])
+                frame['tracking']['keypoints'] = [dict(x=.2, y=.3, confidence=.9) for _ in range(17)]
+            fixtures.EvidenceConversionTests.write(directory / 'session.json', session)
+        self.fixture.review.unlink(); self.fixture.approve(self.fixture.teacher, self.fixture.student, self.fixture.review)
+
+    def test_changed_case_or_missing_pose_cannot_enter_training(self):
+        source = read_json(self.fixture.teacher / 'session.json')
+        for change in (lambda frame: frame['tracking']['identity'].update(observedTag='drakulavlad2'),
+                       lambda frame: frame['tracking'].update(keypoints=[])):
+            invalid = copy.deepcopy(source); change(invalid['frames'][0])
+            with self.assertRaises(ValueError): validate_source(invalid)
+
+
 if __name__ == "__main__": unittest.main()

@@ -49,3 +49,29 @@ configuration reference, then runs the existing trainer/exporter/evaluator. A lo
 Python environment is needed only for offline work. Live analysis uses the native
 C# pipeline; visual-anchor candidates cannot arm automatic release before gameplay
 and hardware acceptance. No trained user model or bundled model weights are claimed.
+
+
+## Automatic acquisition (beta.19)
+
+`Nba2K27AutomaticCapture.cs` owns exact-gamertag/body association, body/joint-based
+regions, meter component proposals, floor estimates and fixed feedback detection.
+The host provides generic native ONNX pose/OCR inference. `Detect capture areas`
+acquires a reviewable proposal without drawing initial player/meter/court boxes.
+The displayed gamertag belongs to the saved NBA profile and matching is case
+sensitive. Two identity observations, periodic rechecks and ambiguity rejection
+replace jersey appearance as the automatic acquisition identity source.
+
+Run `scripts/Install-NbaCaptureModels.ps1` when installing this beta; see
+`docs/capture-models.md` for sources, hashes and notices. Weights are project-local,
+ignored files. Live capture uses no Python service. Version-4 recordings preserve
+17 joints, exact-tag evidence, meter visibility, floor estimate, source sequences
+and the capture backend. Bounded acquisition diagnostics go to the configured
+model-output directory; they are not reviewed training takes or exposed via MCP.
+
+The offline release network now uses ordered RGB history (16 frames, 50 ms spacing).
+It can be trained on reviewed movement examples; the acquisition pose network is
+not itself a shot-type classifier or green-window predictor. No trained NBA 2K27
+release weights are supplied. Meter/floor proposals and gameplay pose/identity
+accuracy still require actual-game validation, followed by diverse shot/contest
+training and held-out timing checks. The old manual calibration remains available
+as an explicitly selected alternative, rather than the automatic setup path.

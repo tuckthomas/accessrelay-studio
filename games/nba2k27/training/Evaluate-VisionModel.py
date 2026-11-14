@@ -157,7 +157,7 @@ def main() -> int:
     target_shots, negative_shots, accepted_targets, false_releases = 0, 0, 0, 0
     errors = []
     capture_configuration = None
-    tracked_inputs = manifest.get("inputRegionPolicy") == "visual-anchors-v1"
+    tracked_inputs = manifest.get("inputRegionPolicy") in ("visual-anchors-v1", "identity-pose-v1")
     for directory, recording in sessions:
         configuration = (recording["captureWidth"], recording["captureHeight"], recording["crop"])
         if not tracked_inputs and capture_configuration is not None and configuration != capture_configuration:

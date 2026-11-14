@@ -13,7 +13,10 @@ internal interface IVisionCaptureProfile : ITrainingCaptureProfile
     object ExportProfile();
     void ValidateCapture(VisionTrainingCaptureSettings settings);
     IReadOnlyList<VisionEvidenceRegion> EvidenceRegions(VisionSettings settings);
-    IVisionRegionTracker? CreateRegionTracker(VisionSettings settings) => null;
+    IVisionRegionTracker? CreateRegionTracker(VisionSettings settings, Func<VisionCaptureModelSet, IVisionAnalysisModels>? models = null) => null;
+    VisionSettings PrepareAutomaticCapture(VisionSettings settings) => throw new NotSupportedException("This plugin does not provide automatic capture acquisition.");
+    VisionSettings CompleteAutomaticCapture(VisionSettings settings, VisionRegionObservation observation, int width, int height) =>
+        throw new NotSupportedException("This plugin does not provide automatic capture acquisition.");
     VisionTrainingCaptureSettings ConfigureCapture(VisionTrainingCaptureSettings settings, ReadOnlySpan<byte> referenceBitmap) => settings;
     bool ReferenceTriggered(ControllerState input) => false;
     int ReferenceDelayMs => 0;

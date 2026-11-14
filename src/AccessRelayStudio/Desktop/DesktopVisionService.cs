@@ -10,8 +10,8 @@ namespace EliteScriptStudio.Desktop;
 /// <summary>Desktop presentation adapter. Capture, inference and controller arbitration remain in their native workers.</summary>
 internal sealed class DesktopVisionService : IDesktopModule
 {
-    private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt, long SourceCaptureTicks);
-    private sealed record FrozenImage(string Token, PreviewImage Image, string SourceId, Guid ProfileId, string Fingerprint, VisionSettings Settings);
+    private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt, long SourceCaptureTicks, VisionRegionObservation? Tracking);
+    private sealed record FrozenImage(string Token, PreviewImage Image, string SourceId, Guid ProfileId, string Fingerprint, VisionSettings Settings, VisionSettings? PreviousSettings = null);
     private sealed record CalibrationProposal(string Token, VisionCalibrationImport Import, VisionCalibrationEstimate Estimate,
         VisionSettings Settings, string ManifestHash, VisionModelManifest Manifest, string SourceId, int Width, int Height);
     private readonly WindowId _owner;
@@ -103,7 +103,7 @@ internal sealed class DesktopVisionService : IDesktopModule
             selectedSourceId = _selectedSourceId, captureLayoutConfirmed = _settings.TrainingCapture.Configured,
             stopping = _session?.IsStopping == true, output = _runtime()?.VisionStatus,
             training = _session?.TrainingSnapshot, performance = _performance, comparison,
-            tracking = _session?.Tracking,
+            tracking = preview?.Tracking ?? _session?.Tracking,
             trainingJob = _trainingJob.Snapshot,
             preview = preview is null ? null : new { url = "https://media.accessrelay.test/vision/preview?v=" + preview.Sequence,
                 sequence = preview.Sequence, sourceWidth = preview.SourceWidth, sourceHeight = preview.SourceHeight }
@@ -262,6 +262,14 @@ internal sealed class DesktopVisionService : IDesktopModule
                     if (_runtime()?.SetVisionArmed(armed) != true && armed)
                         throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
                     return null;
+                case "detectAreas": return await DetectAreasAsync(version, cancellation);
+                case "layoutCancel":
+                {
+                    FrozenImage? frozen; lock (_mediaGate) { frozen = _frozen; _frozen = null; }
+                    if (frozen is { PreviousSettings: { } previous } && frozen.Settings == _settings && frozen.SourceId == _selectedSourceId && frozen.ProfileId == _profile?.Id)
+                    { _settings = previous; SaveSettings(); }
+                    return null;
+                }
                 case "freeze": return await FreezeAsync(version, cancellation, args.Flag("nextShot"));
                 case "layoutSave": SaveLayout(args); await RefreshModelsAsync(); return null;
                 case "recordStart": return await RecordAsync(version, cancellation);
@@ -358,8 +366,9 @@ internal sealed class DesktopVisionService : IDesktopModule
             if (_profile is null) throw new InvalidOperationException("Choose a game plugin profile before starting analysis.");
             if (_settings.ModelManifestPath.Length == 0) throw new InvalidOperationException("Choose a model before starting analysis.");
             var (manifest, _) = VisionModelManifest.Read(_settings.ModelManifestPath);
-            bool anchored = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored;
-            if (anchored != (manifest.InputRegionPolicy == "visual-anchors-v1")) throw new InvalidDataException("The model's input-region policy differs from the configured capture anchors.");
+            bool anchored = _settings.TrainingCapture.EvidenceMode is VisionEvidenceMode.Anchored or VisionEvidenceMode.Automatic;
+            string regionPolicy = _settings.TrainingCapture.EvidenceMode switch { VisionEvidenceMode.Automatic => "identity-pose-v1", VisionEvidenceMode.Anchored => "visual-anchors-v1", _ => "fixed-region-v1" };
+            if (manifest.InputRegionPolicy != regionPolicy) throw new InvalidDataException("The model's input-region policy differs from the configured capture anchors.");
             if (anchored && !_settings.TrainingCapture.Configured) throw new InvalidOperationException("Acquire the capture anchors before starting the tracked model.");
             if (anchored && _settings.PreprocessingBackend != VisionPreprocessingBackend.Cpu)
                 throw new InvalidOperationException("Tracked crops currently require CPU image preparation. CUDA model inference remains available.");
@@ -368,7 +377,8 @@ internal sealed class DesktopVisionService : IDesktopModule
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
-        _session.Start(source.Hwnd, _settings, loadModel, _profile?.CreateRegionTracker(_settings)); _lastObservedSourceId = _selectedSourceId;
+        var captureProvider = _settings.ExecutionProvider;
+        _session.Start(source.Hwnd, _settings, loadModel, _profile?.CreateRegionTracker(_settings, models => new VisionAnalysisModels(models, captureProvider))); _lastObservedSourceId = _selectedSourceId;
         _notice = loadModel && _settings.ModelManifestPath.Length != 0
             ? "Preparing live analysis. Assistance remains disarmed until you arm it."
             : "Preview is live. Frames are not being saved.";
@@ -388,13 +398,62 @@ internal sealed class DesktopVisionService : IDesktopModule
                     var media = DesktopVisionBitmap.Encode(preview.Pixels, preview.Width, preview.Height, preview.Stride);
                     lock (_mediaGate)
                         if (!_disposed && version == _version)
-                            Volatile.Write(ref _preview, new(media, preview.Sequence, preview.Width, preview.Height, Stopwatch.GetTimestamp(), preview.CaptureTicks));
+                            Volatile.Write(ref _preview, new(media, preview.Sequence, preview.Width, preview.Height, Stopwatch.GetTimestamp(), preview.CaptureTicks, preview.Tracking));
                 }
                 finally { Interlocked.Exchange(ref _encodingPreview, 0); }
             }
         });
     }
     private void ClearPreview() { lock (_mediaGate) { Volatile.Write(ref _preview, null); _frozen = null; } }
+    private async Task<object> DetectAreasAsync(int version, CancellationToken cancellation)
+    {
+        RequireStopped(); var profile = _profile ?? throw new InvalidOperationException("Choose a shot profile with your displayed gamertag.");
+        if (!Path.IsPathFullyQualified(_trainingJob.Configuration.WorkspaceRoot)) throw new InvalidOperationException("Choose the model output folder before detecting capture areas.");
+        var previous = _settings; bool proposed = false;
+        _settings = profile.PrepareAutomaticCapture(_settings); var acquisitionSettings = _settings;
+        string diagnostics = Path.Combine(_trainingJob.Configuration.WorkspaceRoot, "acquisition-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
+        var savedPhases = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            Start(loadModel: false); _session!.SetPreviewEnabled(true);
+            _notice = "Return to gameplay and take one manual shot. Detecting your gamertag, pose, meter, court and shot feedback.";
+            long began = Stopwatch.GetTimestamp(); PreviewImage? image;
+            while (true)
+            {
+                CheckOperation(version, cancellation); _session.SetPreviewEnabled(true); UpdatePreview(force: true);
+                image = Volatile.Read(ref _preview);
+                if (image?.Tracking is { } snapshot)
+                {
+                    string phase = snapshot.AcquisitionComplete ? "complete" : snapshot.Feedback is not null ? "feedback" : snapshot.MeterDetected ? "meter" : snapshot.Valid ? "identity" : "acquiring";
+                    if (savedPhases.Add(phase))
+                        await Task.Run(() => { Directory.CreateDirectory(diagnostics);
+                            File.WriteAllBytes(Path.Combine(diagnostics, phase + ".bmp"), image.Media.Bytes);
+                            File.WriteAllBytes(Path.Combine(diagnostics, phase + ".json"), JsonSerializer.SerializeToUtf8Bytes(snapshot, DesktopJson.Options)); }, cancellation);
+                }
+                if (image?.Tracking is { Valid: true, AcquisitionComplete: true } && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1) break;
+                if (_session.Status.CaptureFailed) throw new InvalidOperationException(_session.Status.Message);
+                if (Stopwatch.GetElapsedTime(began).TotalSeconds >= 23)
+                    throw new InvalidOperationException("Capture areas were not all detected. " + (_session.Tracking?.Message ?? "Keep the game visible and the configured gamertag displayed."));
+                await Task.Delay(40, cancellation);
+            }
+            _session.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
+            var proposal = profile.CompleteAutomaticCapture(_settings, image.Tracking!, image.SourceWidth, image.SourceHeight);
+            var frozen = new FrozenImage(Guid.NewGuid().ToString("N"), image, _selectedSourceId, profile.Id, profile.ConfigurationFingerprint, _settings, previous);
+            lock (_mediaGate) _frozen = frozen;
+            proposed = true; _notice = "Review the detected player, meter, court and feedback areas.";
+            return new { automatic = true, token = frozen.Token, url = "https://media.accessrelay.test/vision/frozen/" + frozen.Token,
+                sourceWidth = image.SourceWidth, sourceHeight = image.SourceHeight, sequence = image.Sequence,
+                player = proposal.Crop, layout = proposal.TrainingCapture, tracking = image.Tracking };
+        }
+        finally
+        {
+            if (!proposed)
+            {
+                _session?.Stop(); await WaitStoppedAsync(CancellationToken.None);
+                if (_settings == acquisitionSettings && _profile?.Id == profile.Id) { _settings = previous; SaveSettings(); }
+            }
+        }
+    }
     private async Task<object> FreezeAsync(int version, CancellationToken cancellation, bool nextShot = false)
     {
         if (_profile is null) throw new InvalidOperationException("Choose a game plugin profile before marking training areas.");

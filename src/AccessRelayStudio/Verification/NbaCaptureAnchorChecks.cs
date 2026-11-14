@@ -5,6 +5,7 @@ internal static class NbaCaptureAnchorChecks
 {
     internal static void Run()
     {
+        AutomaticIdentityChecks.Run();
         const int width = 320, height = 180;
         var random = new Random(42); var floor = new byte[width * height]; random.NextBytes(floor);
         var player = new VisionCrop(.4, .45, .12, .32);
