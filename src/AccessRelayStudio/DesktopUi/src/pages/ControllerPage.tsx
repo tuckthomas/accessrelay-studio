@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesignPreview } from '../api';
 import { CoPilotInput } from '../CoPilotInput';
-import { ProfilePicker, TimingFields, FlickDirectionFields } from '../ui';
-import { recordingPhases, recordingFlickDirection, hasRecordingAxis, phaseDuration, retimeRecording, type RecordingPhase, type FlickDirection } from '../recording-timing';
-import { sequenceTimingFields } from '../sequence-timing';
+import { ProfilePicker } from '../ui';
 import { GamePacks } from '../GamePacks';
-import { useGameControllerTuning } from '../game-plugins/registry';
 import { currentTheme, themeChanged } from '../theme';
-import { Select, SelectOption, Input, Slider, Checkbox, Textarea, ActionMenu, ActionMenuItem, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
+import { Select, SelectOption, Input, Slider, Checkbox, Textarea, Badge, Button, Card, ConfirmDialog, DiscardDialog, EmptyState, Field, Icon, Meter, Modal, Notice, SectionHeader, Tabs, Toggle, formatDuration, formatMs, hasUnsavedChanges, humanize, useUnsavedChanges, type PageProps } from '../ui';
 
-const INITIAL_TIMING = { startDelay: 0, downSweep: 0, downHold: 512, upSweep: 80, upHold: 48, centerHold: 120, flick: 64, settle: 240, flickX: 0, flickY: -32767 };
 const controlGlyph = (control: string) => ({ a: 'A', b: 'B', x: 'X', y: 'Y', leftBumper: 'LB', rightBumper: 'RB',
   leftTrigger: 'LT', rightTrigger: 'RT', leftStick: 'LS', rightStick: 'RS', smallLeft: 'P1', smallRight: 'P2', largeLeft: 'P3', largeRight: 'P4',
   dPadUp: '↑', dPadDown: '↓', dPadLeft: '←', dPadRight: '→', menu: 'M', view: 'V' } as Record<string, string>)[control] || control.slice(0, 2).toUpperCase();
@@ -26,7 +22,7 @@ const suggestedModel = (state: any, status: any) => {
 };
 
 export function ControllerPage({ state, status, command }: PageProps) {
-  const [tab, setTab] = useState('mapping'), [profileAction, setProfileAction] = useState(''), [profileName, setProfileName] = useState('');
+  const [tab, setTab] = useState('mapping'), [editScriptId,setEditScriptId]=useState<string|undefined>(), [profileAction, setProfileAction] = useState(''), [profileName, setProfileName] = useState('');
   const [profileBusy, setProfileBusy] = useState(false), [deleteProfile, setDeleteProfile] = useState(false), [error, setError] = useState(''), [busy, setBusy] = useState(''), [originalProfileName, setOriginalProfileName] = useState('');
   useUnsavedChanges(!!profileAction && profileName !== originalProfileName);
   const [nextAction, setNextAction] = useState<(() => void) | null>(null);
@@ -54,12 +50,11 @@ export function ControllerPage({ state, status, command }: PageProps) {
         onClick={() => live.outputActive || connectingOutput ? perform('outputStop') : perform('scriptsSet', { enabled: true })}><Icon name="power" size={17} />{live.outputActive ? 'Stop controller' : connectingOutput ? 'Cancel connection' : 'Start controller'}</Button>
     </div>
     {!state.driverAvailable && <Notice tone="warning" title="One-time device setup">Open Settings to install the virtual device driver before connecting output.</Notice>}
-    {live.training && <Notice tone="warning">Gameplay training is recording manual input. Finish that clip before changing controller profiles or sequences.</Notice>}
-    <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Controller workspace" items={[{ id: 'mapping', label: 'Button mapping' }, { id: 'sequences', label: 'Sequences', count: profile.recordings?.length || 0 }, { id: 'lua', label: 'Lua scripts', count: profile.luaScripts?.length || 0 }, { id: 'packs', label: 'Plugins' }, { id: 'input', label: 'Input & response' }, { id: 'accessibility', label: 'Accessibility' }]} />
+    {live.training && <Notice tone="warning">Gameplay training is recording manual input. Finish that clip before changing controller profiles or scripts.</Notice>}
+    <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Controller workspace" items={[{ id: 'mapping', label: 'Button mapping' }, { id: 'lua', label: 'Scripts', count: profile.luaScripts?.length || 0 }, { id: 'packs', label: 'Plugins' }, { id: 'input', label: 'Input & response' }, { id: 'accessibility', label: 'Accessibility' }]} />
     {tab === 'packs' && <GamePacks state={state} status={live} command={command} />}
-    {tab === 'mapping' && <MappingEditor state={state} status={live} command={command} openSequences={() => transition(() => setTab('sequences'))} />}
-    {tab === 'sequences' && <Sequences state={state} status={live} command={command} />}
-    {tab === 'lua' && <LuaEditor state={state} status={live} command={command} />}
+    {tab === 'mapping' && <MappingEditor state={state} status={live} command={command} openScript={id=>transition(()=>{setEditScriptId(id);setTab('lua');})} />}
+    {tab === 'lua' && <LuaEditor state={state} status={live} command={command} initialId={editScriptId}/>}
     {tab === 'input' && <InputResponse state={state} status={live} command={command} />}
     {tab === 'accessibility' && <div className="page-stack"><StickyInput key={'sticky-' + profile.id} state={state} status={live} command={command} />
       <SmoothingInput key={'smoothing-' + profile.id} state={state} status={live} command={command} />
@@ -70,7 +65,7 @@ export function ControllerPage({ state, status, command }: PageProps) {
     <Modal open={!!profileAction} onClose={() => { if (!profileBusy) setProfileAction(''); }} title={profileAction === 'profileCreate' ? 'Create controller profile' : profileAction === 'profileDuplicate' ? 'Duplicate controller profile' : 'Rename controller profile'}
       description="Give it a name you will recognize when you come back." footer={<><Button disabled={profileBusy} onClick={() => setProfileAction('')}>Cancel</Button><Button variant="primary" busy={profileBusy} disabled={!profileName.trim()} onClick={() => void saveName()}>Save profile</Button></>}>
       <Field label="Profile name"><Input autoFocus maxLength={80} value={profileName} onChange={event => setProfileName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void saveName(); }} /></Field></Modal>
-    <ConfirmDialog open={deleteProfile} onClose={() => setDeleteProfile(false)} title="Delete this controller profile?" description={'“' + profile.name + '” and its saved mappings, sequences and Lua scripts will be removed.'}
+    <ConfirmDialog open={deleteProfile} onClose={() => setDeleteProfile(false)} title="Delete this controller profile?" description={'“' + profile.name + '” and its saved mappings and Lua scripts will be removed.'}
       onConfirm={() => command('profileDelete', { id: profile.id })} confirmLabel="Delete profile" />
     <DiscardDialog open={nextAction !== null} onKeep={() => setNextAction(null)} onDiscard={() => { const action = nextAction; setNextAction(null); action?.(); }} />
   </div>;
@@ -114,7 +109,7 @@ function SmoothingInput({ state, status, command }: PageProps) {
   useEffect(() => { if (!dirty) { setSettings(JSON.parse(saved)); setBaseline(saved); } }, [saved]);
   const locked = busy || status.training || status.recording?.isRecording || !!status.recording?.pending;
   return <Card title="Tremor smoothing" description="Soften small changes in manual stick movement. Both sticks are unfiltered by default.">
-    <div className="stack"><p className="subtle">Higher values smooth more and add response delay. At the selected time constant, output covers about 63% of a sudden movement; allow about three times that value to reach 95%. Returning to the deadzone is immediate. Sequences and recordings are not smoothed.</p>
+    <div className="stack"><p className="subtle">Higher values smooth more and add response delay. At the selected time constant, output covers about 63% of a sudden movement; allow about three times that value to reach 95%. Returning to the deadzone is immediate. Script output is not smoothed.</p>
       <div className="field-grid">{(['left', 'right'] as const).map(side => <Field key={side} label={side === 'left' ? 'Left stick smoothing' : 'Right stick smoothing'}
         hint={settings[side + 'TimeConstantMs'] === 0 ? 'Off' : settings[side + 'TimeConstantMs'] + ' ms time constant'}>
         <Slider type="range" min={0} max={100} step={1} value={settings[side + 'TimeConstantMs']} disabled={locked}
@@ -161,7 +156,7 @@ function FeedbackInput({ state, status, command }: PageProps) {
   </Card>;
 }
 
-function MappingEditor({ state, status, command, openSequences }: PageProps & { openSequences: () => void }) {
+function MappingEditor({ state, status, command, openScript }: PageProps & { openScript: (id:string) => void }) {
   const profile = state.activeProfile || {}, [selected, setSelected] = useState('largeRight');
   const binding = (profile.bindings || []).find((item: any) => item.control === selected) || { control: selected, label: humanize(selected), script: 'passthrough', enabled: true, consume: false };
   const [draft, setDraft] = useState<any>(binding), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
@@ -170,12 +165,11 @@ function MappingEditor({ state, status, command, openSequences }: PageProps & { 
   useUnsavedChanges(!saved);
   const [nextControl, setNextControl] = useState<string | null>(null);
   const chooseControl = (control: string) => { if (control === selected) return; if (!saved) setNextControl(control); else setSelected(control); };
-  const selectedScript = draft.script === 'recorded' ? 'recorded:' + draft.recordingId : draft.script === 'lua' ? 'lua:' + draft.luaScriptId : draft.script;
+  const selectedScript = draft.script === 'lua' ? 'lua:' + draft.luaScriptId : draft.script;
   const groups = [{ title: 'Buttons & bumpers', controls: ['a', 'b', 'x', 'y', 'leftBumper', 'rightBumper', 'leftTrigger', 'rightTrigger'] },
     { title: 'Sticks & navigation', controls: ['leftStick', 'rightStick', 'dPadUp', 'dPadDown', 'dPadLeft', 'dPadRight', 'menu', 'view'] },
     { title: 'Elite paddles', controls: ['smallLeft', 'smallRight', 'largeLeft', 'largeRight'] }];
-  const scriptName = (item: any) => item.script === 'recorded' ? profile.recordings?.find((record: any) => record.id === item.recordingId)?.name || 'Saved sequence'
-    : item.script === 'lua' ? profile.luaScripts?.find((script: any) => script.id === item.luaScriptId)?.name || 'Lua script' : state.scripts?.find((script: any) => script.id === item.script)?.label || humanize(item.script);
+  const scriptName = (item: any) => item.script === 'lua' ? profile.luaScripts?.find((script: any) => script.id === item.luaScriptId)?.name || 'Lua script' : 'Normal input';
   return <div className="controller-layout mapping-layout"><div className="stack">
     <ControllerVisual state={state} status={status} selected={selected} onSelect={chooseControl} />
     <Card title="Choose a control" description="Pick it on the controller or choose it below."><div className="binding-groups">{groups.map(group => <div key={group.title}><p className="binding-group-label">{group.title}</p><div className="binding-grid">{group.controls.map(control => {
@@ -184,14 +178,13 @@ function MappingEditor({ state, status, command, openSequences }: PageProps & { 
         <span className="control-glyph">{controlGlyph(control)}</span><span className="binding-copy"><strong>{item.label}</strong><small>{item.enabled ? scriptName(item) : 'Disabled'}</small></span></Button>;
     })}</div></div>)}</div></Card></div>
     <Card className="mapping-editor"><div className="editor-heading"><span className="control-glyph">{controlGlyph(selected)}</span><div><p className="eyebrow">Edit this control</p><h2>{binding.label}</h2></div></div><div className="stack">
-      <Field label="What should it do?" hint={draft.script === 'passthrough' ? "Keep this control's usual behavior." : draft.script === 'recorded' ? 'Replay the selected saved recording.' : draft.script === 'lua' ? 'Run this script when the control is pressed.' : 'Use the sequence timing saved in this profile.'}><Select value={selectedScript} disabled={status.training} onValueChange={selectionValue => { const [script, id] = selectionValue.split(':'); setDraft({ ...draft, script, recordingId: script === 'recorded' ? id : null, luaScriptId: script === 'lua' ? id : null }); setMessage(''); }}>
-        {(state.scripts || []).filter((item: any) => !['recorded', 'lua'].includes(item.id)).map((item: any) => <SelectOption key={item.id} value={item.id}>{item.label}</SelectOption>)}
-        {!!profile.recordings?.length && <optgroup label="Your recorded sequences">{profile.recordings.map((item: any) => <SelectOption key={item.id} value={'recorded:' + item.id}>{item.name}</SelectOption>)}</optgroup>}
+      <Field label="What should it do?" hint={draft.script === 'passthrough' ? "Keep this control's usual behavior." : 'Run this script when the control is pressed.'}><Select value={selectedScript} disabled={status.training} onValueChange={selectionValue => { const [script, id] = selectionValue.split(':'); setDraft({ ...draft, script, recordingId: null, luaScriptId: script === 'lua' ? id : null }); setMessage(''); }}>
+        {(state.scripts || []).filter((item: any) => item.id === 'passthrough').map((item: any) => <SelectOption key={item.id} value={item.id}>{item.label}</SelectOption>)}
         {!!profile.luaScripts?.length && <optgroup label="Your Lua scripts">{profile.luaScripts.map((item: any) => <SelectOption key={item.id} value={'lua:' + item.id}>{item.name}</SelectOption>)}</optgroup>}</Select></Field>
       <Toggle label="Use this mapping" checked={draft.enabled !== false} disabled={status.training} onChange={enabled => setDraft({ ...draft, enabled })} />
-      {!/^(small|large)/.test(selected) && draft.script !== 'passthrough' && <Toggle label="Replace the physical press" description="Run the sequence without also passing this button press to the game." checked={!!draft.consume} disabled={status.training} onChange={consume => setDraft({ ...draft, consume })} />}
+      {!/^(small|large)/.test(selected) && draft.script !== 'passthrough' && <Toggle label="Replace the physical press" description="Run the script without also passing this button press to the game." checked={!!draft.consume} disabled={status.training} onChange={consume => setDraft({ ...draft, consume })} />}
       {draft.script !== 'passthrough' && <p className="subtle">{!status.outputActive ? 'Start controller to use this mapping.' : !status.scriptsEnabled ? 'Scripts are paused. Turn on Run scripts to use this mapping.' : 'Runs when you press this control.'}</p>}
-      {draft.script !== 'passthrough' && <Button variant="ghost" onClick={openSequences}><Icon name="sliders" size={17} />Edit sequence timing<Icon name="arrowRight" size={16} /></Button>}
+      {draft.script !== 'passthrough' && <Button variant="ghost" onClick={()=>openScript(draft.luaScriptId)}><Icon name="code" size={17} />Edit script<Icon name="arrowRight" size={16} /></Button>}
       {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
       <div className="editor-actions"><span className="saved-note">{saved ? 'All changes saved' : 'Unsaved changes'}</span><Button disabled={saved || busy} onClick={() => setDraft(binding)}>Reset</Button>
         <Button variant="primary" busy={busy} disabled={saved || status.training} onClick={async () => { setBusy(true); setError(''); try { await command('bindingSave', { ...draft, control: selected }); setMessage('Mapping saved.'); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } }}><Icon name="check" size={17} />Save mapping</Button></div>
@@ -236,41 +229,13 @@ function ControllerVisual({ state, status, selected, onSelect }: { state: any; s
   </Card>;
 }
 
-// Sequence and input tools.
-function Sequences({ state, status, command }: PageProps) {
-  const [view,setView]=useState('saved'),[editId,setEditId]=useState<string|null>(null),[deleteItem,setDeleteItem]=useState<any>(null),[duplicateItem,setDuplicateItem]=useState<any>(null);
-  const [name,setName]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
-  const records=state.activeProfile?.recordings||[];
-  const [nextView, setNextView] = useState<string | null>(null);
-  return <div className="stack"><div className="row-spread"><div><h2>Sequences</h2><p className="subtle">Recordings replay your captured input. Built-in sequences generate movement from timing settings.</p></div>
-    <Button onClick={()=>void command('recordImport').catch(()=>{})}><Icon name="upload" size={16}/>Import sequence</Button></div>
-    <Tabs value={view} onChange={next=>{if(next!==view){if(hasUnsavedChanges())setNextView(next);else setView(next);}}} ariaLabel="Sequence type" items={[{id:'saved',label:'Your recordings',count:records.length},{id:'builtIn',label:'Built-in sequences'}]}/>
-    {view==='saved'?<div className="split-grid"><Card title="Your saved sequences" description="Choose one to inspect its trajectory and edit individual movements.">
-      {!records.length?<EmptyState icon="waves" title="Keep a movement you like" description="Record from your controller, stop when you are done, and give the sequence a name."/>:
-      <div className="sequence-list">{records.map((item:any)=><div className="sequence-item" key={item.id}><span className="sequence-icon"><Icon name="waves"/></span>
-        <div><strong>{item.name}</strong><p>{formatDuration(item.durationMs)} · {item.frameCount} samples</p></div><Button variant="ghost" onClick={()=>setEditId(item.id)}>Edit<Icon name="arrowRight" size={16}/></Button>
-        <ActionMenu label={'More actions for '+item.name}>
-          <ActionMenuItem onSelect={()=>{setName(item.name+' copy');setDuplicateItem(item);}}><Icon name="copy" size={16}/>Duplicate</ActionMenuItem>
-          <ActionMenuItem onSelect={()=>void command('recordExport',{id:item.id}).catch(()=>{})}><Icon name="download" size={16}/>Export</ActionMenuItem>
-          <ActionMenuItem onSelect={()=>setDeleteItem(item)}><Icon name="trash" size={16}/>Delete</ActionMenuItem></ActionMenu></div>)}</div>}
-    </Card><RecordPanel state={state} status={status} command={command}/></div>:<TimingEditor state={state} status={status} command={command}/>}
-    {editId&&<RecordingEditor id={editId} pluginId={state.activeProfile?.gamePack?.id} command={command} onClose={()=>setEditId(null)}/>}
-    <ConfirmDialog open={!!deleteItem} onClose={()=>setDeleteItem(null)} title="Delete this sequence?" description={'“'+deleteItem?.name+'” will be removed. Its mappings will be cleared.'}
-      onConfirm={()=>command('recordDelete',{id:deleteItem.id})} confirmLabel="Delete sequence"/>
-    <Modal open={!!duplicateItem} onClose={()=>setDuplicateItem(null)} title="Make another version" description="The original sequence stays as it is."
-      footer={<><Button onClick={()=>setDuplicateItem(null)}>Cancel</Button><Button variant="primary" busy={busy} disabled={!name.trim()} onClick={async()=>{setBusy(true);setError('');try{await command('recordDuplicate',{id:duplicateItem.id,name:name.trim()});setDuplicateItem(null);}catch(e){setError(String(e));}finally{setBusy(false);}}}>Duplicate</Button></>}>
-      <Field label="New sequence name"><Input value={name} maxLength={80} onChange={event=>setName(event.target.value)}/></Field>{error&&<Notice tone="danger">{error}</Notice>}</Modal>
-    <DiscardDialog open={nextView!==null} onKeep={()=>setNextView(null)} onDiscard={()=>{if(nextView)setView(nextView);setNextView(null);}}/>
-  </div>;
-}
-
-function RecordPanel({state,status,command}:PageProps){
+function RecordPanel({state,status,command,onSaved}:PageProps & {onSaved:(script:any)=>void}){
   const [channels,setChannels]=useState(['rightStick']),[name,setName]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState('');
   const capture=status.recording||{},pending=capture.pending;
   const options=[{id:'rightStick',label:'Right stick'},{id:'leftStick',label:'Left stick'},{id:'buttons',label:'Buttons & bumpers'},{id:'leftTrigger',label:'Left trigger'},{id:'rightTrigger',label:'Right trigger'}];
-  const run=async(action:string,args?:any)=>{setBusy(action);setError('');try{await command(action,args);if(action==='recordSave')setName('');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy('');}};
-  return <section className="capture-panel"><div className="capture-head"><div><p className="eyebrow">Make a new recording</p><h2>Capture your movement</h2></div><Icon name="radio" size={24}/></div>
-    <p>Choose the controls to keep. Everything else stays out of the saved sequence.</p>
+  const run=async(action:string,args?:any)=>{setBusy(action);setError('');try{const result=await command(action,args);if(action==='recordSave'){setName('');onSaved(result);}}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy('');}};
+  return <section className="capture-panel"><div className="capture-head"><div><h2>Record controller input</h2></div><Icon name="radio" size={24}/></div>
+    <p>Choose the controls to capture. Saving creates an editable Lua script.</p>
     <div className="checkbox-grid">{options.map(option=><label key={option.id} className="check-row"><Checkbox type="checkbox" disabled={capture.isRecording||!!pending} checked={channels.includes(option.id)}
       onChange={event=>setChannels(event.target.checked?[...channels,option.id]:channels.filter(id=>id!==option.id))}/>{option.label}</label>)}</div>
     <details><summary>Choose individual axes or buttons</summary><div className="checkbox-grid">{(state.recordingChannels||[]).filter((item:any)=>!['all','buttons','rightStick','leftStick','leftTrigger','rightTrigger'].includes(item.id))
@@ -278,137 +243,53 @@ function RecordPanel({state,status,command}:PageProps){
         onChange={event=>setChannels(event.target.checked?[...channels,option.id]:channels.filter(id=>id!==option.id))}/>{option.label}</label>)}</div></details>
     {capture.isRecording?<div className="stack"><div><span className="capture-counter">{(Math.max(0,capture.elapsedMs||0)/1000).toFixed(2)}<span style={{fontSize:17}}> s</span></span><p>{capture.hasInput?'Recording your controller input…':'Waiting for your first selected movement…'}</p></div>
       <Button variant="primary" busy={busy==='recordStop'} onClick={()=>void run('recordStop')}><Icon name="stop" size={16}/>Stop recording</Button></div>:
-      pending?<div className="stack"><Notice tone="success" title="Movement captured">{formatDuration(pending.durationMs)} · {pending.frameCount} samples. Give it a name to keep it.</Notice>
-        <Field label="Sequence name"><Input placeholder="A name you will remember" maxLength={80} value={name} onChange={event=>setName(event.target.value)}/></Field>
-        <div className="row"><Button onClick={()=>void run('recordDiscard')}>Discard</Button><Button variant="primary" busy={busy==='recordSave'} disabled={!name.trim()} onClick={()=>void run('recordSave',{name:name.trim()})}><Icon name="save" size={16}/>Save sequence</Button></div></div>:
+      pending?<div className="stack"><Notice tone="success" title="Movement captured">{formatDuration(pending.durationMs)} · {pending.frameCount} samples. Give the Lua script a name to save it.</Notice>
+        <Field label="Script name"><Input placeholder="A name you will remember" maxLength={80} value={name} onChange={event=>setName(event.target.value)}/></Field>
+        <div className="row"><Button onClick={()=>void run('recordDiscard')}>Discard</Button><Button variant="primary" busy={busy==='recordSave'} disabled={!name.trim()} onClick={()=>void run('recordSave',{name:name.trim()})}><Icon name="save" size={16}/>Save as Lua script</Button></div></div>:
       <div className="stack"><Button variant="primary" disabled={!status.connected||!channels.length||status.training} busy={busy==='recordStart'} onClick={()=>void run('recordStart',{channels})}><Icon name="circle" size={16}/>Start recording</Button>
         <p>{status.connected?'The timer starts when you first move a selected control.':'Connect a controller before recording.'}</p></div>}
     {error&&<Notice tone="danger">{error}</Notice>}{capture.note&&<p>{capture.note}</p>}
   </section>;
 }
 
-function TimingEditor({state,status,command}:PageProps){
-  const Tuning = useGameControllerTuning(state.activeProfile?.gamePack?.id);
-  const timings=state.activeProfile?.timings||[],[variant,setVariant]=useState(timings[0]?.variant||'rhythm');
-  const item=timings.find((entry:any)=>entry.variant===variant)||timings[0];
-  const [draft,setDraft]=useState<any>(item?.timing||INITIAL_TIMING),[chart,setChart]=useState<any>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
-  useEffect(()=>{setDraft(item?.timing||INITIAL_TIMING);setMessage('');setError('');},[state.activeProfile?.id,variant,JSON.stringify(item?.timing)]);
-  useEffect(()=>{let current=true;void command('trajectory',{variant}).then(value=>{if(current)setChart(value);}).catch(()=>{});return()=>{current=false;};},[command,variant,JSON.stringify(item?.timing)]);
-  const changed=JSON.stringify(draft)!==JSON.stringify(item?.timing);
-  useUnsavedChanges(changed);
-  const [nextVariant, setNextVariant] = useState<string | null>(null);
-  return <div className={Tuning ? "split-grid" : "stack"}><Card title="Shape the sequence" description="Adjust each phase, then save it to the current controller profile."><div className="stack">
-    <Field label="Built-in sequence"><Select value={variant} onValueChange={selectionValue=>{if(changed)setNextVariant(selectionValue);else setVariant(selectionValue);}}>{timings.map((entry:any)=><SelectOption key={entry.variant} value={entry.variant}>{entry.label}</SelectOption>)}</Select></Field>
-    <TimingFields fields={sequenceTimingFields.map(field=>({...field,value:draft[field.id]??field.min}))} onChange={(key,value)=>setDraft({...draft,[key]:Number(value)})}/>
-    <FlickDirectionFields value={draft} onChange={(key,value)=>setDraft({...draft,[key]:value})}/>
-    {error&&<Notice tone="danger">{error}</Notice>}{message&&<Notice tone="success">{message}</Notice>}
-    <div className="editor-actions"><span className="saved-note">{changed?'Unsaved changes':'All changes saved'}</span><Button disabled={!changed||busy} onClick={()=>setDraft(item.timing)}>Reset</Button>
-      <Button variant="primary" busy={busy} disabled={!changed||status.training} onClick={async()=>{setBusy(true);setError('');try{await command('timingSave',{variant,timing:draft});setMessage('Sequence timing saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}}><Icon name="save" size={16}/>Save timing</Button></div>
-  </div></Card><div className="stack"><Card title="How it moves" description="The saved right-stick trajectory, from beginning to end."><TrajectoryChart data={chart}/><p className="subtle" style={{marginTop:12}}>The preview reflects saved settings. It does not send controller input.</p></Card>
-    {Tuning && <Tuning variant={variant} command={command} disabled={status.training||changed}/>}</div>
-    <DiscardDialog open={nextVariant!==null} onKeep={()=>setNextVariant(null)} onDiscard={()=>{if(nextVariant)setVariant(nextVariant);setNextVariant(null);}}/></div>;
-}
-
-export function TrajectoryChart({data,recording}:{data?:any;recording?:any}){
-  const raw=recording?.frames||data?.frames||data?.points||[],duration=Math.max(1,recording?.durationMs||data?.durationMs||raw[raw.length-1]?.timeMs||1);
-  const count=Math.min(900,raw.length),width=900,height=180,points=count?Array.from({length:count},(_,i)=>raw[Math.floor(i*(raw.length-1)/Math.max(1,count-1))]):[];
-  const normalized=!recording&&(data?.normalized===true||(!!data?.points&&!data?.frames));
-  const path=(axis:string)=>points.map((frame:any,index:number)=>{const state=frame.state||frame;let value=Number(state[axis]??(normalized?(axis==='rightY'?state.y:state.x):0)??0);if(!normalized)value/=32767;
-    return(index?'L':'M')+(20+Number(frame.timeMs||0)/duration*(width-40)).toFixed(1)+','+(height/2-value*(height/2-16)).toFixed(1);}).join(' ');
-  return <div className="trajectory"><div className="chart-legend"><span><i className="legend-dot" style={{background:'var(--accent)'}}/>Vertical</span><span><i className="legend-dot" style={{background:'var(--chart-secondary)'}}/>Horizontal</span></div>
-    <svg viewBox={'0 0 '+width+' '+height} role="img" aria-label="Right-stick vertical and horizontal trajectory over time">
-      {[16,height/2,height-16].map(y=><line key={y} x1="20" x2={width-20} y1={y} y2={y} stroke="var(--line)" strokeWidth="1" strokeDasharray={y===height/2?undefined:'4 5'}/>)}
-      {[0,.25,.5,.75,1].map(x=><line key={x} x1={20+x*(width-40)} x2={20+x*(width-40)} y1="12" y2={height-12} stroke="var(--line)"/>)}
-      {count>0?<><path d={path('rightX')} fill="none" stroke="var(--chart-secondary)" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/><path d={path('rightY')} fill="none" stroke="var(--accent)" strokeWidth="3" vectorEffect="non-scaling-stroke"/></>:
-        <text x={width/2} y={height/2+5} fill="var(--muted)" textAnchor="middle" fontSize="18">Choose a saved sequence to see its movement</text>}
-    </svg><div className="chart-labels"><span>0 ms</span><span>{formatDuration(duration)}</span></div></div>;
-}
-
-function RecordingEditor({id,pluginId,command,onClose}:{id:string;pluginId?:string;command:PageProps['command'];onClose:()=>void}){
-  const Tuning = useGameControllerTuning(pluginId);
-  const [recording,setRecording]=useState<any>(null),[original,setOriginal]=useState<any>(null),[index,setIndex]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
-  const [phaseChanges,setPhaseChanges]=useState<Partial<Record<RecordingPhase,string>>>({});
-  const [directionChange,setDirectionChange]=useState<FlickDirection|undefined>();
-  const [trimStart,setTrimStart]=useState(0),[trimEnd,setTrimEnd]=useState(0),[intervalStart,setIntervalStart]=useState(0),[intervalEnd,setIntervalEnd]=useState(1),[intervalMs,setIntervalMs]=useState(100);
-  const load=useCallback(async()=>{const value=await command('recordGet',{id});setRecording(value);setOriginal(value);setPhaseChanges({});setDirectionChange(undefined);setTrimEnd(Math.max(0,value.frames.length-1));},[id,command]);
-  useEffect(()=>{void load().catch(e=>setError(e instanceof Error?e.message:String(e)));},[load]);
-  const phases=recording?recordingPhases(recording):{};
-  let preview=recording,timingError='';
-  try { if(recording)preview=retimeRecording(recording,phaseChanges,directionChange); } catch(e) { timingError=e instanceof Error?e.message:String(e); }
-  const editRecording=(value:any)=>{setRecording(value);setPhaseChanges({});setDirectionChange(undefined);setMessage('');};
-  const frame=preview?.frames?.[index],dirty=!!timingError||JSON.stringify(preview)!==JSON.stringify(original);
-  useUnsavedChanges(!!recording && dirty);
-  const [closeRequested,setCloseRequested]=useState(false);
-  const requestClose=()=>{if(busy)return;if(dirty)setCloseRequested(true);else onClose();};
-  const updateFrame=(key:string,value:number)=>editRecording({...preview,frames:preview.frames.map((item:any,i:number)=>i===index?key==='timeMs'?{...item,timeMs:value}:{...item,state:{...item.state,[key]:value}}:item)});
-  const save=async()=>{if(timingError)return;setBusy(true);setError('');try{await command('recordUpdate',{recording:preview});setRecording(preview);setOriginal(structuredClone(preview));setPhaseChanges({});setDirectionChange(undefined);setMessage('Sequence saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
-  return <><Modal open onClose={requestClose} wide title="Refine your sequence" description="Adjust phase timing while keeping your recorded movement."
-    footer={<><span className="saved-note">{dirty?'Unsaved changes':'All changes saved'}</span><Button onClick={requestClose} disabled={busy}>Close</Button><Button variant="primary" busy={busy} disabled={!recording||!dirty||!!timingError} onClick={()=>void save()}><Icon name="save" size={16}/>Save sequence</Button></>}>
-    {error&&<Notice tone="danger">{error}</Notice>}{message&&<Notice tone="success">{message}</Notice>}{recording?<>
-      <Field label="Sequence name"><Input disabled={busy} maxLength={80} value={recording.name} onChange={event=>setRecording({...recording,name:event.target.value})}/></Field>
-      <TimingFields disabled={busy} fields={sequenceTimingFields.map(({id,label})=>{
-        const interval=phases[id];return {id,label,value:phaseChanges[id]??(interval?phaseDuration(recording,interval):0),min:0,disabled:id!=='startDelay'&&!hasRecordingAxis(recording,'rightY')};
-      })} onChange={(key,value)=>{const changes={...phaseChanges,[key]:value};
-        if(key==='flick'&&Number(value)>0&&!phases.settle&&!Number(phaseChanges.settle))changes.settle='1';
-        if(key==='flick'&&value==='0'){changes.settle='0';setDirectionChange(undefined);}
-        setPhaseChanges(changes);setMessage('');}}/>
-      <FlickDirectionFields value={directionChange??recordingFlickDirection(recording)} disabled={busy}
-        horizontalDisabled={!hasRecordingAxis(recording,'rightX')} verticalDisabled={!hasRecordingAxis(recording,'rightY')}
-        onChange={(key,value)=>{setDirectionChange({...recordingFlickDirection(recording),...directionChange,[key]:value});setMessage('');}}/>
-      <p className="subtle">Timings are estimated from the recorded movement. Zero means a stage is absent; enter a duration to add it.</p>
-      {timingError&&<Notice tone="danger">{timingError}</Notice>}
-      <TrajectoryChart recording={preview}/>
-      <details><summary>Advanced sample editing</summary><fieldset disabled={busy||!!timingError} style={{border:0,padding:0,margin:0,minWidth:0}}>
-      <Field label="Total duration (ms)"><Input type="number" min={1} max={10000} value={preview.durationMs} onChange={event=>editRecording({...preview,durationMs:Number(event.target.value)})}/></Field>
-      <details><summary>Trim the beginning or end</summary><div className="form-grid"><Field label="First sample"><Input type="number" min={0} max={recording.frames.length-1} value={trimStart} onChange={event=>setTrimStart(Number(event.target.value))}/></Field>
-        <Field label="Last sample"><Input type="number" min={trimStart} max={recording.frames.length-1} value={trimEnd} onChange={event=>setTrimEnd(Number(event.target.value))}/></Field></div>
-        <Button style={{marginTop:14}} onClick={()=>{if(trimStart<0||trimEnd<trimStart||trimEnd>=recording.frames.length){setError('Choose a valid first and last sample.');return;}
-          const start=preview.frames[trimStart].timeMs,end=trimEnd+1<preview.frames.length?preview.frames[trimEnd+1].timeMs:preview.durationMs;
-          const frames=preview.frames.slice(trimStart,trimEnd+1).map((item:any)=>({...item,timeMs:item.timeMs-start}));
-          editRecording({...preview,durationMs:end-start,frames});setIndex(0);setTrimStart(0);setTrimEnd(frames.length-1);setMessage('Trim is ready. Save the sequence to keep it.');}}>Trim to these samples</Button></details>
-      <details><summary>Adjust an interval</summary><div className="form-grid form-grid-three">
-        <Field label="Start sample (included)"><Input type="number" min={0} max={recording.frames.length-1} value={intervalStart} onChange={event=>setIntervalStart(Number(event.target.value))}/></Field>
-        <Field label="End boundary (excluded)"><Input type="number" min={intervalStart+1} max={recording.frames.length} value={intervalEnd} onChange={event=>setIntervalEnd(Number(event.target.value))}/></Field>
-        <Field label="New interval duration (ms)"><Input type="number" min={1} max={10000} value={intervalMs} onChange={event=>setIntervalMs(Number(event.target.value))}/></Field></div>
-        <Button style={{marginTop:14}} busy={busy} onClick={async()=>{setBusy(true);setError('');try{await command('recordRetime',{id,startFrame:intervalStart,endFrame:intervalEnd,durationMs:intervalMs,...(dirty?{recording:preview}:{})});await load();setMessage('Interval timing saved.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}}}>Save interval timing</Button></details>
-      <details><summary>Inspect and edit individual samples</summary><div className="data-table-wrap"><table className="data-table"><thead><tr><th>Sample</th><th>Time</th><th>Right X</th><th>Right Y</th><th>Buttons</th></tr></thead>
-        <tbody>{preview.frames.map((item:any,i:number)=><tr key={i} className={index===i?'selected':''}><td><Button variant="unstyled" onClick={()=>setIndex(i)} aria-label={'Edit sample '+i}>{i}</Button></td><td>{item.timeMs} ms</td><td>{item.state.rightX}</td><td>{item.state.rightY}</td><td>{item.state.buttons}</td></tr>)}</tbody></table></div>
-        <div className="frame-fields" style={{marginTop:15}}>{['timeMs','rightX','rightY','leftX','leftY','leftTrigger','rightTrigger','buttons'].map(key=><Field key={key} label={humanize(key)}>
-          <Input type="number" min={key==='timeMs'||key.includes('Trigger')||key==='buttons'?0:-32768} max={key==='buttons'?65535:key.includes('Trigger')?255:key==='timeMs'?preview.durationMs:32767}
-            value={key==='timeMs'?frame?.timeMs||0:frame?.state[key]||0} onChange={event=>updateFrame(key,Number(event.target.value))}/></Field>)}</div></details>
-      </fieldset></details>
-      {Tuning && <Tuning id={id} command={command} disabled={dirty} onApplied={load}/>}
-    </>:!error&&<p className="subtle">Opening your saved sequence…</p>}
-  </Modal><DiscardDialog open={closeRequested} onKeep={()=>setCloseRequested(false)} onDiscard={onClose}/></>;
-}
-
-function LuaEditor({state,status,command}:PageProps){
+function LuaEditor({state,status,command,initialId}:PageProps & {initialId?:string}){
   const scripts=state.activeProfile?.luaScripts||[],[selected,setSelected]=useState(''),[draft,setDraft]=useState<any>(null),[original,setOriginal]=useState<any>(null);
-  const [busy,setBusy]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState(''),[deleting,setDeleting]=useState(false);
-  useEffect(()=>{setSelected('');setDraft(null);setOriginal(null);setMessage('');},[state.activeProfile?.id]);
+  const [busy,setBusy]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState(''),[deleting,setDeleting]=useState(false),[recordOpen,setRecordOpen]=useState(false),[discardRecording,setDiscardRecording]=useState(false);
+  useEffect(()=>{setSelected('');setDraft(null);setOriginal(null);setMessage('');if(initialId)void open(initialId);},[state.activeProfile?.id,initialId]);
   const open=async(id:string)=>{setBusy('open');setError('');try{const value=await command('luaGet',{id});setSelected(id);setDraft(value);setOriginal(value);setMessage('');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy('');}};
   const create=async()=>{setBusy('new');setError('');try{const value=await command('luaNew');setSelected(value.id);setDraft(value);setOriginal(null);setMessage('New script. Check it, then save it to this profile.');}catch(e){setError(String(e));}finally{setBusy('');}};
   const dirty=JSON.stringify(draft)!==JSON.stringify(original);
   useUnsavedChanges(!!draft && dirty);
   const [nextAction,setNextAction]=useState<(()=>void)|null>(null);
   const transition=(action:()=>void)=>{if(draft&&dirty)setNextAction(()=>action);else action();};
-  return <div className="split-grid lua-layout"><Card title="Your Lua scripts" description="Controller logic saved with this profile." actions={<Button variant="ghost" busy={busy==='new'} onClick={()=>transition(()=>void create())}><Icon name="plus" size={17}/>New</Button>}>
+  const recordingBusy=status.recording?.isRecording||!!status.recording?.pending;
+  return <div className="split-grid lua-layout"><Card title="Your Lua scripts" description="Write a script or create one by recording controller input." actions={<div className="row">
+    <Button variant="ghost" onClick={()=>transition(()=>setRecordOpen(true))}><Icon name="radio" size={17}/>Record input</Button>
+    <Button variant="ghost" onClick={()=>transition(()=>void command('luaImport').then(value=>{if(value){setSelected(value.id);setDraft(value);setOriginal(value);}}).catch(e=>setError(String(e))))}><Icon name="upload" size={17}/>Import</Button>
+    <Button variant="ghost" busy={busy==='new'} onClick={()=>transition(()=>void create())}><Icon name="plus" size={17}/>New</Button></div>}>
     {scripts.length?<div className="sequence-list">{scripts.map((script:any)=><Button variant="unstyled" type="button" className={'lua-script-item'+(selected===script.id?' active':'')} key={script.id} onClick={()=>transition(()=>void open(script.id))}><Icon name="code" size={19}/><span>{script.name}</span><Icon name="chevronRight" size={16}/></Button>)}</div>:
-      <EmptyState title="A little logic goes a long way" description="Create a Lua script when a fixed sequence is not enough. Save it here, then assign it to a control in Button mapping." icon="code" action={<Button onClick={()=>transition(()=>void create())}><Icon name="plus" size={16}/>Create a script</Button>}/>}
+      <EmptyState title="No scripts yet" description="Write Lua or record your controller input, then assign the saved script in Button mapping." icon="code" action={<Button onClick={()=>transition(()=>void create())}><Icon name="plus" size={16}/>Create a script</Button>}/>}
+    {error&&!draft&&<Notice tone="danger">{error}</Notice>}
     <details className="details-section"><summary>Controller API quick reference</summary><div className="stack-sm subtle">
-      <p>Read physical input, write controller values and wait between steps. The starter script shows the supported calls.</p><p>Scripts run with a bounded instruction budget. Check errors before assigning a script.</p></div></details>
+      <p>Read physical input, write buttons, sticks or triggers, and wait between steps. Recorded input is saved inside output.replay as timestamped raw values.</p><p>Scripts run with a bounded instruction budget. Check errors before assigning a script.</p></div></details>
   </Card><Card title={draft?'Shape the behavior':'Your script editor'} description="Check the Lua, save it, then choose its trigger in Button mapping.">
     {draft?<div className="stack"><Field label="Script name"><Input value={draft.name||''} maxLength={80} onChange={event=>setDraft({...draft,name:event.target.value})}/></Field>
-      <Field label="Lua source"><Textarea className="code-editor" spellCheck={false} maxLength={state.limits?.maximumSourceLength||32768} value={draft.source||''} onChange={event=>setDraft({...draft,source:event.target.value})}
+      <Field label="Lua source"><Textarea className="code-editor" spellCheck={false} maxLength={state.limits?.maximumSourceLength||524288} value={draft.source||''} onChange={event=>setDraft({...draft,source:event.target.value})}
         onKeyDown={event=>{if(event.key==='Tab'){event.preventDefault();const target=event.currentTarget,start=target.selectionStart,end=target.selectionEnd;setDraft({...draft,source:draft.source.slice(0,start)+'  '+draft.source.slice(end)});requestAnimationFrame(()=>{target.selectionStart=target.selectionEnd=start+2;});}}}/></Field>
       <div className="code-meta"><span>{draft.source?.split('\n').length||0} lines</span><span>{draft.source?.length||0} characters</span><span>{dirty?'Unsaved changes':'All changes saved'}</span></div>
       {error&&<Notice tone="danger">{error}</Notice>}{message&&<Notice>{message}</Notice>}
       <div className="editor-actions"><Button variant="ghost" className="icon-button" title="Delete script" aria-label="Delete script" disabled={!original} onClick={()=>setDeleting(true)}><Icon name="trash" size={18}/></Button>
+        <Button disabled={!original||dirty} onClick={()=>void command('luaExport',{id:draft.id}).catch(e=>setError(String(e)))}><Icon name="download" size={17}/>Export</Button>
         <Button busy={busy==='validate'} onClick={async()=>{setBusy('validate');setError('');try{const result=await command('luaValidate',{source:draft.source});setMessage(result?.message||(typeof result==='string'?result:'Syntax check passed.'));}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy('');}}}><Icon name="check" size={17}/>Check Lua</Button>
         <Button variant="primary" busy={busy==='save'} disabled={!dirty||status.training} onClick={async()=>{setBusy('save');setError('');try{await command('luaSave',{script:draft});setOriginal(structuredClone(draft));setMessage('Script saved. It is ready to assign in Button mapping.');}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy('');}}}><Icon name="save" size={17}/>Save script</Button></div>
     </div>:<EmptyState icon="code" title="Choose a script or start a new one" description="Your controller logic will appear here. Opening the editor never starts a script."/>}
   </Card><ConfirmDialog open={deleting} onClose={()=>setDeleting(false)} title="Delete this Lua script?" description={'“'+draft?.name+'” and its control assignments will be removed.'}
     onConfirm={async()=>{await command('luaDelete',{id:draft.id});setDraft(null);setOriginal(null);setSelected('');}} confirmLabel="Delete script"/>
+    <Modal open={recordOpen} title="Record controller input" wide onClose={()=>{if(recordingBusy)setDiscardRecording(true);else setRecordOpen(false);}}>
+      <RecordPanel state={state} status={status} command={command} onSaved={script=>{setRecordOpen(false);setSelected(script.id);setDraft(script);setOriginal(script);setMessage('Recording saved as a Lua script.');}}/>
+    </Modal>
+    <ConfirmDialog open={discardRecording} onClose={()=>setDiscardRecording(false)} title="Discard this recording?" description="The unsaved controller input will be discarded."
+      confirmLabel="Discard recording" onConfirm={async()=>{if(status.recording?.isRecording)await command('recordStop');await command('recordDiscard');setDiscardRecording(false);setRecordOpen(false);}}/>
     <DiscardDialog open={nextAction!==null} onKeep={()=>setNextAction(null)} onDiscard={()=>{const action=nextAction;setNextAction(null);action?.();}}/></div>;
 }
 

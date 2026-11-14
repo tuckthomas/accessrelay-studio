@@ -24,7 +24,7 @@ internal static class GamePackVerification
             var setup = installed.CreateProfile(new Dictionary<string, double> { ["press-ms"] = 40 });
             Equal(false, setup.ScriptsEnabled); Equal(1, setup.Bindings.Count); Equal("switch-demo", setup.GamePack!.Id);
             var store = new ProfileStore(Path.Combine(directory, "profiles")); store.Save(setup);
-            Equal(5, JsonDocument.Parse(File.ReadAllBytes(Path.Combine(store.DirectoryPath, setup.Id.ToString("N") + ".json"))).RootElement.GetProperty("version").GetInt32());
+            Equal(6, JsonDocument.Parse(File.ReadAllBytes(Path.Combine(store.DirectoryPath, setup.Id.ToString("N") + ".json"))).RootElement.GetProperty("version").GetInt32());
             var restored = store.Load(setup.Id); Equal(40d, restored.GamePack!.Tuning["press-ms"]);
             var engine = new MacroEngine(); engine.Apply(restored); engine.SetEnabled(true); engine.Tick(default, PaddleButtons.None, true, 0);
             var pressed = default(ControllerState) with { Buttons = (ushort)ControlId.RightBumper };
@@ -35,7 +35,7 @@ internal static class GamePackVerification
             Equal(restored.Id, tuned.Id); Equal(300d, tuned.LuaScripts.Values.Single().Tuning["press-ms"]);
             var edited = restored.WithLuaScript(restored.LuaScripts.Values.Single() with { Source = "wait(1)" });
             Expect<InvalidOperationException>(() => installed.Retune(edited, new Dictionary<string, double>()));
-            Expect<InvalidDataException>(() => installed.Retune(StudioProfile.CreateDefault(), new Dictionary<string, double>()));
+            Expect<InvalidDataException>(() => installed.Retune(LegacyProfiles.CreateDefault(), new Dictionary<string, double>()));
             Expect<InvalidDataException>(() => installed.CreateProfile(new Dictionary<string, double> { ["press-ms"] = 41 }));
             Expect<InvalidDataException>(() => installed.CreateProfile(new Dictionary<string, double> { ["unknown"] = 40 }));
             var script = installed.Manifest.Assets.Single();

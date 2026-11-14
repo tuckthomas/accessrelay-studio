@@ -52,7 +52,7 @@ public sealed class MacroEngine
     public void Apply(StudioProfile profile)
     {
         profile.Validate();
-        var plans = Enum.GetValues<ShotVariant>().Select(variant =>
+        var plans = profile.Timings.Keys.OrderBy(variant => variant).Select(variant =>
         {
             var phases = Trajectory.Build(profile, variant);
             return new Plan(phases, phases.Sum(phase => phase.DurationMs));

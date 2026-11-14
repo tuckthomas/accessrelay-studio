@@ -65,7 +65,7 @@ internal static class FeedbackVerification
             Check(store.LoadFeedbackSettings() == new FeedbackSettings(), "Missing preferences enabled feedback.");
             var settings = new FeedbackSettings(true, true, .3, .2); store.SaveFeedbackSettings(settings);
             Check(store.LoadFeedbackSettings() == settings, "Feedback preferences did not round-trip.");
-            var profile = StudioProfile.CreateDefault(); store.Save(profile);
+            var profile = LegacyProfiles.CreateDefault(); store.Save(profile);
             Check(store.LoadAll().Count == 1, "Global feedback preferences were treated as a controller profile.");
             File.WriteAllText(Path.Combine(directory, "accessibility-feedback.json"), "{broken");
             Check(store.LoadFeedbackSettings() == new FeedbackSettings(), "Corrupt preferences enabled feedback.");

@@ -34,7 +34,7 @@ internal static class StickSmoothingVerification
         try
         {
             var store = new ProfileStore(directory);
-            var profile = StudioProfile.CreateDefault() with { Smoothing = new(25, 50) };
+            var profile = LegacyProfiles.CreateDefault() with { Smoothing = new(25, 50) };
             store.Save(profile); Check(store.Load(profile.Id).Smoothing == profile.Smoothing, "Smoothing did not round-trip.");
             store.Save(profile with { Smoothing = StickSmoothing.Off });
             Check(store.Load(profile.Id).Smoothing == StickSmoothing.Off, "Disabling smoothing did not persist.");

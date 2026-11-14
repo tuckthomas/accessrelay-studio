@@ -1,6 +1,13 @@
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
+if (args.Length is 1 or 2 && args[0] == "--lua-conversion")
+{
+    LuaVerification.Run();
+    LuaConversionVerification.Run(args.Length == 2 ? args[1] : null);
+    return;
+}
+
 if (args.Length is 3 or 4 && args[0] == "--installed-plugin")
 {
     InstalledPluginVerification.Run(args[1], args[2], args.Length == 4 ? args[3] : null);
@@ -20,6 +27,7 @@ if (args is ["--marketplace", var marketplaceOutput])
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Recorded input and legacy actions migrate to exact Lua playback", () => LuaConversionVerification.Run()),
     ("Bounded allocation-free runtime lock measurements, epochs, freeze and percentiles", RuntimeLockVerification.Run),
     ("Versioned game packs, resource integrity, bounded import, tuning, Lua output and legacy profile compatibility", GamePackVerification.Run),
     ("Local voice command bounds, cancellation, synthetic acoustic templates, queue overload and recognizer faults", VoiceCommandVerification.Run),
@@ -30,7 +38,7 @@ var tests = new (string Name, Action Run)[]
     ("Sticky button edges, resets, manual composition and legacy profile compatibility", StickyButtonVerification.Run),
     ("Vision deadlines, manual cancellation, release latch, generations, freshness and ownership", VisionVerification.Run),
     ("Lua timing, live input, state, cancellation, budgets and profile compatibility", LuaVerification.Run),
-    ("Default bindings and manual passthrough", Defaults),
+    ("Legacy bindings and manual passthrough", Defaults),
     ("Preview and runtime agree for all five variants", AllTrajectories),
     ("Down/up sweep totals and phase boundaries", SweepDurations),
     ("Quick taps, held inputs and priority", TriggerEdges),
@@ -115,7 +123,7 @@ static void LiveFeedback()
 
 static void Defaults()
 {
-    var profile = StudioProfile.CreateDefault();
+    var profile = LegacyProfiles.CreateDefault();
     Equal(ScriptKind.Rhythm, profile.GetBinding(ControlId.LargeRight).Script);
     Equal(ScriptKind.IntentionalMiss, profile.GetBinding(ControlId.LargeLeft).Script);
     Equal(ScriptKind.Moving, profile.GetBinding(ControlId.SmallRight).Script);
@@ -224,7 +232,7 @@ static void SafeReset()
     engine.Tick(input, PaddleButtons.None, true, 9);
     Equal((short)-32767, engine.Tick(input, PaddleButtons.LargeRight, true, 10).RightY);
     Equal((short)-24575, engine.Tick(input, PaddleButtons.None, true, 85).RightY);
-    engine.Apply(StudioProfile.CreateDefault("Another profile"));
+    engine.Apply(LegacyProfiles.CreateDefault("Another profile"));
     Equal(input, engine.Tick(input, PaddleButtons.None, true, 86));
     Equal(default(MacroStatus), engine.Status);
 }
@@ -879,7 +887,7 @@ static void ProfileDeletion()
     }
 }
 
-static StudioProfile Enabled() => StudioProfile.CreateDefault() with { ScriptsEnabled = true };
+static StudioProfile Enabled() => LegacyProfiles.CreateDefault() with { ScriptsEnabled = true };
 
 static MacroEngine Start(StudioProfile profile, ControllerState input = default)
 {

@@ -87,7 +87,7 @@ export function WorkspacePage({ state, status, command, navigate }: {
     <div className="workspace-tools">
       <Button variant="unstyled" type="button" className="tool-card" onClick={() => navigate('controller')}>
         <div className="tool-card-top"><span className="tool-card-icon"><Icon name="sliders" size={24} /></span><Icon name="arrowUpRight" size={20} /></div>
-        <div><h3>Make the controls yours</h3><p>Map a button, refine a sequence, or record a movement you want to keep.</p></div>
+        <div><h3>Make the controls yours</h3><p>Map a button, write a Lua script, or record controller input.</p></div>
         <span className="tool-card-link">{profile?.name || 'Open controller profiles'}</span>
       </Button>
       <Button variant="unstyled" type="button" className="tool-card" onClick={() => navigate('vision')}>

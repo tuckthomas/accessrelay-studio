@@ -32,13 +32,13 @@ internal static class StickyButtonVerification
         Check(sticky.Sample(default(ControllerState) with { Buttons = (ushort)ControlId.B }, true).Buttons == (ushort)(ControlId.A | ControlId.B), "Independent button latches interfered.");
 
         var engine = new MacroEngine();
-        engine.Apply(StudioProfile.CreateDefault() with { ScriptsEnabled = true });
+        engine.Apply(LegacyProfiles.CreateDefault() with { ScriptsEnabled = true });
         engine.Tick(default, PaddleButtons.None, true, 0);
         var latched = default(ControllerState) with { Buttons = (ushort)ControlId.A };
         Check(engine.Tick(default, PaddleButtons.None, true, 10, manualOutput: latched) == latched && !engine.Status.IsActive,
             "Sticky manual output generated a physical macro trigger.");
 
-        var profile = StudioProfile.CreateDefault() with { StickyControls = ImmutableHashSet.Create(ControlId.A, ControlId.LeftTrigger) };
+        var profile = LegacyProfiles.CreateDefault() with { StickyControls = ImmutableHashSet.Create(ControlId.A, ControlId.LeftTrigger) };
         string directory = Path.Combine(Path.GetTempPath(), "AccessRelay.Sticky." + Guid.NewGuid().ToString("N"));
         try
         {

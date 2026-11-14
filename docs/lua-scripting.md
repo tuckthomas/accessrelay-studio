@@ -1,6 +1,22 @@
 # Lua controller scripts
 
-Open **Lua Scripts**, choose **New script**, enter a name and Lua source, then choose **Check syntax**. Pick a controller input under **Assign when saved** and choose **Save & apply**. Turn on **Macro scripts** on Dashboard and press that input. Existing Lua scripts also appear in the Bindings assignment picker. Lua sources travel with macro profile import/export; profiles containing Lua use format version 3. Older profiles remain readable.
+Open **Controller → Scripts**. Choose **New** to write Lua, or **Record input** to capture buttons, triggers and/or individual stick axes. **Save as Lua script** opens the result in the same Lua editor. There is no separate sequence editor or built-in timing catalog. Under **Button mapping**, assign a saved script and use **Start controller** to enable output and scripts together.
+
+Existing captures automatically become Lua scripts with their original names and exact captured values. Existing mappings keep their controls, enabled state and physical-button replacement settings. A previously mapped built-in action becomes an editable Lua script; unused built-in presets are removed. New profiles have no predefined actions. The original profile files are backed up before migration; active Lua-only profiles use format version 6, while older formats remain importable.
+
+A recorded script contains its data directly in Lua:
+
+```lua
+-- Columns are raw RightX / RightY values, not percentages.
+-- First column is milliseconds from the replay's start.
+output.replay(140, "RightX,RightY", [[
+0,0,-32768
+80,0,32767
+120,0,0
+]])
+```
+
+Edit these values or add ordinary Lua logic before/after the replay. Only the named channels are overridden. Replays use absolute sample times and skip to the latest sample after a delayed poll, rather than accumulating delays. The last sample is held until the stated total duration, then its channels return to normal input. **Import** accepts `.lua` scripts and older recording `.json` files; **Export** writes a `.lua` file.
 
 ```lua
 -- Mirror the left stick's vertical movement to the right stick while held.
@@ -30,6 +46,9 @@ output.clear()
 | `input.trigger()` | Return the name of the control that started this run. |
 | `output.button("A", true)` | Hold a virtual controller button pressed. `false` holds it released. |
 | `output.axis("RightY", 50)` | Override one axis until released or the script ends. |
+| `output.axis_raw("RightY", -32768)` | Exact raw stick override (−32768–32767); raw trigger values are 0–255. |
+| `output.replay(140, "RightX,RightY", [[...]])` | Replay timestamped raw inputs on the named channels, including buttons or triggers. Up to 4096 samples / 10 seconds. |
+| `wait_until(140)` | Yield until 140 ms from script start; overdue deadlines continue immediately. |
 | `output.release("RightY")` | Relinquish one axis or button to normal input. |
 | `output.clear()` | Relinquish every overridden channel. |
 | `wait(80)` | Yield until at least 80 ms later. Values are 0–10000 ms; zero resumes on a later input sample. |
@@ -45,9 +64,9 @@ MoonSharp 2.0.0 provides Lua 5.2-style syntax, including variables, functions, t
 
 Scripts compile when checked or applied, outside the sampling loop. Each press starts the compiled top-level chunk; top-level locals start fresh. `state` survives successive triggers until apply, script toggle, stop, or disconnect resets the engine. Avoid replacing the host's API globals.
 
-The current engine runs one sequence at a time. A different bound control takes over using the existing trigger priority. A completed script, runtime error, stop, disconnect, or profile apply releases its overrides. Controls the script does not override continue following manual input. An output followed immediately by script completion is released on that same sample: use `wait()` to make a press observable.
+The current engine runs one script at a time. A different bound control takes over using the existing trigger priority. A completed script, runtime error, stop, disconnect, or profile apply releases its overrides. Controls the script does not override continue following manual input. An output followed immediately by script completion is released on that same sample: use `wait()` to make a press observable.
 
-A resume may execute at most 4000 interpreter instructions before it must yield through `wait()`. An unyielding loop stops with an error. Each run also stops after 60 seconds. A profile holds up to 32 scripts, each at most 32768 source characters. These limits protect the input loop from common mistakes; this in-process interpreter does **not** impose a hard memory quota or isolate hostile code. Run trusted scripts.
+A resume may execute at most 4000 interpreter instructions before it must yield through `wait()`. An unyielding loop stops with an error. Each run also stops after 60 seconds. A profile holds up to 32 scripts, each at most 524288 source characters. These limits protect the input loop from common mistakes; this in-process interpreter does **not** impose a hard memory quota or isolate hostile code. Run trusted scripts.
 
 ## Timing and performance
 

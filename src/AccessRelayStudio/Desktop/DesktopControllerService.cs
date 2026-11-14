@@ -78,7 +78,7 @@ internal sealed class DesktopControllerService : IDesktopModule
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException) { _packErrors = [error.Message]; }
         try
         {
-            _profiles = _store.LoadAll();
+            _profiles = _store.MigrateLuaProfiles();
             if (_profiles.Count == 0) { _store.Save(_active); _profiles = [_active]; }
             _persisted = _profiles.FirstOrDefault(profile => profile.Id == _store.LoadSelectedId()) ?? _profiles[0];
             _active = _persisted with { ScriptsEnabled = false };
@@ -105,8 +105,6 @@ internal sealed class DesktopControllerService : IDesktopModule
                 return new { control = EnumName(control), label = ControlLabel(control), binding.Script,
                     binding.Enabled, binding.Consume, binding.RecordingId, binding.LuaScriptId };
             }),
-            timings = Enum.GetValues<ShotVariant>().Select(variant => new { variant, label = VariantLabel(variant), timing = _active.GetTiming(variant) }),
-            recordings = _active.Recordings.Values.OrderBy(recording => recording.Name).Select(RecordingSummary),
             luaScripts = _active.LuaScripts.Values.OrderBy(script => script.Name).Select(script => new { script.Id, script.Name })
         },
         devices = _runtime()?.Latest?.Input.Devices ?? [], selectedDeviceId = _runtime()?.Latest?.Input.DeviceId,
@@ -116,7 +114,7 @@ internal sealed class DesktopControllerService : IDesktopModule
             pack.ManifestSha256, models = pack.Manifest.Assets.Where(asset => asset.Kind == GamePackAssetKind.VisionManifest).Select(asset => asset.Path) }),
         gamePackErrors = _packErrors,
         controls = ControlMap.All.Select(control => new { id = EnumName(control), label = ControlLabel(control), mask = (uint)control }),
-        scripts = Enum.GetValues<ScriptKind>().Select(script => new { id = EnumName(script), label = ScriptLabel(script) }),
+        scripts = new[] { new { id = "passthrough", label = "Normal input" }, new { id = "lua", label = "Lua script" } },
         recordingChannels = Enum.GetValues<RecordingChannels>().Where(value => value != RecordingChannels.None)
             .Select(value => new { id = EnumName(value), label = ChannelLabel(value) }),
         driverAvailable = VirtualMicDriver.IsAvailable, profileDirectory = _store.DirectoryPath, status = GetStatus(),
@@ -316,6 +314,7 @@ internal sealed class DesktopControllerService : IDesktopModule
             {
                 var control = args.EnumValue<ControlId>("control");
                 var script = args.EnumValue<ScriptKind>("script");
+                if (script is not (ScriptKind.Passthrough or ScriptKind.Lua)) throw new InvalidDataException("Choose normal input or a Lua script.");
                 Guid? recordingId = Guid.TryParse(args.Text("recordingId"), out var rid) ? rid : null;
                 Guid? luaId = Guid.TryParse(args.Text("luaScriptId"), out var lid) ? lid : null;
                 Save(_active.WithBinding(control, new(script, args.Flag("enabled", true), args.Flag("consume"), recordingId, luaId)));
@@ -336,12 +335,6 @@ internal sealed class DesktopControllerService : IDesktopModule
                 settings.Validate(); Save(_active with { Smoothing = settings });
                 _notice = "Stick smoothing saved. Stronger smoothing adds response delay.";
                 break;
-            }
-            case "timingSave":
-            {
-                var variant = args.EnumValue<ShotVariant>("variant");
-                var timing = args.GetProperty("timing").Read<ScriptTiming>(); timing.Validate();
-                Save(_active.WithTiming(variant, timing)); break;
             }
             case "deadzoneSave":
             {
@@ -368,62 +361,40 @@ internal sealed class DesktopControllerService : IDesktopModule
             case "recordDiscard": Runtime.DiscardRecording(); _notice = "Unsaved recording discarded."; break;
             case "recordSave":
             {
-                var pending = Runtime.Recording.Pending ?? throw new InvalidOperationException("Record and stop a sequence first.");
-                if (_active.Recordings.Count >= MacroRecording.MaxRecordingsPerProfile)
-                    throw new InvalidOperationException("This setup already has the maximum number of saved sequences.");
-                var named = pending with { Name = args.Text("name", "Recorded sequence").Trim() };
-                Save(_active.WithRecording(named), allowPending: true); Runtime.DiscardRecording(); break;
+                var pending = Runtime.Recording.Pending ?? throw new InvalidOperationException("Record and stop controller input first.");
+                var script = RecordedLua.Convert(pending with { Name = args.Text("name", "Recorded input").Trim() });
+                Save(_active.WithLuaScript(script), allowPending: true);
+                Runtime.DiscardRecording(); _notice = "Recording saved as a Lua script."; return script;
             }
-            case "recordGet": return Recording(args.Id());
-            case "recordUpdate":
-            {
-                var recording = args.GetProperty("recording").Read<MacroRecording>();
-                if (!_active.Recordings.ContainsKey(recording.Id)) throw new InvalidOperationException("Choose a saved sequence to edit.");
-                recording.Validate(); Save(_active.WithRecording(recording)); break;
-            }
-            case "recordFrame":
-            {
-                var recording = Recording(args.Id()).WithFrame(args.Number("index"), args.Number("timeMs"), args.GetProperty("state").Read<ControllerState>());
-                Save(_active.WithRecording(recording)); return recording;
-            }
-            case "recordRetime":
-            {
-                var current = Recording(args.Id());
-                var source = args.TryGetProperty("recording", out var draft) && draft.ValueKind == JsonValueKind.Object
-                    ? draft.Read<MacroRecording>() : current;
-                if (source.Id != current.Id) throw new InvalidDataException("The sequence changed. Reopen it before retiming.");
-                source.Validate();
-                var recording = source.WithIntervalDuration(args.Number("startFrame"), args.Number("endFrame"), args.Number("durationMs"));
-                Save(_active.WithRecording(recording)); return recording;
-            }
-            case "recordDuplicate":
-            {
-                var result = _active.DuplicateRecording(args.Id(), args.Text("name", Recording(args.Id()).Name + " copy"));
-                Save(result.Profile); return RecordingSummary(result.Copy);
-            }
-            case "recordDelete": _ = Recording(args.Id()); Save(_active.WithoutRecording(args.Id())); break;
             case "recordImport":
+            case "luaImport":
             {
                 RequireEditable(); int revision = _revision;
-                var picker = new FileOpenPicker(_owner); picker.FileTypeFilter.Add(".json");
-                if (await picker.PickSingleFileAsync() is { } file)
+                var picker = new FileOpenPicker(_owner); picker.FileTypeFilter.Add(".lua"); picker.FileTypeFilter.Add(".json");
+                if (await picker.PickSingleFileAsync() is not { } file) return null;
+                CheckRevision(revision);
+                using var stream = File.OpenRead(file.Path);
+                if (stream.Length is <= 0 or > 2 * 1024 * 1024) throw new InvalidDataException("The script file is empty or too large.");
+                LuaControllerScript script;
+                if (Path.GetExtension(file.Path).Equals(".json", StringComparison.OrdinalIgnoreCase))
                 {
-                    CheckRevision(revision);
-                    using var stream = File.OpenRead(file.Path);
-                    if (stream.Length is <= 0 or > 2 * 1024 * 1024) throw new InvalidDataException("The sequence file is empty or too large.");
                     var recording = JsonSerializer.Deserialize<MacroRecording>(stream, DesktopJson.Options)
-                        ?? throw new InvalidDataException("The sequence file is invalid.");
-                    recording = recording with { Id = Guid.NewGuid() }; recording.Validate();
-                    Save(_active.WithRecording(recording));
+                        ?? throw new InvalidDataException("The recording file is invalid.");
+                    script = RecordedLua.Convert(recording with { Id = Guid.NewGuid() });
                 }
-                break;
+                else
+                {
+                    using var reader = new StreamReader(stream);
+                    script = new(Guid.NewGuid(), Path.GetFileNameWithoutExtension(file.Path), await reader.ReadToEndAsync());
+                }
+                _ = new LuaControllerProgram(script); Save(_active.WithLuaScript(script)); return script;
             }
-            case "recordExport":
+            case "luaExport":
             {
-                var recording = Recording(args.Id());
-                var picker = new FileSavePicker(_owner) { SuggestedFileName = "AccessRelay-Sequence" };
-                picker.FileTypeChoices.Add("Controller sequence", [".json"]);
-                if (await picker.PickSaveFileAsync() is { } file) _store.ExportRecording(recording, file.Path);
+                var script = _active.LuaScripts.TryGetValue(args.Id(), out var found) ? found : throw new InvalidOperationException("Choose a saved Lua script.");
+                var picker = new FileSavePicker(_owner) { SuggestedFileName = "AccessRelay-Script" };
+                picker.FileTypeChoices.Add("Lua script", [".lua"]);
+                if (await picker.PickSaveFileAsync() is { } file) await File.WriteAllTextAsync(file.Path, script.Source);
                 break;
             }
             case "luaGet":
@@ -443,7 +414,6 @@ internal sealed class DesktopControllerService : IDesktopModule
             case "luaDelete":
                 if (!_active.LuaScripts.ContainsKey(args.Id())) throw new InvalidOperationException("That Lua script no longer exists.");
                 Save(_active.WithoutLuaScript(args.Id())); break;
-            case "trajectory": return BuildTrajectory(args);
             case "nbaFeedback": // Compatibility alias for older clients; still requires the linked pack.
             case "packAction":
             {
@@ -498,14 +468,12 @@ internal sealed class DesktopControllerService : IDesktopModule
     private StudioRuntime Runtime => _runtime() ?? throw new InvalidOperationException("The controller engine is not available.");
     private GamePackDefinition FindPack(string key) => _packs.FirstOrDefault(pack => pack.Manifest.Id + "@" + pack.Manifest.Version == key)
         ?? throw new InvalidOperationException("Choose an installed game pack.");
-    private MacroRecording Recording(Guid id) => _active.Recordings.TryGetValue(id, out var recording) ? recording
-        : throw new InvalidOperationException("That sequence no longer exists in the selected setup.");
     private static object RecordingSummary(MacroRecording recording) => new
     { recording.Id, recording.Name, recording.DurationMs, recording.Channels, frameCount = recording.Frames.Length };
 
     private void Save(StudioProfile profile, bool allowPending = false)
     {
-        RequireEditable(allowPending); profile = profile with { ScriptsEnabled = _runtime()?.ScriptsEnabled == true };
+        RequireEditable(allowPending); profile = LuaProfileMigration.Convert(profile) with { ScriptsEnabled = _runtime()?.ScriptsEnabled == true };
         profile.Validate(); foreach (var script in profile.LuaScripts.Values) _ = new LuaControllerProgram(script);
         _store.SaveRecordingEdit(_persisted, profile);
         _runtime()?.Apply(profile); _active = _persisted = profile; _revision++;
@@ -514,7 +482,7 @@ internal sealed class DesktopControllerService : IDesktopModule
 
     private void SelectProfile(StudioProfile profile)
     {
-        RequireEditable(); profile.Validate();
+        RequireEditable(); var migrated = LuaProfileMigration.Convert(profile); if (!ReferenceEquals(migrated, profile)) _store.Save(migrated); profile = migrated; profile.Validate();
         _persisted = profile;
         _active = profile with { ScriptsEnabled = _runtime()?.ScriptsEnabled == true };
         _runtime()?.Apply(_active); _store.SaveSelectedId(profile.Id); _revision++;
@@ -533,24 +501,6 @@ internal sealed class DesktopControllerService : IDesktopModule
     private void CheckRevision(int revision)
     { RequireEditable(); if (_disposed || _revision != revision) throw new InvalidOperationException("The selected setup changed while choosing a file. Try again."); }
 
-    private object BuildTrajectory(JsonElement args)
-    {
-        if (Guid.TryParse(args.Text("id"), out var id))
-        {
-            var recording = Recording(id);
-            return new { recording.DurationMs, normalized = true, frames = recording.Frames.Select(frame => new { timeMs = frame.TimeMs,
-                leftX = frame.State.LeftX / 32767d, leftY = frame.State.LeftY / 32767d,
-                rightX = frame.State.RightX / 32767d, rightY = frame.State.RightY / 32767d }), phases = Array.Empty<object>() };
-        }
-        var variant = args.TryGetProperty("variant", out _) ? args.EnumValue<ShotVariant>("variant") : ShotVariant.Rhythm;
-        var phases = Trajectory.Build(_active, variant);
-        var points = new List<object>(); int time = 0;
-        foreach (var phase in phases)
-        { points.Add(new { timeMs = time, rightX = (phase.RightX ?? 0) / 32767d, rightY = phase.RightY / 32767d }); time += phase.DurationMs; }
-        points.Add(new { timeMs = time, rightX = 0d, rightY = 0d });
-        return new { durationMs = time, normalized = true, frames = points, phases };
-    }
-
     internal static string EnumName<T>(T value) where T : struct, Enum => JsonNamingPolicy.CamelCase.ConvertName(value.ToString());
     private static string ControlLabel(ControlId control) => control switch
     {
@@ -559,10 +509,6 @@ internal sealed class DesktopControllerService : IDesktopModule
         ControlId.LeftStick => "Left stick click", ControlId.RightStick => "Right stick click",
         _ => SplitLabel(control.ToString())
     };
-    private static string VariantLabel(ShotVariant variant) => variant switch
-    { ShotVariant.Rhythm => "Timed sequence", ShotVariant.MissEarly => "Early alternate", ShotVariant.MissLate => "Late alternate", ShotVariant.Moving => "Moving sequence", _ => "Two-stage sequence" };
-    private static string ScriptLabel(ScriptKind script) => script switch
-    { ScriptKind.Passthrough => "Normal input", ScriptKind.Rhythm => "Timed sequence", ScriptKind.IntentionalMiss => "Alternating sequence", ScriptKind.Moving => "Moving sequence", ScriptKind.Stepback => "Two-stage sequence", ScriptKind.Recorded => "Recorded sequence", _ => "Lua script" };
     private static string ChannelLabel(RecordingChannels value) => value switch
     { RecordingChannels.All => "All controls", RecordingChannels.Buttons => "All buttons", _ => SplitLabel(value.ToString()) };
     private static string SplitLabel(string value) => System.Text.RegularExpressions.Regex.Replace(value, "(?<=[a-z])(?=[A-Z])", " ");

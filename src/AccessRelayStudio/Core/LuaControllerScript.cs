@@ -8,7 +8,7 @@ public sealed record LuaControllerScript(Guid Id, string Name, string Source)
 {
     public ImmutableDictionary<string, double> Tuning { get; init; } = ImmutableDictionary<string, double>.Empty;
     public const int MaxScripts = 32;
-    public const int MaxSourceLength = 32768;
+    public const int MaxSourceLength = 524288;
 
     public void Validate()
     {
@@ -48,6 +48,9 @@ internal sealed class LuaControllerProgram
     private byte _axisOverrides;
     private long _now, _started, _wakeAt;
     private ControlId _trigger;
+    private readonly Dictionary<(int Duration, string Header, string Data), MacroRecording> _replays = [];
+    private MacroRecording? _replay;
+    private long _replayStarted;
 
     internal LuaControllerProgram(LuaControllerScript source)
     {
@@ -100,6 +103,35 @@ internal sealed class LuaControllerProgram
             _axisOverrides |= (byte)(1 << index);
             return DynValue.Nil;
         });
+        output["axis_raw"] = Callback(args =>
+        {
+            int index = AxisIndex(Text(args, 0));
+            double value = Number(args, 1);
+            if (value != Math.Truncate(value) || value < (index >= 4 ? 0 : short.MinValue) || value > (index >= 4 ? 255 : short.MaxValue))
+                throw new ScriptRuntimeException("Raw stick values must be integers -32768–32767; triggers 0–255.");
+            _values = index switch
+            {
+                0 => _values with { LeftX = (short)value }, 1 => _values with { LeftY = (short)value },
+                2 => _values with { RightX = (short)value }, 3 => _values with { RightY = (short)value },
+                4 => _values with { LeftTrigger = (byte)value }, _ => _values with { RightTrigger = (byte)value }
+            };
+            _axisOverrides |= (byte)(1 << index); return DynValue.Nil;
+        });
+        output["replay"] = Callback(args =>
+        {
+            double duration = Number(args, 0);
+            if (duration is < 1 or > InputRecorder.MaxDurationMs || duration != Math.Truncate(duration))
+                throw new ScriptRuntimeException("Replay duration must be 1–10000 whole milliseconds.");
+            var key = ((int)duration, Text(args, 1), Text(args, 2));
+            if (!_replays.TryGetValue(key, out var recording))
+            {
+                try { recording = RecordedLua.Parse(key.Item1, key.Item2, key.Item3); }
+                catch (InvalidDataException error) { throw new ScriptRuntimeException(error.Message); }
+                if (_replays.Count < 8) _replays.Add(key, recording);
+            }
+            _replay = recording; _replayStarted = _now; _wakeAt = _now + recording.DurationMs;
+            return DynValue.NewYieldReq([]);
+        });
         output["release"] = Callback(args =>
         {
             string channel = Text(args, 0);
@@ -120,6 +152,14 @@ internal sealed class LuaControllerProgram
             _wakeAt = _now + Math.Max(1, (long)Math.Ceiling(delay));
             return DynValue.NewYieldReq([]);
         });
+        _vm.Globals["wait_until"] = Callback(args =>
+        {
+            double deadline = Number(args, 0);
+            if (deadline is < 0 or > MaxRunMs) throw new ScriptRuntimeException("wait_until expects 0–60000 milliseconds from script start.");
+            long target = _started + (long)Math.Ceiling(deadline);
+            if (target <= _now) return DynValue.Nil;
+            _wakeAt = target; return DynValue.NewYieldReq([]);
+        });
         _vm.Globals["elapsed"] = Callback(_ => DynValue.NewNumber(_now - _started));
         // Persistent, bounded numeric state survives successive triggers until profile apply.
         var state = new Table(_vm);
@@ -135,6 +175,11 @@ internal sealed class LuaControllerProgram
         _vm.Globals["state"] = state;
         try { _chunk = _vm.LoadString(source.Source, codeFriendlyName: source.Name); }
         catch (InterpreterException error) { throw new InvalidDataException(error.DecoratedMessage ?? error.Message, error); }
+        foreach (var key in RecordedLua.Constants(source.Source).Take(8))
+        {
+            try { _replays.TryAdd(key, RecordedLua.Parse(key.Duration, key.Header, key.Data)); }
+            catch (InvalidDataException) { /* Nonliteral/dynamic calls are checked when invoked. */ }
+        }
     }
 
     internal string Name { get; }
@@ -152,6 +197,7 @@ internal sealed class LuaControllerProgram
     internal void Cancel()
     {
         _routine = null;
+        _replay = null;
         _buttonOverrides = 0;
         _axisOverrides = 0;
     }
@@ -173,6 +219,7 @@ internal sealed class LuaControllerProgram
                 throw new ScriptRuntimeException("Script stopped after 60 seconds. Release and press its control to run it again.");
             if (_now >= _wakeAt)
             {
+                if (_replay is not null && _now - _replayStarted >= _replay.DurationMs) _replay = null;
                 _routine.Resume();
                 if (_routine.State == CoroutineState.ForceSuspended)
                     throw new ScriptRuntimeException($"Script exceeded {InstructionsPerTick} instructions without wait().");
@@ -183,7 +230,7 @@ internal sealed class LuaControllerProgram
                     return output;
                 }
             }
-            return output with
+            var composed = output with
             {
                 Buttons = (ushort)((output.Buttons & ~_buttonOverrides) | (_values.Buttons & _buttonOverrides)),
                 LeftX = HasAxis(0) ? _values.LeftX : output.LeftX,
@@ -193,6 +240,8 @@ internal sealed class LuaControllerProgram
                 LeftTrigger = HasAxis(4) ? _values.LeftTrigger : output.LeftTrigger,
                 RightTrigger = HasAxis(5) ? _values.RightTrigger : output.RightTrigger
             };
+            return _replay is { } replay ? RecordingFilter.Overlay(replay.Channels, composed,
+                replay.Frames[replay.FrameIndexAt((int)(_now - _replayStarted))].State) : composed;
         }
         catch (Exception failure) when (failure is InterpreterException or ArgumentException or InvalidOperationException)
         {

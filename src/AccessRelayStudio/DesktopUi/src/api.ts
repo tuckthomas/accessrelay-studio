@@ -58,7 +58,6 @@ export class DesktopBridge {
 }
 export const desktop = new DesktopBridge();
 
-const timing = { startDelay: 0, downSweep: 0, downHold: 512, upSweep: 80, upHold: 48, centerHold: 120, flick: 64, settle: 240, flickX: 0, flickY: -32767 };
 const controls = [
   ['a', 'A button'], ['b', 'B button'], ['x', 'X button'], ['y', 'Y button'], ['leftBumper', 'Left bumper'],
   ['rightBumper', 'Right bumper'], ['leftTrigger', 'Left trigger'], ['rightTrigger', 'Right trigger'],
@@ -67,8 +66,7 @@ const controls = [
   ['menu', 'Menu'], ['view', 'View'], ['smallLeft', 'Small left paddle'], ['smallRight', 'Small right paddle'],
   ['largeLeft', 'Large left paddle'], ['largeRight', 'Large right paddle']
 ].map(([id, label]) => ({ id, label }));
-const scripts = [['passthrough', 'Pass through'], ['rhythm', 'Timed stick sequence'], ['intentionalMiss', 'Alternating stick sequence'],
-  ['moving', 'Moving stick sequence'], ['stepback', 'Two-stage stick sequence']].map(([id, label]) => ({ id, label }));
+const scripts = [{ id: 'passthrough', label: 'Normal input' }, { id: 'lua', label: 'Lua script' }];
 const profileId = '420113cb-0585-4a35-af51-0425196c008f';
 const disconnected = { connected: false, deviceName: 'No controller selected', input: {}, output: {}, outputActive: false,
   scriptsEnabled: false, outputStatus: 'Virtual controller is off', recording: { isRecording: false, hasInput: false, elapsedMs: 0, pending: null },
@@ -78,9 +76,8 @@ export const previewState: StudioState = {
   controller: {
     profiles: [{ id: profileId, name: 'Everyday setup' }],
     activeProfile: { id: profileId, name: 'Everyday setup',
-      bindings: controls.map(control => ({ control: control.id, label: control.label, script: control.id === 'largeRight' ? 'rhythm' : 'passthrough', enabled: true, consume: false })),
-      timings: ['rhythm', 'missEarly', 'missLate', 'moving', 'stepback'].map(variant => ({ variant, label: variant === 'rhythm' ? 'Timed sequence' : variant, timing: { ...timing } })),
-      recordings: [], luaScripts: []
+      bindings: controls.map(control => ({ control: control.id, label: control.label, script: 'passthrough', enabled: true, consume: false })),
+      luaScripts: []
     },
     devices: [], selectedDeviceId: '', deadzone: { leftPercent: 5, rightPercent: 5 }, controls, scripts,
     recordingChannels: [['rightStick', 'Right stick'], ['leftStick', 'Left stick'], ['buttons', 'Buttons'], ['leftTrigger', 'Left trigger'], ['rightTrigger', 'Right trigger']].map(([id, label]) => ({ id, label })),
@@ -142,8 +139,6 @@ async function previewCommand(method: string, args: any): Promise<any> {
     } else if (action === 'bindingSave') {
       const index = controller.activeProfile.bindings.findIndex((binding: any) => binding.control === args.control);
       controller.activeProfile.bindings[index] = { ...controller.activeProfile.bindings[index], ...args };
-    } else if (action === 'timingSave') {
-      controller.activeProfile.timings.find((item: any) => item.variant === args.variant).timing = args.timing;
     } else if (action === 'navigationSet') {
       if (args.enabled) throw new Error('Controller switches need the installed app. Choose keyboard switches for the design preview.');
     } else if (action === 'stickySave') controller.activeProfile.stickyControls = args.controls;
@@ -168,7 +163,7 @@ async function previewCommand(method: string, args: any): Promise<any> {
       controller.activeProfile.luaScripts = [...controller.activeProfile.luaScripts.filter((item: any) => item.id !== script.id), script];
       return script;
     } else if (action === 'luaDelete') controller.activeProfile.luaScripts = controller.activeProfile.luaScripts.filter((item: any) => item.id !== args.id);
-    else if (action === 'trajectory') return { points: Array.from({ length: 101 }, (_, index) => ({ timeMs: index * 8, x: 0, y: index < 64 ? -1 : index < 74 ? -1 + (index - 64) / 5 : index < 82 ? 1 : 0 })), durationMs: 800 };
+    else if (action === 'luaNew') return { id: crypto.randomUUID(), name: 'Controller script', source: 'output.button("A", true)\nwait(80)\noutput.button("A", false)' };
     else if (['outputStart', 'scriptsSet', 'recordStart', 'deviceSelect'].includes(action)) throw new Error('This is a design preview. Device actions are available in the installed desktop app.');
     return null;
   }

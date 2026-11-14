@@ -71,17 +71,11 @@ public sealed record StudioProfile
         Bindings = Bindings.RemoveRange(Bindings.Where(binding => binding.Value.LuaScriptId == id).Select(binding => binding.Key))
     };
 
-    public static StudioProfile CreateDefault(string name = "PC Profile") => new()
+    public static StudioProfile CreateDefault(string name = "Controller Profile") => new()
     {
         Id = Guid.NewGuid(),
         Name = name,
-        Bindings = new Dictionary<ControlId, ScriptBinding>
-        {
-            [ControlId.LargeRight] = new(ScriptKind.Rhythm),
-            [ControlId.LargeLeft] = new(ScriptKind.IntentionalMiss),
-            [ControlId.SmallRight] = new(ScriptKind.Moving),
-            [ControlId.SmallLeft] = new(ScriptKind.Stepback)
-        }.ToImmutableDictionary()
+        Timings = ImmutableDictionary<ShotVariant, ScriptTiming>.Empty
     };
 
     public ScriptBinding GetBinding(ControlId control) => Bindings.GetValueOrDefault(control, Passthrough);
@@ -160,9 +154,10 @@ public sealed record StudioProfile
             || (entry.Value.Script == ScriptKind.Lua
                 && (entry.Value.LuaScriptId is not Guid luaId || !LuaScripts.ContainsKey(luaId)))))
             throw new InvalidDataException("The profile contains an invalid control or script binding.");
-        if (Timings is null || Timings.Count != Defaults.Count)
+        if (Timings is null || (Timings.Count != 0 && Timings.Count != Defaults.Count)
+            || (Timings.Count == 0 && Bindings.Values.Any(binding => binding.Script is not (ScriptKind.Passthrough or ScriptKind.Lua or ScriptKind.Recorded))))
             throw new InvalidDataException("The profile needs timing for all five shot variants.");
-        foreach (var variant in Defaults.Keys)
+        foreach (var variant in Timings.Keys)
         {
             if (!Timings.TryGetValue(variant, out var timing) || timing is null)
                 throw new InvalidDataException($"The profile has no {variant} timing.");

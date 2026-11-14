@@ -91,11 +91,15 @@ internal static class LuaVerification
     private static void CancellationAndTakeover()
     {
         var (engine, profile, _) = Setup("output.axis('RightY', 100) wait(10000)");
+        var takeoverScript = new LuaControllerScript(Guid.NewGuid(), "Takeover", "output.axis('RightY', -100) wait(80)");
+        profile = profile.WithLuaScript(takeoverScript).WithBinding(ControlId.SmallLeft, new(ScriptKind.Lua, LuaScriptId: takeoverScript.Id));
+        engine.Apply(profile); engine.Tick(default, PaddleButtons.None, true, 0);
         engine.Tick(default, PaddleButtons.LargeRight, true, 1);
         Check(engine.Status.IsActive, "Lua starts.");
         var takeover = engine.Tick(default, PaddleButtons.SmallLeft, true, 2);
-        Equal(ScriptKind.Stepback, engine.Status.Script);
-        Check(takeover.RightY < 0, "Built-in sequence takes over.");
+        Equal(ScriptKind.Lua, engine.Status.Script);
+        Equal("Takeover", engine.Status.RecordingName);
+        Check(takeover.RightY < 0, "Another Lua script takes over.");
         engine.Apply(profile);
         engine.Tick(default, PaddleButtons.None, true, 3);
         engine.Tick(default, PaddleButtons.LargeRight, true, 4);
@@ -158,7 +162,7 @@ internal static class LuaVerification
             var store = new ProfileStore(directory);
             store.Save(profile);
             string path = Path.Combine(directory, profile.Id.ToString("N") + ".json");
-            Equal(3, JsonNode.Parse(File.ReadAllText(path))!["version"]!.GetValue<int>());
+            Equal(6, JsonNode.Parse(File.ReadAllText(path))!["version"]!.GetValue<int>());
             var loaded = store.Load(profile.Id);
             Equal(script, loaded.LuaScripts[script.Id]);
             Equal(script.Id, loaded.GetBinding(ControlId.LargeRight).LuaScriptId!.Value);

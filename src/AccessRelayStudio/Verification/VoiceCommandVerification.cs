@@ -54,7 +54,7 @@ internal static class VoiceCommandVerification
             Expect(() => (settings with { Bindings = [binding with { DurationMs = 10000 }] }).Validate());
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
-        var profileForSequence = StudioProfile.CreateDefault() with { ScriptsEnabled = true };
+        var profileForSequence = LegacyProfiles.CreateDefault() with { ScriptsEnabled = true };
         var engine = new MacroEngine(); engine.Apply(profileForSequence); engine.Tick(default, PaddleButtons.None, true, 0);
         var sequence = engine.Tick(default, PaddleButtons.None, true, 1, externalTrigger: ControlId.LargeRight);
         if (sequence.RightY == 0) throw new Exception("Voice sequence request did not use the existing engine.");
