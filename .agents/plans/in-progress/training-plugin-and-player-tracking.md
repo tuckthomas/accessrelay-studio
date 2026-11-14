@@ -293,3 +293,20 @@ includes the Apache-2.0 license, model-specific notices and a source/hash manife
 The publishing machine uses the existing M: cache; end users receive the models
 inside the application. These remain generic acquisition models and are not a
 trained NBA release model. No game-specific controls move into the global shell.
+
+Beta.23 installed from `ce45770` at the existing project-local executable. The
+normal publish hook and installed files both verified all three hashes and the
+license/notices manifest. The Windows PowerShell publish child explicitly loads
+its own utility module so an inherited PowerShell 7 module path cannot hide hashing
+commands. Evidence: `artifacts/ModelRedistribution/installation23.json`.
+
+The user exposed the Xbox management screen, which directly showed **Version
+2.0.0.12** for NBA 2K27 (Xbox Series X|S). The exact observed version was saved in
+the meter-on capture profile through the native configuration validator/store.
+Both retained raw calibration clips have a `game-version.json` sidecar binding
+this later inspection to the original session metadata hash; the original session
+files were not relabeled or rewritten. The profile was restored with the host
+source selected before loading the NBA plugin; the installed UI showed all four
+saved capture-area checks and an enabled recording control. No trained shot model
+or full-motion tracking acceptance is implied by that saved setup. The interface
+needed one recovery click on relaunch, after which navigation succeeded.
