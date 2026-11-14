@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--acquisition-worker", var acquisitionEvidence])
+{
+    TrainingPluginChecks.CheckAcquisitionWorker(acquisitionEvidence);
+    return;
+}
+
 if (args is ["--automatic-gameplay-frame", var gameRuntime, var gameAssets, var gameImage, var gameOutput])
 {
     AutomaticCaptureModelChecks.ProbeFrame(gameRuntime, gameAssets, gameImage, gameOutput);

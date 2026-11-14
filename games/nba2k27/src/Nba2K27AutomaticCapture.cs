@@ -152,9 +152,9 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
             + Math.Pow((a.Top + a.Height / 2 - b.Top - b.Height / 2) / Math.Max(.01, b.Height), 2));
     private static VisionCrop Clip(double l, double t, double r, double b)
     { l = Math.Clamp(l, 0, .99999); t = Math.Clamp(t, 0, .99999); return new(l, t, Math.Max(.00001, Math.Min(1, r) - l), Math.Max(.00001, Math.Min(1, b) - t)); }
-    private static VisionCrop? FindFeedback(VisionTextRegion[] text)
+    internal static VisionCrop? FindFeedback(VisionTextRegion[] text)
     {
-        string[] words = ["TIMING", "TEMPO", "COVERAGE", "CONTEST", "RELEASE"];
+        string[] words = ["TIMING", "TEMPO", "COVERAGE", "CONTEST", "RELEASE", "RHYTHM", "DISTANCE"];
         var candidates = text.Where(t => words.Any(word => t.Text.Contains(word, StringComparison.OrdinalIgnoreCase)) && (t.Bounds.Top < .3 || t.Bounds.Top > .65)).ToArray();
         foreach (var first in candidates)
         {
@@ -165,11 +165,12 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
         }
         return null;
     }
-    private static VisionCrop? FindMeter(ReadOnlySpan<byte> bgra, int width, int height, int stride, VisionCrop body)
+    internal static VisionCrop? FindMeter(ReadOnlySpan<byte> bgra, int width, int height, int stride, VisionCrop body)
     {
-        // Search beside the detected body; require a compact vertical high-contrast HUD component.
-        const int gw = 120, gh = 160;
-        var region = Clip(body.Left - body.Width * .8, body.Top - body.Height * .25, body.Left + body.Width * 1.8, body.Top + body.Height * 1.1);
+        // The curved meter has a neutral gray ribbon, not a bright white bar.
+        // Require its green target and a connected, compact ribbon beside this body.
+        const int gw = 160, gh = 200;
+        var region = Clip(body.Left - body.Width * .8, body.Top - body.Height * .55, body.Left + body.Width * 1.8, body.Top + body.Height * 1.1);
         var mask = new bool[gw * gh]; var colored = new bool[mask.Length];
         for (int y = 0; y < gh; y++) for (int x = 0; x < gw; x++)
         {
@@ -177,8 +178,8 @@ internal sealed class Nba2K27AutomaticTracker(Nba2K27AutomaticCapture configurat
             if (nx > body.Left + body.Width * .2 && nx < body.Left + body.Width * .8) continue;
             int i = Math.Clamp((int)(ny * height), 0, height - 1) * stride + Math.Clamp((int)(nx * width), 0, width - 1) * 4;
             int lo = Math.Min(bgra[i], Math.Min(bgra[i + 1], bgra[i + 2])), hi = Math.Max(bgra[i], Math.Max(bgra[i + 1], bgra[i + 2]));
-            colored[y * gw + x] = hi > 150 && hi - lo > 80;
-            mask[y * gw + x] = colored[y * gw + x] || lo > 195;
+            colored[y * gw + x] = bgra[i + 1] >= 115 && bgra[i + 1] - bgra[i + 2] >= 30 && bgra[i + 1] - bgra[i] >= 25;
+            mask[y * gw + x] = colored[y * gw + x] || lo > 195 || (hi - lo <= 4 && lo >= 80 && hi <= 225);
         }
         var candidates = new List<VisionCrop>(); var queue = new int[mask.Length];
         for (int start = 0; start < mask.Length; start++)

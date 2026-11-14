@@ -185,11 +185,12 @@ thereafter; final player regions still come from body/joint detections. The nati
 probe found one body on the saved gameplay frame with this correction. A single
 saved-frame probe is not live tracking, meter/floor detection or timing acceptance.
 
-Automatic acquisition runs as a cancellable background UI operation (90-second
+Automatic acquisition runs as a cancellable background UI operation (120-second
 limit), allowing time to return to gameplay and finish an attempt without the
 30-second command timeout. A completed proposal opens once through status updates;
 cancelling it consumes that token and restores the prior configuration. This does
-not start a training take or controller output.
+not activate controller output. Beta.21 additionally retains a bounded raw
+calibration clip when shot input is observed.
 
 
 Beta.20 installed at the existing project-local executable from `9a512f0`.
@@ -218,3 +219,32 @@ Setup also retains up to 300 timestamped preview reference frames at 2.5 Hz unde
 the M: model-output acquisition directory. This bounded reference sequence remains
 available even if the physical/pose recording trigger misses. It is diagnostic
 acquisition footage, not a high-rate timing dataset or an accepted player crop.
+
+## First retained user shot and beta.22 correction
+
+The user completed the next shot. Beta.21 saved
+`take-20261114-015719-ed694749`: 134 full-scene frames over 9.794 seconds and 2,416
+physical/controller trace samples, with no writer-channel drops. This is raw
+calibration evidence, not a labeled or trainable release-model dataset. Native
+OCR read `RHYTHM`, `LATE`, `DISTANCE` and `28'8"`; the original feedback keyword
+policy did not support that layout. The meter was a neutral-gray curved ribbon
+with a small green target, which the original bright-component policy discarded.
+
+Beta.22 recognizes those feedback headings and the connected gray/green meter.
+The native HUD policy was run on the actual recorded pixels and stored OCR results.
+Visual inspection confirmed both sample meter crops and the feedback crop, with
+no meter proposed in the checked idle frame. This is one-shot, saved-evidence
+verification, not broad camera/movement, occlusion, meter-style or gameplay acceptance.
+
+The same recording exposed capture gaps: median 18.98 ms, p95 255.57 ms and maximum
+296.82 ms. Its writer reported no drops because synchronous OCR blocked the
+upstream consumer. Unconfigured automatic setup now runs one bounded analysis job
+on an owned pixel copy while the raw scene writer continues independently. Its
+preview and observation retain matching sequence, dimensions and source generation;
+stale analysis is never attached to a different recorded frame. Raw calibration
+frames are deliberately unannotated; sampled analysis remains in setup diagnostics.
+Configured dynamic-crop recording continues to require exact-frame tracking.
+No queued history or second capture session is added. A focused blocked-analyzer
+check confirmed that the raw writer advances, the analysis queue stays at one,
+and its returned pixels/sequence/generation remain associated. Actual post-change
+capture cadence still requires a fresh live recording.

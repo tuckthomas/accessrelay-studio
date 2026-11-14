@@ -2,6 +2,12 @@ using EliteScriptStudio.Packs.Nba2K27;
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
+if (args is ["--inspect-calibration", var takeDirectory, var outputPath])
+{
+    AutomaticIdentityChecks.InspectCalibration(takeDirectory, outputPath);
+    return;
+}
+
 if (args is ["--capture-anchors"])
 {
     NbaCaptureAnchorChecks.Run();

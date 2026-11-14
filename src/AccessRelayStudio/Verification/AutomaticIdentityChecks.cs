@@ -1,8 +1,38 @@
 using EliteScriptStudio.Core;
 using EliteScriptStudio.Packs.Nba2K27;
+using System.Text.Json;
 
 internal static class AutomaticIdentityChecks
 {
+    // Runs the actual HUD policy on retained gameplay, without a GPU or live capture.
+    internal static void InspectCalibration(string directory, string output)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "session.json")));
+        var root = document.RootElement;
+        var stream = root.GetProperty("captureEvidence").GetProperty("streams").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "scene");
+        int width = stream.GetProperty("width").GetInt32(), height = stream.GetProperty("height").GetInt32();
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var pixels = new byte[checked(width * height * 4)]; var results = new List<object>();
+        using var raw = File.OpenRead(Path.Combine(directory, stream.GetProperty("file").GetString()!));
+        int index = 0;
+        foreach (var frame in root.GetProperty("frames").EnumerateArray())
+        {
+            var evidence = frame.GetProperty("evidence").EnumerateArray().Single(e => e.GetProperty("name").GetString() == "scene");
+            raw.Position = evidence.GetProperty("offsetBytes").GetInt64(); raw.ReadExactly(pixels);
+            VisionCrop? meter = null, feedback = null;
+            if (frame.TryGetProperty("tracking", out var tracking))
+            {
+                if (tracking.TryGetProperty("bodyBounds", out var body))
+                    meter = Nba2K27AutomaticTracker.FindMeter(pixels, width, height, width * 4, body.Deserialize<VisionCrop>(options));
+                if (tracking.TryGetProperty("textRegions", out var text))
+                    feedback = Nba2K27AutomaticTracker.FindFeedback(text.Deserialize<VisionTextRegion[]>(options) ?? []);
+            }
+            results.Add(new { index = index++, sequence = frame.GetProperty("sequence").GetInt64(), meter, feedback });
+        }
+        File.WriteAllText(output, JsonSerializer.Serialize(results, options));
+        Console.WriteLine($"Inspected {index} recorded frames with the native NBA HUD policy. Results: {output}");
+    }
+
     internal static void Run()
     {
         const int width = 320, height = 180;

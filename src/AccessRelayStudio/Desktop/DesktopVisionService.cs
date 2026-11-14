@@ -477,7 +477,8 @@ internal sealed class DesktopVisionService : IDesktopModule
                             File.WriteAllBytes(Path.Combine(diagnostics, phase + ".bmp"), image.Media.Bytes);
                             File.WriteAllBytes(Path.Combine(diagnostics, phase + ".json"), JsonSerializer.SerializeToUtf8Bytes(snapshot, DesktopJson.Options)); }, cancellation);
                 }
-                if (image?.Tracking is { Valid: true, AcquisitionComplete: true } && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1) break;
+                if (image?.Tracking is { Valid: true, AcquisitionComplete: true } && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1
+                    && _session.TrainingSnapshot is not { IsRecording: true }) break;
                 if (_session.Status.CaptureFailed) throw new InvalidOperationException(_session.Status.Message);
                 if (Stopwatch.GetElapsedTime(began).TotalSeconds >= 120 && _session.TrainingSnapshot is not { IsRecording: true })
                     throw new InvalidOperationException("Capture areas were not all detected. " + (_session.Tracking?.Message ?? "Keep the game visible and the configured gamertag displayed."));

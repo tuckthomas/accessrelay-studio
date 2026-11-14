@@ -7,6 +7,47 @@ using EliteScriptStudio.Vision;
 
 internal static class TrainingPluginChecks
 {
+    internal static void CheckAcquisitionWorker(string evidence)
+    {
+        var profile = new Nba2K27ShotProfile(Guid.NewGuid(), "Acquisition concurrency", 83, 91, "Base", "Upper 1", "Upper 2", true, "Push");
+        var settings = ((IVisionCaptureProfile)profile).PrepareCalibrationCapture(VisionSettings.Default, 64, 64);
+        using var tracker = new BlockedTracker();
+        using var analysis = new VisionAcquisitionWorker(tracker);
+        using var recorder = new VisionTrainingRecorder(Path.GetFullPath(evidence), profile, settings, "Synthetic concurrency check");
+        var pixels = new byte[64 * 64 * 4]; pixels[0] = 79;
+        using (var first = new CapturedVisionFrame(pixels, 64, 64, Stopwatch.GetTimestamp(), 1, 7, () => { }))
+        {
+            Check(analysis.TryQueue(first), "Initial setup analysis was not queued.");
+            Check(tracker.Started.Wait(TimeSpan.FromSeconds(2)), "Setup analysis did not start.");
+            for (int i = 1; i <= 12; i++)
+            {
+                using var next = new CapturedVisionFrame(pixels, 64, 64, Stopwatch.GetTimestamp(), i + 1, 7, () => { });
+                Check(!analysis.TryQueue(next), "Setup analysis accumulated a frame backlog.");
+                recorder.Capture(next, default);
+                Thread.Sleep(3);
+            }
+        }
+        pixels[0] = 1; // The analysis must own its copy after the capture lease ends.
+        Check(analysis.TakeCompleted() is null, "Blocked analysis unexpectedly completed.");
+        recorder.Stop(complete: true); recorder.Dispose();
+        Check(recorder.Snapshot is { IsComplete: true, StoredFrames: > 0 }, "Raw recording waited for blocked analysis.");
+        tracker.Release.Set();
+        VisionAcquisitionWorker.Result? result = null;
+        Check(SpinWait.SpinUntil(() => (result = analysis.TakeCompleted()) is not null, TimeSpan.FromSeconds(2)), "Analysis did not return its frame.");
+        using (result!.Preview)
+            Check(result.Generation == 7 && result.Preview.Sequence == 1 && result.Preview.Tracking?.Sequence == 1 && result.Preview.Pixels[0] == 79,
+                "Analysis pixels, source generation and observation lost their exact frame association.");
+        Console.WriteLine($"SUCCESS: raw writer progresses while analysis is blocked; one in-flight frame, owned pixels and matching sequence/generation. {recorder.DirectoryPath}");
+    }
+    private sealed class BlockedTracker : IVisionRegionTracker
+    {
+        internal readonly ManualResetEventSlim Started = new(), Release = new();
+        public VisionRegionObservation Track(ReadOnlySpan<byte> pixels, int width, int height, int stride, long sequence, long generation)
+        { Started.Set(); Release.Wait(); return new(sequence, true, new(0, 0, 1, 1), null, [], 1, "Synthetic blocked analysis"); }
+        public void RequestStop() => Release.Set();
+        public void Dispose() { Release.Set(); Started.Dispose(); Release.Dispose(); }
+    }
+
     internal static void Run(string evidenceDirectory)
     {
         string root = Path.Combine(Path.GetFullPath(evidenceDirectory), Guid.NewGuid().ToString("N"));

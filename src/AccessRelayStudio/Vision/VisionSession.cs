@@ -141,6 +141,10 @@ internal sealed class VisionSession : IDisposable
     private void Run(nint hwnd, VisionSettings settings, CancellationToken cancellation, bool loadModel, IVisionRegionTracker? regionTracker)
     {
         VisionModel? model = null;
+        // Automatic setup saves an unannotated scene. Its analysis can sample independently;
+        // configured dynamic-crop recording still requires an observation for the exact frame.
+        VisionAcquisitionWorker? acquisition = !loadModel && regionTracker is not null && !settings.TrainingCapture.Configured
+            && settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? new(regionTracker, cancellation) : null;
         bool modelLoadFailed = false;
         try
         {
@@ -218,8 +222,31 @@ internal sealed class VisionSession : IDisposable
                         int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
                         VisionTrainingRecorder? recorder;
                         lock (_gate) recorder = _recorder;
-                        var regions = regionTracker?.Track(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.SourceGeneration);
-                        Volatile.Write(ref _tracking, regions);
+                        VisionRegionObservation? regions = null;
+                        if (acquisition is not null)
+                        {
+                            if (acquisition.TakeCompleted() is { } analyzed)
+                            {
+                                var preview = analyzed.Preview;
+                                if (analyzed.Generation == frame.SourceGeneration && preview.Width == frame.Width && preview.Height == frame.Height)
+                                {
+                                    Volatile.Write(ref _tracking, preview.Tracking);
+                                    lock (_gate)
+                                    {
+                                        if (_previewEnabled && !cancellation.IsCancellationRequested && Stopwatch.GetElapsedTime(previewAt).TotalMilliseconds >= 200)
+                                        { _preview?.Dispose(); _preview = preview; previewAt = Stopwatch.GetTimestamp(); }
+                                        else preview.Dispose();
+                                    }
+                                }
+                                else { preview.Dispose(); Volatile.Write(ref _tracking, null); }
+                            }
+                            acquisition.TryQueue(frame);
+                        }
+                        else
+                        {
+                            regions = regionTracker?.Track(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride, frame.Sequence, frame.SourceGeneration);
+                            Volatile.Write(ref _tracking, regions);
+                        }
                         frame.PlayerCrop = regions is { Valid: true } ? regions.Player : null;
                         recorder?.Capture(frame, observedStatus, regions);
                         if (sourceGeneration != frame.SourceGeneration)
@@ -267,7 +294,7 @@ internal sealed class VisionSession : IDisposable
                         model?.Diagnostics.FrameTimings(frame.Sequence, out preprocessingMs, out inferenceMs);
                         frames++;
                         bool buildPreview;
-                        lock (_gate) buildPreview = _previewEnabled && !cancellation.IsCancellationRequested &&
+                        lock (_gate) buildPreview = acquisition is null && _previewEnabled && !cancellation.IsCancellationRequested &&
                             Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200;
                         if (buildPreview)
                         {
@@ -336,6 +363,8 @@ internal sealed class VisionSession : IDisposable
             }
             try { model?.Dispose(); }
             catch (Exception error) { lock (_gate) _status = _status with { Message = "Model shutdown failed: " + error.Message }; }
+            try { acquisition?.Dispose(); }
+            catch (Exception error) { lock (_gate) _status = _status with { Message = "Capture analysis shutdown failed: " + error.Message }; }
             try { regionTracker?.Dispose(); }
             catch (Exception error) { lock (_gate) _status = _status with { Message = "Capture detector shutdown failed: " + error.Message }; }
             finally { lock (_gate) _regionTracker = null; }
