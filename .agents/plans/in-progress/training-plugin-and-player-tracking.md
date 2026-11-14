@@ -371,3 +371,27 @@ this verifies recording/handoff, not a shooting example or target-phase label.
 The user has been asked whether an audible countdown would make the cue usable
 without leaving fullscreen gameplay. No further takes or training are started
 while that coordination is pending. Preview was stopped; controller output is off.
+
+## Two subsequent user-recorded clips verified
+
+The idle assessment above applies only to `take-20261114-034251-b38df4fe`.
+Two subsequent user-recorded clips are complete and contain actual shot input:
+`take-20261114-035245-5bf9a6d0` has 515 frames;
+`take-20261114-035326-40674653` has 519 frames. Both are approximately ten seconds
+at 2560x1440, build 2.0.0.12, with 2,410 connected-controller samples, full
+down/up right-stick input and no writer or controller-trace drops. The traces
+contain two shot sequences per clip; the first clip's later shot is near its end.
+
+Native offline preparation completed for both without computer/UI control.
+A supervisor would stop only the offline worker if another raw take appeared.
+Prepared clips retain 273 and 133 admissible player frames; all original scene
+and input data remain unchanged. The real converter validated their provenance.
+Raw feedback was visually checked independently of filtered player frames:
+the first clip shows RHYTHM LATE; the second shows LATE earlier and EXCELLENT
+at approximately 9.6 seconds. This is game feedback, not model accuracy.
+
+The existing 16-frame/50 ms sampler finds 61 and two candidate history windows.
+These are coverage checks, not accepted target-phase labels. Tracking exclusions,
+reviewed meter timing, separate meter-off data and model training remain open.
+Evidence and journal: `artifacts/RecordedClipPreparation/verified-new-clips.json`,
+`original-clip-feedback.png`, and `artifacts/Validation/nba2k27-training-2026-11-13.md`.
