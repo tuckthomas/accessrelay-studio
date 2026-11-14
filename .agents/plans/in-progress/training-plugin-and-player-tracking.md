@@ -217,7 +217,8 @@ recording and actual meter/feedback diagnosis remain pending.
 
 Setup also retains up to 300 timestamped preview reference frames at 2.5 Hz under
 the M: model-output acquisition directory. This bounded reference sequence remains
-available even if the physical/pose recording trigger misses. It is diagnostic
+available even if the physical/pose recording trigger misses. Beta.22 rotates
+these slots, preserving the most recent setup interval while waiting. It is diagnostic
 acquisition footage, not a high-rate timing dataset or an accepted player crop.
 
 ## First retained user shot and beta.22 correction
@@ -248,3 +249,9 @@ No queued history or second capture session is added. A focused blocked-analyzer
 check confirmed that the raw writer advances, the analysis queue stays at one,
 and its returned pixels/sequence/generation remain associated. Actual post-change
 capture cadence still requires a fresh live recording.
+
+After exact player acquisition, setup now waits for the user's first shot until
+they stop it; the former two-minute pre-shot timeout could expire during a voice
+or chat handoff. Missing initial identity still times out after two minutes, and
+missing regions after a triggered shot time out after 30 seconds. Reference slots
+remain bounded at 300 while waiting, and the raw clip remains bounded at ten seconds.

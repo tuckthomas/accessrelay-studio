@@ -434,7 +434,8 @@ internal sealed class DesktopVisionService : IDesktopModule
         _settings = profile.PrepareAutomaticCapture(_settings); var acquisitionSettings = _settings;
         string diagnostics = Path.Combine(_trainingJob.Configuration.WorkspaceRoot, "acquisition-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
         var savedPhases = new HashSet<string>(StringComparer.Ordinal);
-        bool calibrationStarted = false;
+        bool calibrationStarted = false, playerAcquired = false;
+        long shotStartedAt = 0;
         long lastReferenceAt = 0, lastReferenceSequence = -1;
         int referenceCount = 0;
         try
@@ -446,11 +447,11 @@ internal sealed class DesktopVisionService : IDesktopModule
             {
                 CheckOperation(version, cancellation); _session.SetPreviewEnabled(true); UpdatePreview(force: true);
                 image = Volatile.Read(ref _preview);
-                if (image is not null && image.Sequence != lastReferenceSequence && referenceCount < 300
+                if (image is not null && image.Sequence != lastReferenceSequence
                     && (lastReferenceAt == 0 || Stopwatch.GetElapsedTime(lastReferenceAt).TotalMilliseconds >= 400))
                 {
                     // Retain the entire setup interval even if the shot trigger or a region detector misses.
-                    string reference = Path.Combine(diagnostics, "frames", (referenceCount++).ToString("D4"));
+                    string reference = Path.Combine(diagnostics, "frames", (referenceCount++ % 300).ToString("D4"));
                     var retained = image;
                     await Task.Run(() => { Directory.CreateDirectory(Path.GetDirectoryName(reference)!);
                         File.WriteAllBytes(reference + ".bmp", retained.Media.Bytes);
@@ -458,6 +459,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                             retained.SourceWidth, retained.SourceHeight, retained.Tracking }, DesktopJson.Options)); }, cancellation);
                     lastReferenceAt = Stopwatch.GetTimestamp(); lastReferenceSequence = image.Sequence;
                 }
+                playerAcquired |= _session.Tracking is { Valid: true, Identity: not null };
                 if (!calibrationStarted && _session.Status is { CaptureWidth: > 0, CaptureHeight: > 0 } source)
                 {
                     ControllerState? physical = _runtime()?.Latest?.Input is { IsConnected: true } connected ? connected.State : null;
@@ -466,6 +468,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                         var calibration = profile.PrepareCalibrationCapture(_settings, source.CaptureWidth, source.CaptureHeight);
                         _session.StartTraining(_trainingJob.Configuration.DatasetRoot, profile, SelectedSource().Title, calibration);
                         calibrationStarted = true;
+                        shotStartedAt = Stopwatch.GetTimestamp();
                         _notice = "Saving the full calibration clip, including the shot and feedback, while detecting capture areas.";
                     }
                 }
@@ -480,7 +483,11 @@ internal sealed class DesktopVisionService : IDesktopModule
                 if (image?.Tracking is { Valid: true, AcquisitionComplete: true } && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1
                     && _session.TrainingSnapshot is not { IsRecording: true }) break;
                 if (_session.Status.CaptureFailed) throw new InvalidOperationException(_session.Status.Message);
-                if (Stopwatch.GetElapsedTime(began).TotalSeconds >= 120 && _session.TrainingSnapshot is not { IsRecording: true })
+                // Waiting for a person to shoot must not expire a successfully acquired player.
+                // Stop/profile/source changes still cancel; references rotate in 300 slots.
+                if ((!playerAcquired && Stopwatch.GetElapsedTime(began).TotalSeconds >= 120
+                    || calibrationStarted && Stopwatch.GetElapsedTime(shotStartedAt).TotalSeconds >= 30)
+                    && _session.TrainingSnapshot is not { IsRecording: true })
                     throw new InvalidOperationException("Capture areas were not all detected. " + (_session.Tracking?.Message ?? "Keep the game visible and the configured gamertag displayed."));
                 await Task.Delay(40, cancellation);
             }
