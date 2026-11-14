@@ -57,3 +57,34 @@ Installation/replay receipts remain local under
 versioned assets are on that repository's main at `998a0c9`; host implementation
 and generic SDK documentation are on the application main. Existing beta.30
 sequence editor changes were retained.
+
+## 2026-11-14: native-resolution fill interruption
+
+Live calibration reported no automatic reversal, unreliable velocity and fill
+readings around 49%. No feedback from those failed actions counts as calibration.
+A retained real-shot fixture, enlarged from 720p to 1440p and given a two-row
+dark interruption, reproduced a 76.4% fill being reported as 47.1%. The detector
+scaled cap acquisition but used a fixed fill-component bridge radius.
+
+NBA plugin 1.2.3 scales that radius with capture height. The same interrupted
+fixture now reports 76.4%; a larger gap still keeps separate bright regions
+disconnected. Geometry score remains visible before velocity becomes reliable.
+The changed detector policy invalidates old calibration matches without erasing
+their receipts. The application binary stays beta.33; all game code remains in
+the separate Marketplace repository.
+
+A device-free predictor/host-arbiter replay of the retained 598-frame shot,
+enlarged to 1440p with a counterfactual continued physical hold, produces an up
+endpoint and one completed action receipt. This verifies software integration,
+not Xbox timing. It neither proves the injected gap caused the user's live
+failure nor establishes successful live reversal; that remains to be checked
+after Studio loads the updated plugin. No screen control, focus change,
+controller input, or user recording was used for this diagnosis.
+
+Plugin 1.2.3 is installed side by side under `InstalledPacks`; Studio must reload
+it on its next start. All 25 assets match manifest SHA-256
+`4474bd97dc8eb41cb8ff99519ab3edd08858b6fa8530d30a04a33ce0666e4842`.
+Its committed implementation/package is Marketplace `3e15105`. A separate
+headless load against the installed beta.33 SDK reports assembly 1.2.3.0 without
+loading ONNX or activating a controller. The running app was not replaced or
+restarted, and its settings and recordings were not edited.
