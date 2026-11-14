@@ -197,6 +197,19 @@ describe('vision workflows', () => {
     await waitFor(() => expect(command).toHaveBeenCalledWith('layoutSave', { token: 'automatic-proposal', layout, player: all }));
   });
 
+  it('opens an asynchronous detection proposal once and keeps it closed after cancellation despite a stale status packet', async () => {
+    const state = fixture(), proposal = { automatic: true, token: 'background-proposal', url: 'https://media.accessrelay.test/vision/frozen/background-proposal', sourceWidth: 2560, sourceHeight: 1440, player: all,
+      layout: { ...state.settings.trainingCapture, evidenceMode: 'automatic' }, tracking: { valid: true, player: all, court: [], identity: { expectedTag: profile.gamertag } } };
+    const command = vi.fn().mockResolvedValue(null);
+    const view = render(<VisionPage mode="training" state={state} status={{ captureProposal: proposal }} command={command} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Review detected capture areas' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith('layoutCancel', undefined));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Review detected capture areas' })).toBeNull());
+    view.rerender(<VisionPage mode="training" state={state} status={{ captureProposal: { ...proposal } }} command={command} />);
+    expect(screen.queryByRole('dialog', { name: 'Review detected capture areas' })).toBeNull();
+  });
+
   it('keeps unapplied analysis changes through native status refreshes and disallows unvalidated arming', () => {
     const command = vi.fn().mockResolvedValue(null), state = fixture();
     const view = render(<VisionPage mode="live" state={state} status={null} command={command} />);

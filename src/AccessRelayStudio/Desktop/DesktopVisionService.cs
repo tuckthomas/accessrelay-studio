@@ -11,7 +11,8 @@ namespace EliteScriptStudio.Desktop;
 internal sealed class DesktopVisionService : IDesktopModule
 {
     private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt, long SourceCaptureTicks, VisionRegionObservation? Tracking);
-    private sealed record FrozenImage(string Token, PreviewImage Image, string SourceId, Guid ProfileId, string Fingerprint, VisionSettings Settings, VisionSettings? PreviousSettings = null);
+    private sealed record FrozenImage(string Token, PreviewImage Image, string SourceId, Guid ProfileId, string Fingerprint, VisionSettings Settings, VisionSettings? PreviousSettings = null, VisionSettings? AutomaticProposal = null);
+    private Task? _areaDetection;
     private sealed record CalibrationProposal(string Token, VisionCalibrationImport Import, VisionCalibrationEstimate Estimate,
         VisionSettings Settings, string ManifestHash, VisionModelManifest Manifest, string SourceId, int Width, int Height);
     private readonly WindowId _owner;
@@ -98,12 +99,13 @@ internal sealed class DesktopVisionService : IDesktopModule
             ? VisionPerformanceRuns.Compare(_baseline, new VisionPerformanceRun { Label = "Current observation", Snapshot = _performance }) : null;
         return new
         {
-            notice = _notice, busy = Volatile.Read(ref _busy) != 0, session = _session?.Status,
+            notice = _notice, busy = Volatile.Read(ref _busy) != 0 || _areaDetection is { IsCompleted: false }, session = _session?.Status,
             sources = _sources.Select(source => new { id = SourceId(source), source.Title, source.ProcessId }),
             selectedSourceId = _selectedSourceId, captureLayoutConfirmed = _settings.TrainingCapture.Configured,
             stopping = _session?.IsStopping == true, output = _runtime()?.VisionStatus,
             training = _session?.TrainingSnapshot, performance = _performance, comparison,
             tracking = preview?.Tracking ?? _session?.Tracking,
+            captureProposal = AutomaticProposal(),
             trainingJob = _trainingJob.Snapshot,
             preview = preview is null ? null : new { url = "https://media.accessrelay.test/vision/preview?v=" + preview.Sequence,
                 sequence = preview.Sequence, sourceWidth = preview.SourceWidth, sourceHeight = preview.SourceHeight }
@@ -262,7 +264,9 @@ internal sealed class DesktopVisionService : IDesktopModule
                     if (_runtime()?.SetVisionArmed(armed) != true && armed)
                         throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
                     return null;
-                case "detectAreas": return await DetectAreasAsync(version, cancellation);
+                case "detectAreas":
+                    if (_areaDetection is { IsCompleted: false }) throw new InvalidOperationException("Capture area detection is already running.");
+                    _areaDetection = DetectAreasForUiAsync(version, cancellation); return null;
                 case "layoutCancel":
                 {
                     FrozenImage? frozen; lock (_mediaGate) { frozen = _frozen; _frozen = null; }
@@ -405,6 +409,22 @@ internal sealed class DesktopVisionService : IDesktopModule
         });
     }
     private void ClearPreview() { lock (_mediaGate) { Volatile.Write(ref _preview, null); _frozen = null; } }
+    private object? AutomaticProposal()
+    {
+        lock (_mediaGate)
+        {
+            if (_frozen is not { AutomaticProposal: { } proposal } frozen) return null;
+            return new { automatic = true, token = frozen.Token, url = "https://media.accessrelay.test/vision/frozen/" + frozen.Token,
+                sourceWidth = frozen.Image.SourceWidth, sourceHeight = frozen.Image.SourceHeight, sequence = frozen.Image.Sequence,
+                player = proposal.Crop, layout = proposal.TrainingCapture, tracking = frozen.Image.Tracking };
+        }
+    }
+    private async Task DetectAreasForUiAsync(int version, CancellationToken cancellation)
+    {
+        try { await DetectAreasAsync(version, cancellation); }
+        catch (OperationCanceledException) { if (!_disposed) _notice = "Capture area detection stopped."; }
+        catch (Exception error) { if (!_disposed) _notice = error.Message; }
+    }
     private async Task<object> DetectAreasAsync(int version, CancellationToken cancellation)
     {
         RequireStopped(); var profile = _profile ?? throw new InvalidOperationException("Choose a shot profile with your displayed gamertag.");
@@ -432,13 +452,13 @@ internal sealed class DesktopVisionService : IDesktopModule
                 }
                 if (image?.Tracking is { Valid: true, AcquisitionComplete: true } && Stopwatch.GetElapsedTime(image.CapturedAt).TotalSeconds < 1) break;
                 if (_session.Status.CaptureFailed) throw new InvalidOperationException(_session.Status.Message);
-                if (Stopwatch.GetElapsedTime(began).TotalSeconds >= 23)
+                if (Stopwatch.GetElapsedTime(began).TotalSeconds >= 90)
                     throw new InvalidOperationException("Capture areas were not all detected. " + (_session.Tracking?.Message ?? "Keep the game visible and the configured gamertag displayed."));
                 await Task.Delay(40, cancellation);
             }
             _session.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
             var proposal = profile.CompleteAutomaticCapture(_settings, image.Tracking!, image.SourceWidth, image.SourceHeight);
-            var frozen = new FrozenImage(Guid.NewGuid().ToString("N"), image, _selectedSourceId, profile.Id, profile.ConfigurationFingerprint, _settings, previous);
+            var frozen = new FrozenImage(Guid.NewGuid().ToString("N"), image, _selectedSourceId, profile.Id, profile.ConfigurationFingerprint, _settings, previous, proposal);
             lock (_mediaGate) _frozen = frozen;
             proposed = true; _notice = "Review the detected player, meter, court and feedback areas.";
             return new { automatic = true, token = frozen.Token, url = "https://media.accessrelay.test/vision/frozen/" + frozen.Token,
@@ -450,7 +470,7 @@ internal sealed class DesktopVisionService : IDesktopModule
             if (!proposed)
             {
                 _session?.Stop(); await WaitStoppedAsync(CancellationToken.None);
-                if (_settings == acquisitionSettings && _profile?.Id == profile.Id) { _settings = previous; SaveSettings(); }
+                if (!_disposed && _settings == acquisitionSettings && _profile?.Id == profile.Id) { _settings = previous; SaveSettings(); }
             }
         }
     }

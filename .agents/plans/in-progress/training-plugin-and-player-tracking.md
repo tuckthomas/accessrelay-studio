@@ -184,3 +184,9 @@ locate a broad, higher-resolution pose search and follows detected body bounds
 thereafter; final player regions still come from body/joint detections. The native
 probe found one body on the saved gameplay frame with this correction. A single
 saved-frame probe is not live tracking, meter/floor detection or timing acceptance.
+
+Automatic acquisition runs as a cancellable background UI operation (90-second
+limit), allowing time to return to gameplay and finish an attempt without the
+30-second command timeout. A completed proposal opens once through status updates;
+cancelling it consumes that token and restores the prior configuration. This does
+not start a training take or controller output.
