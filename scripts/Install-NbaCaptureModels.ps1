@@ -4,6 +4,8 @@ param(
     [string]$CacheDirectory = (Join-Path $PSScriptRoot '../artifacts/AutoCaptureModels')
 )
 $ErrorActionPreference = 'Stop'
+# A PowerShell 7 parent can pass its module path to Windows PowerShell during MSBuild.
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $cacheRoot = [IO.Path]::GetFullPath($CacheDirectory)
 $modelRoot = Join-Path ([IO.Path]::GetFullPath($InstallDirectory)) 'CaptureModels/nba2k27-automatic-v1'
