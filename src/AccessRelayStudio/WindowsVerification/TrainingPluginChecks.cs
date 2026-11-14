@@ -114,10 +114,17 @@ internal static class TrainingPluginChecks
         {
             using var frame = new CapturedVisionFrame(pixels, 64, 64, Stopwatch.GetTimestamp(), i, 1, () => { });
             // Even a failed/incorrect region detector must not alter or discard raw acquisition pixels.
-            recorder.Capture(frame, default, new(i, false, new(.3, .3, .2, .2), null, [], 0, "No meter detected"));
+            recorder.Capture(frame, default, new(i, false, new(.3, .3, .2, .2), null, [], 0, "No meter detected"),
+                new(i, i, i, 0, i, 0, 0, 0, 16, 1));
         }
         recorder.Stop(complete: true); recorder.Dispose();
         Check(recorder.Snapshot is { IsComplete: true, AcquisitionOnly: true, StoredFrames: 2 }, "Detector loss discarded the calibration clip.");
+        using var timingMetadata = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "session.json")));
+        Check(timingMetadata.RootElement.GetProperty("capturePipeline").GetProperty("atLastRecordedFrame").GetProperty("sampleTicks").GetInt64() == 2,
+            "Saved capture counters do not describe the last stored frame.");
+        foreach (var frame in timingMetadata.RootElement.GetProperty("frames").EnumerateArray())
+            foreach (string stage in new[] { "preparationMs", "writerQueueMs", "writeMs" })
+                Check(frame.GetProperty(stage).GetDouble() >= 0, "A recorded stage duration is missing or negative.");
         byte[] primary = File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "frames.bgra"));
         byte[] scene = File.ReadAllBytes(Path.Combine(recorder.DirectoryPath, "scene.bgra"));
         Check(primary[0] == 11 && scene[0] == 11 && scene[64 * 64 * 4 - 4] == 123, "A detected player crop replaced full-scene acquisition.");

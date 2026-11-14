@@ -12,7 +12,7 @@ internal sealed class LatestFrameBuffer : IDisposable
     private readonly Slot[] _slots;
     private Slot? _pending;
     private bool _disposed;
-    private long _dropped;
+    private long _dropped, _pendingReplacements, _bufferUnavailable;
     private ulong _latestFingerprint;
 
     internal LatestFrameBuffer()
@@ -21,6 +21,8 @@ internal sealed class LatestFrameBuffer : IDisposable
     }
 
     public long DroppedFrames => Interlocked.Read(ref _dropped);
+    internal long PendingReplacements => Interlocked.Read(ref _pendingReplacements);
+    internal long BufferUnavailable => Interlocked.Read(ref _bufferUnavailable);
     internal ulong LatestFingerprint { get { lock (_gate) return _latestFingerprint; } }
     internal void NoteDroppedFrame() => Interlocked.Increment(ref _dropped);
 
@@ -46,10 +48,12 @@ internal sealed class LatestFrameBuffer : IDisposable
                 slot = replaced;
                 _pending = null;
                 Interlocked.Increment(ref _dropped);
+                Interlocked.Increment(ref _pendingReplacements);
             }
             if (slot is null)
             {
                 Interlocked.Increment(ref _dropped);
+                Interlocked.Increment(ref _bufferUnavailable);
                 return false;
             }
             slot.State = SlotState.Writing;
@@ -59,7 +63,8 @@ internal sealed class LatestFrameBuffer : IDisposable
         {
             if (slot.Buffer.Length != bytes)
                 slot.Buffer = GC.AllocateUninitializedArray<byte>(bytes);
-            for (int row = 0; row < height; row++)
+            if (rowPitch == stride) Marshal.Copy(pixels, slot.Buffer, 0, bytes);
+            else for (int row = 0; row < height; row++)
                 Marshal.Copy(pixels + checked((nint)((long)row * rowPitch)), slot.Buffer, row * stride, stride);
             // Sparse window-image fingerprint is a freeze hint, not proof that gameplay advanced.
             ulong fingerprint = 14695981039346656037;
@@ -84,6 +89,7 @@ internal sealed class LatestFrameBuffer : IDisposable
                 {
                     previous.State = SlotState.Free;
                     Interlocked.Increment(ref _dropped);
+                    Interlocked.Increment(ref _pendingReplacements);
                 }
                 slot.Width = width;
                 slot.Height = height;

@@ -4,6 +4,7 @@ using System.Text;
 using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
+using Windows.Foundation.Metadata;
 
 namespace EliteScriptStudio.Vision;
 
@@ -13,7 +14,8 @@ internal sealed record CaptureSource(nint Hwnd, string Title, uint ProcessId)
 }
 
 internal readonly record struct CaptureStatus(bool IsRunning, string Message, long SourceGeneration,
-    long LatestFrameTicks, long LatestSequence, long ContentChangedTicks, int Width, int Height, long DroppedFrames);
+    long LatestFrameTicks, long LatestSequence, long ContentChangedTicks, int Width, int Height, long DroppedFrames,
+    CapturePipelineSnapshot? Pipeline = null);
 
 /// <summary>HWND capture with a free-threaded WGC pool and explicitly measured CPU readback.
 /// Consumers must dispose frame leases. This does not measure original console frame age.</summary>
@@ -25,6 +27,7 @@ internal sealed class RemotePlayCapture : IDisposable
     private Resources? _resources;
     private bool _disposed;
     private long _generation, _sequence, _latestTicks, _contentChangedTicks;
+    private long _frameCallbacks, _framesDequeued, _framesSuperseded, _framesPublished, _failedPublications;
     private ulong _lastContentHash;
     private string _message = "Capture is off.";
     private int _width, _height;
@@ -43,7 +46,12 @@ internal sealed class RemotePlayCapture : IDisposable
                 : present && !running ? "Capture paused: restore the source window." : Volatile.Read(ref _message);
             return new(running, message, Interlocked.Read(ref _generation), Interlocked.Read(ref _latestTicks),
                 Interlocked.Read(ref _sequence), resource?.GpuFrames?.ContentChangedTicks ?? Interlocked.Read(ref _contentChangedTicks),
-                Volatile.Read(ref _width), Volatile.Read(ref _height), resource?.GpuFrames?.DroppedFrames ?? _frames.DroppedFrames);
+                Volatile.Read(ref _width), Volatile.Read(ref _height), resource?.GpuFrames?.DroppedFrames ?? _frames.DroppedFrames,
+                new(Stopwatch.GetTimestamp(), Interlocked.Read(ref _frameCallbacks), Interlocked.Read(ref _framesDequeued),
+                    Interlocked.Read(ref _framesSuperseded), Interlocked.Read(ref _framesPublished), Interlocked.Read(ref _failedPublications),
+                    resource?.GpuFrames?.PendingReplacements ?? _frames.PendingReplacements,
+                    resource?.GpuFrames?.BufferUnavailable ?? _frames.BufferUnavailable,
+                    resource?.DefaultMinimumUpdateIntervalMs, resource?.EffectiveMinimumUpdateIntervalMs));
         }
     }
 
@@ -71,7 +79,7 @@ internal sealed class RemotePlayCapture : IDisposable
         return sources.OrderBy(source => source.Title, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    public void Start(nint hwnd, bool gpuFrames = false, nint adapter = 0)
+    public void Start(nint hwnd, bool gpuFrames = false, nint adapter = 0, bool useSystemUpdateInterval = false)
     {
         Stop();
         lock (_gate)
@@ -94,11 +102,22 @@ internal sealed class RemotePlayCapture : IDisposable
                     DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, resource.Size);
                 resource.Session = resource.Pool.CreateCaptureSession(resource.Item);
                 resource.Session.IsCursorCaptureEnabled = false;
+                // On 24H2+, the default interval can quantize 60-Hz delivery to three
+                // refreshes on a 165-Hz display (~55 Hz). Request timely WGC updates;
+                // this does not manufacture frames or change the monitor/game rate.
+                if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 26100)
+                    && ApiInformation.IsPropertyPresent("Windows.Graphics.Capture.GraphicsCaptureSession", "MinUpdateInterval"))
+                {
+                    resource.DefaultMinimumUpdateIntervalMs = resource.Session.MinUpdateInterval.TotalMilliseconds;
+                    if (!useSystemUpdateInterval) resource.Session.MinUpdateInterval = TimeSpan.FromMilliseconds(1);
+                    resource.EffectiveMinimumUpdateIntervalMs = resource.Session.MinUpdateInterval.TotalMilliseconds;
+                }
                 resource.Pool.FrameArrived += FrameArrived;
                 resource.Item.Closed += ItemClosed;
                 _resources = resource;
                 _generation++;
                 _latestTicks = _contentChangedTicks = 0;
+                _frameCallbacks = _framesDequeued = _framesSuperseded = _framesPublished = _failedPublications = 0;
                 _lastContentHash = 0;
                 _width = resource.Size.Width;
                 _height = resource.Size.Height;
@@ -181,6 +200,7 @@ internal sealed class RemotePlayCapture : IDisposable
         {
             if (_disposed || _resources is not { } resource || !ReferenceEquals(resource.Pool, sender))
                 return;
+            Interlocked.Increment(ref _frameCallbacks);
             try
             {
                 bool published = false;
@@ -219,6 +239,8 @@ internal sealed class RemotePlayCapture : IDisposable
                         published = resource.GpuFrames is { } gpu
                             ? resource.Graphics.CopyGpuFrame(frame, gpu, captureTicks, ++_sequence, _generation, compositorTicks)
                             : resource.Graphics.CopyFrame(frame, _frames, captureTicks, ++_sequence, _generation, compositorTicks);
+                        if (published) Interlocked.Increment(ref _framesPublished);
+                        else Interlocked.Increment(ref _failedPublications);
                         if (published)
                         {
                             _latestTicks = captureTicks;
@@ -270,16 +292,21 @@ internal sealed class RemotePlayCapture : IDisposable
     private Direct3D11CaptureFrame? TakeNewestFrame(Direct3D11CaptureFramePool pool)
     {
         var newest = pool.TryGetNextFrame();
+        if (newest is not null) Interlocked.Increment(ref _framesDequeued);
         try
         {
             for (int attempts = 0; attempts < 8; attempts++)
             {
                 var next = pool.TryGetNextFrame();
                 if (next is null) break;
-                newest?.Dispose();
+                Interlocked.Increment(ref _framesDequeued);
+                if (newest is not null)
+                {
+                    newest.Dispose(); Interlocked.Increment(ref _framesSuperseded);
+                    if (_resources?.GpuFrames is { } gpu) gpu.NoteDroppedFrame();
+                    else _frames.NoteDroppedFrame();
+                }
                 newest = next;
-                if (_resources?.GpuFrames is { } gpu) gpu.NoteDroppedFrame();
-                else _frames.NoteDroppedFrame();
             }
             return newest;
         }
@@ -314,6 +341,7 @@ internal sealed class RemotePlayCapture : IDisposable
         internal GraphicsCaptureSession? Session;
         internal SizeInt32 Size;
         internal bool Paused;
+        internal double? DefaultMinimumUpdateIntervalMs, EffectiveMinimumUpdateIntervalMs;
         public void Dispose()
         {
             Session?.Dispose();

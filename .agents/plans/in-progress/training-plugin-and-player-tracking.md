@@ -395,3 +395,40 @@ These are coverage checks, not accepted target-phase labels. Tracking exclusions
 reviewed meter timing, separate meter-off data and model training remain open.
 Evidence and journal: `artifacts/RecordedClipPreparation/verified-new-clips.json`,
 `original-clip-feedback.png`, and `artifacts/Validation/nba2k27-training-2026-11-13.md`.
+
+## Capture cadence correction (beta.26)
+
+The two user-recorded takes have contiguous application capture sequences: no
+sequence numbers are missing between capture publication and the stored frames.
+Their compositor timestamp median is already 18.181 ms, matching three refreshes
+on the approximately 165-Hz display. Capture-to-recorder entry median is about
+5.4-5.6 ms. This localizes the cadence restriction upstream of the writer rather
+than proving that its queue dropped frames.
+
+An inactive-session property probe on this PC confirmed Windows Graphics Capture
+defaults to a **16 ms** minimum update interval. Setter/readback confirmed **1 ms**.
+The capture service now explicitly requests 1 ms on supported Windows versions;
+this removes an additional OS-side throttle and does not increase the Xbox Remote
+Play stream beyond 60 FPS or synthesize/interpolate frames. Reference API:
+https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession.minupdateinterval?view=winrt-26100
+Matching high-refresh report: https://issues.chromium.org/issues/565075148
+
+Training crop preparation caches exact nearest-neighbour source indices instead
+of repeating floating-point coordinate calculations and four-byte span copies
+per pixel. At a 1440p-sized input, the focused saved-image benchmark measured
+2.860 ms before and 0.886 ms after (3.23x). Output bytes match across full-frame,
+moving/fractional crops, up/down scaling and padded row pitches. Contiguous CPU
+capture buffers also use one bulk copy instead of one copy per row.
+
+New clip metadata separates WGC dequeues/superseded deliveries, publication
+failures, pending-buffer replacement, buffer exhaustion and writer-queue losses.
+Per-frame readback, crop preparation, writer wait and OS-write durations support
+the next live comparison. The last capture snapshot belongs to a stored frame.
+Focused buffer ownership/counter and scene/tracked writer checks passed; no broad
+suite or user UI/controller actions were run.
+
+Evidence: `artifacts/CaptureCadenceEvidence/resize.json`,
+`interval-property-readback.json`, `buffer-check.log` and `writer-check.log`.
+The gameplay window was unavailable to the passive probe, so end-to-end 60-FPS
+preservation is **not yet verified**. Future comparisons distinguish repeated
+Windows image deliveries from changed images and stop if another recording starts.

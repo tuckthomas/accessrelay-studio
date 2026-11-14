@@ -9,7 +9,8 @@ namespace EliteScriptStudio.Vision;
 internal readonly record struct VisionSessionStatus(bool Running, bool ModelReady, bool CanArm, string Message,
     long Frames, long Predictions, long DroppedFrames, double LastProcessingMs, long LatestCaptureTicks,
     int CaptureWidth = 0, int CaptureHeight = 0, long ExcludedTimingFrames = 0,
-    bool ModelLoadFailed = false, bool SourceStale = false, bool CaptureFailed = false);
+    bool ModelLoadFailed = false, bool SourceStale = false, bool CaptureFailed = false,
+    CapturePipelineSnapshot? CapturePipeline = null);
 
 internal sealed class VisionPreview(byte[] pixels, int width, int height, int stride, long sequence, long captureTicks = 0, VisionRegionObservation? tracking = null) : IDisposable
 {
@@ -248,7 +249,7 @@ internal sealed class VisionSession : IDisposable
                             Volatile.Write(ref _tracking, regions);
                         }
                         frame.PlayerCrop = regions is { Valid: true } ? regions.Player : null;
-                        recorder?.Capture(frame, observedStatus, regions);
+                        recorder?.Capture(frame, observedStatus, regions, source.Pipeline);
                         if (sourceGeneration != frame.SourceGeneration)
                         {
                             _runtime.InvalidateVisionSession("Capture source changed. Reacquiring player.");
@@ -328,7 +329,7 @@ internal sealed class VisionSession : IDisposable
                             _status = new(true, model is not null, !cancellation.IsCancellationRequested && !_trainingInhibited && fresh && model?.CanArm == true && sourceReady,
                                 fresh ? modelMessage : "Source is stale or unchanged. " + modelMessage,
                                 frames, predictions, source.DroppedFrames, processingMs, frame.CaptureTicks, frame.Width, frame.Height,
-                                excludedTimingFrames, modelLoadFailed, !fresh);
+                                excludedTimingFrames, modelLoadFailed, !fresh, CapturePipeline: source.Pipeline);
                         }
                     }
                 }
@@ -450,7 +451,8 @@ internal sealed class VisionSession : IDisposable
                 var trace = new VisionTrainingTrace();
                 _runtime.SetVisionTrainingTrace(trace);
                 _recorder = new VisionTrainingRecorder(directory, profile, recordingSettings, sourceTitle,
-                    controllerTrace: trace, detachControllerTrace: () => _runtime.SetVisionTrainingTrace(null));
+                    controllerTrace: trace, detachControllerTrace: () => _runtime.SetVisionTrainingTrace(null),
+                    capturePipelineAtStart: _status.CapturePipeline);
             }
             catch
             {

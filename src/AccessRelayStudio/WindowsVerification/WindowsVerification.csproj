@@ -12,6 +12,7 @@
     <Compile Include="DatasetChecks.cs" />
     <Compile Include="TrainingPluginChecks.cs" />
     <Compile Include="AutomaticCaptureModelChecks.cs" />
+    <Compile Include="CaptureCadenceChecks.cs" />
     <Compile Include="RuntimeTrainingChecks.cs" />
     <Compile Include="RuntimeAccessibilityChecks.cs" />
     <Compile Include="RuntimeTestDevices.cs" />

@@ -12,9 +12,11 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
     private readonly GpuFrameSurface[] _slots = [new(graphics), new(graphics), new(graphics)];
     private GpuFrameSurface? _pending;
     private bool _disposed;
-    private long _dropped, _contentTicks, _lastHashedSequence, _generation = -1;
+    private long _dropped, _pendingReplacements, _bufferUnavailable, _contentTicks, _lastHashedSequence, _generation = -1;
     private ulong _fingerprint;
     internal long DroppedFrames => Interlocked.Read(ref _dropped);
+    internal long PendingReplacements => Interlocked.Read(ref _pendingReplacements);
+    internal long BufferUnavailable => Interlocked.Read(ref _bufferUnavailable);
     internal void NoteDroppedFrame() => Interlocked.Increment(ref _dropped);
     internal long ContentChangedTicks => Interlocked.Read(ref _contentTicks);
 
@@ -25,8 +27,8 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
         {
             if (_disposed) return false;
             slot = _slots.FirstOrDefault(item => item.State == 0);
-            if (slot is null && _pending is { } replaced) { slot = replaced; _pending = null; NoteDroppedFrame(); }
-            if (slot is null) { NoteDroppedFrame(); return false; }
+            if (slot is null && _pending is { } replaced) { slot = replaced; _pending = null; NoteDroppedFrame(); Interlocked.Increment(ref _pendingReplacements); }
+            if (slot is null) { NoteDroppedFrame(); Interlocked.Increment(ref _bufferUnavailable); return false; }
             slot.State = 1;
         }
         try
@@ -36,7 +38,7 @@ internal sealed class GpuCaptureBuffer(CaptureD3D11 graphics) : IDisposable
             lock (_gate)
             {
                 if (_disposed) { slot.State = 0; slot.Dispose(); return false; }
-                if (_pending is { } old) { old.State = 0; NoteDroppedFrame(); }
+                if (_pending is { } old) { old.State = 0; NoteDroppedFrame(); Interlocked.Increment(ref _pendingReplacements); }
                 slot.State = 2; _pending = slot; _generation = generation; return true;
             }
         }

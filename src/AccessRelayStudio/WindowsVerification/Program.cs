@@ -2,6 +2,12 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--capture-cadence", var cadenceEvidence, var savedTake])
+{
+    CaptureCadenceChecks.Run(cadenceEvidence, savedTake);
+    return;
+}
+
 if (args is ["--prepare-recorded-scene", var sceneRuntime, var sceneAssets, var sceneDirectory])
 {
     AutomaticCaptureModelChecks.PrepareScene(sceneRuntime, sceneAssets, sceneDirectory);
@@ -120,10 +126,18 @@ static void BufferCheck()
         Check(buffer.PublishMapped(mapped, 24, 4, 3, 105, 5, 1), "Pending newest frame was not replaced.");
         Check(buffer.TryAcquireLatest(out var latest) && latest!.Sequence == 5, "Consumer did not receive newest frame.");
         Check(latest!.CompositorTicks is null, "A reused slot retained stale compositor metadata.");
+        Check(buffer.BufferUnavailable == 1 && buffer.PendingReplacements == 1,
+            "Buffer exhaustion and pending replacement were conflated.");
         buffer.Dispose();
         Check(latest!.Pixels.Span[0] == 42 && second!.Pixels.Span[0] == 17, "Dispose invalidated outstanding leases.");
         second!.Dispose(); third!.Dispose(); latest.Dispose();
         Check(!buffer.TryAcquireLatest(out _), "Disposed buffer still returned data.");
+        for (int i = 0; i < data.Length; i++) data[i] = (byte)i;
+        Marshal.Copy(data, 0, mapped, data.Length);
+        using var contiguous = new LatestFrameBuffer();
+        Check(contiguous.PublishMapped(mapped, 16, 4, 3, 106, 1, 1), "Contiguous copy failed.");
+        Check(contiguous.TryAcquireLatest(out var packed), "Contiguous copy was unavailable.");
+        using (packed) Check(packed!.Pixels.Span.SequenceEqual(data.AsSpan(0, 48)), "Contiguous fast copy changed pixels or row alignment.");
         Console.WriteLine("SUCCESS: bounded buffer, row pitch, latest-frame replacement, lease ownership and disposal verified.");
     }
     finally { Marshal.FreeHGlobal(mapped); }

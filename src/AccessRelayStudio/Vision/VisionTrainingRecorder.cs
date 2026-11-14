@@ -17,12 +17,17 @@ internal sealed class VisionTrainingRecorder : IDisposable
     internal const long EvidenceByteLimit = 2L * 1024 * 1024 * 1024;
     internal const long SceneEvidenceByteLimit = 4L * 1024 * 1024 * 1024;
     private sealed record StoredRegion(string Name, string File, int Width, int Height, VisionCrop Crop)
-    { internal int ByteLength => checked(Width * Height * 4); }
+    {
+        internal int ByteLength => checked(Width * Height * 4);
+        internal BgraCropResizer Resizer { get; } = new(Width, Height);
+    }
     private sealed record RegionFrameEntry(string Name, string File, long OffsetBytes, int ByteLength);
     private sealed record Pending(byte[] Pixels, long Sequence, long CaptureTicks, long ObservedTicks,
-        long ShotToken, bool PhysicalShootHeld, long SourceGeneration, long? CompositorTicks, VisionRegionObservation? Tracking);
+        long ShotToken, bool PhysicalShootHeld, long SourceGeneration, long? CompositorTicks, VisionRegionObservation? Tracking,
+        long PreparedTicks, double? CaptureReadbackMs, CapturePipelineSnapshot? CapturePipeline);
     private sealed record FrameEntry(long Sequence, long CaptureTicks, string File, long OffsetBytes, int ByteLength,
-        long ShotToken, bool PhysicalShootHeld, long ObservedTicks, long SourceGeneration, RegionFrameEntry[]? Evidence, long? CompositorTicks, VisionRegionObservation? Tracking);
+        long ShotToken, bool PhysicalShootHeld, long ObservedTicks, long SourceGeneration, RegionFrameEntry[]? Evidence, long? CompositorTicks, VisionRegionObservation? Tracking,
+        double? CaptureReadbackMs, double PreparationMs, double WriterQueueMs, double WriteMs);
     private readonly Channel<Pending> _frames = Channel.CreateBounded<Pending>(new BoundedChannelOptions(8)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly List<FrameEntry> _index = [];
@@ -44,6 +49,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
     private long _generation = -1, _dropped, _storedFrames;
     private int _width, _height;
     private bool _finished, _complete = true, _metadataComplete;
+    private readonly CapturePipelineSnapshot? _capturePipelineAtStart;
+    private CapturePipelineSnapshot? _capturePipelineAtLastFrame;
     private string _message = "Recording a 10-second manual training take.";
     internal string DirectoryPath { get; }
     private bool AcquisitionOnly => _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst && _settings.TrainingCapture.FeedbackRegion is null;
@@ -61,7 +68,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
 
     internal VisionTrainingRecorder(string parentDirectory, IVisionCaptureProfile profile, VisionSettings settings, string sourceTitle,
         Func<string, Stream>? streamFactory = null, TimeSpan? durationLimit = null,
-        VisionTrainingTrace? controllerTrace = null, Action? detachControllerTrace = null, long? byteLimit = null)
+        VisionTrainingTrace? controllerTrace = null, Action? detachControllerTrace = null, long? byteLimit = null,
+        CapturePipelineSnapshot? capturePipelineAtStart = null)
     {
         profile.Validate(); settings.Validate();
         // Legacy primary-only fixtures remain readable; the UI/session requires configured multi-region evidence.
@@ -77,6 +85,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
         if (_byteLimit < _bytesPerFrame || _byteLimit > productionByteLimit)
             throw new ArgumentOutOfRangeException(nameof(byteLimit));
         _controllerTrace = controllerTrace; _detachControllerTrace = detachControllerTrace;
+        _capturePipelineAtStart = capturePipelineAtStart;
         // Production defaults: 10 seconds, at most 2 GiB across visual streams, eight pending frames.
         _durationLimit = durationLimit ?? TimeSpan.FromSeconds(10);
         if (_durationLimit <= TimeSpan.Zero || _durationLimit > TimeSpan.FromSeconds(10))
@@ -102,7 +111,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
         }, null, _durationLimit, Timeout.InfiniteTimeSpan);
     }
 
-    internal void Capture(CapturedVisionFrame frame, VisionStatusSnapshot output, VisionRegionObservation? tracking = null)
+    internal void Capture(CapturedVisionFrame frame, VisionStatusSnapshot output, VisionRegionObservation? tracking = null,
+        CapturePipelineSnapshot? capturePipeline = null)
     {
         long observedTicks = Stopwatch.GetTimestamp();
         lock (_gate)
@@ -135,7 +145,8 @@ internal sealed class VisionTrainingRecorder : IDisposable
                 offset += region.ByteLength;
             }
             if (_frames.Writer.TryWrite(new(buffer, frame.Sequence, frame.CaptureTicks, observedTicks,
-                    output.ShotToken, output.ShootHeld, frame.SourceGeneration, frame.CompositorTicks, tracking)))
+                    output.ShotToken, output.ShootHeld, frame.SourceGeneration, frame.CompositorTicks, tracking,
+                    Stopwatch.GetTimestamp(), frame.CaptureReadbackMs, capturePipeline)))
                 buffer = null!;
             else lock (_gate)
             {
@@ -149,17 +160,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
 
     private static void ResizeCrop(CapturedVisionFrame frame, Span<byte> target, StoredRegion region, VisionCrop? resolved = null)
     {
-        var crop = resolved ?? region.Crop;
-        var source = frame.Pixels.Span;
-        for (int y = 0; y < region.Height; y++)
-        {
-            int sy = Math.Min(frame.Height - 1, (int)((crop.Top + (y + .5) / region.Height * crop.Height) * frame.Height));
-            for (int x = 0; x < region.Width; x++)
-            {
-                int sx = Math.Min(frame.Width - 1, (int)((crop.Left + (x + .5) / region.Width * crop.Width) * frame.Width));
-                source.Slice(sy * frame.Stride + sx * 4, 4).CopyTo(target.Slice((y * region.Width + x) * 4, 4));
-            }
-        }
+        region.Resizer.Resize(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride, target, resolved ?? region.Crop);
     }
 
     private async Task WriteAsync()
@@ -173,6 +174,7 @@ internal sealed class VisionTrainingRecorder : IDisposable
             {
                 try
                 {
+                    long writeStarted = Stopwatch.GetTimestamp();
                     if (totalBytes + _bytesPerFrame > _byteLimit)
                     {
                         lock (_gate) FinishLocked("Take reached its visual evidence storage limit.", true);
@@ -192,7 +194,11 @@ internal sealed class VisionTrainingRecorder : IDisposable
                     }
                     totalBytes += _bytesPerFrame;
                     _index.Add(new(frame.Sequence, frame.CaptureTicks, "frames.bgra", offset, FrameBytes,
-                        frame.ShotToken, frame.PhysicalShootHeld, frame.ObservedTicks, frame.SourceGeneration, evidence, frame.CompositorTicks, frame.Tracking));
+                        frame.ShotToken, frame.PhysicalShootHeld, frame.ObservedTicks, frame.SourceGeneration, evidence, frame.CompositorTicks, frame.Tracking,
+                        frame.CaptureReadbackMs, Stopwatch.GetElapsedTime(frame.ObservedTicks, frame.PreparedTicks).TotalMilliseconds,
+                        Stopwatch.GetElapsedTime(frame.PreparedTicks, writeStarted).TotalMilliseconds,
+                        Stopwatch.GetElapsedTime(writeStarted).TotalMilliseconds));
+                    _capturePipelineAtLastFrame = frame.CapturePipeline;
                     Interlocked.Increment(ref _storedFrames);
                 }
                 finally { ArrayPool<byte>.Shared.Return(frame.Pixels); }
@@ -251,6 +257,10 @@ internal sealed class VisionTrainingRecorder : IDisposable
                 ? "scene-first-untracked-v1" : "bgra8-player-crop-nearest256-bilinear-rgb-unit-ntchw-v2",
             sourceTitle = _sourceTitle, shotProfile = _profile.ExportProfile(), stopwatchFrequency = Stopwatch.Frequency,
             frames = _index, droppedFrames = Interlocked.Read(ref _dropped), complete, completionReason = _message,
+            capturePipeline = new { atStart = _capturePipelineAtStart, atLastRecordedFrame = _capturePipelineAtLastFrame,
+                writerQueueDrops = Interlocked.Read(ref _dropped),
+                scope = "WGC deliveries, superseded frames, publication failures and pending-buffer losses are separate from writer-queue drops. Unreported OS/stream frames are not inferred.",
+                stageTimingScope = "Per-frame readback, preparation, writer wait and OS write completion. Physical disk durability and Xbox render time are not measured." },
             labelsRequired = "Target release labels require reviewed practice experiments; physical release and ball departure are not automatically ground truth.",
             captureTimeBasis = "wgc-local-receipt-qpc-v1",
             timingScope = "captureTicks marks local WGC frame receipt before image copies. compositorTicks preserves WGC metadata separately and can lead receipt. Original Xbox render time is not measured.",
