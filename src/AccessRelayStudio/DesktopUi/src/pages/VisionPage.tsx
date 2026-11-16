@@ -15,7 +15,8 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
   const pluginId = state.selectedPluginId ?? '', installed = plugins.some((plugin: any) => plugin.id === pluginId);
   const Workspace = useGameVisionWorkspace(pluginId), Plugin = installed ? Workspace : undefined;
   const pluginError = useGamePluginError(pluginId);
-  const saving = !!live.training?.hasTake && !live.training?.isFinalized;
+  const saving = (!!live.training?.hasTake && !live.training?.isFinalized)
+    || (!!live.diagnosticRecording && !live.diagnosticRecording.isFinalized);
   const locked = !!session.running || !!live.stopping || saving, working = !!busy || !!live.busy || live.trainingJob?.state === 'running';
   async function run(action: string, args?: any) {
     setError(''); setBusy(action);

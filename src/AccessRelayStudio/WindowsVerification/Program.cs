@@ -2,6 +2,25 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--shot-trainer"]) { RuntimeShotTrainerChecks.Run(); return; }
+
+if (args is ["--signal-context"])
+{
+    RuntimeSignalContextChecks.Run();
+    return;
+}
+
+if (args is ["--diagnostic-recording", var diagnosticDirectory])
+{
+    DiagnosticRecordingChecks.Run(diagnosticDirectory);
+    return;
+}
+if (args is ["--diagnostic-session"])
+{
+    PreviewSessionChecks.Run(diagnosticOnly: true);
+    return;
+}
+
 if (args is ["--capture-cadence", var cadenceEvidence, var savedTake])
 {
     CaptureCadenceChecks.Run(cadenceEvidence, savedTake);

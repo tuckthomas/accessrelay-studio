@@ -4,7 +4,10 @@ namespace EliteScriptStudio.Core;
 /// observation, not to whichever session happens to be current when inference finishes.</summary>
 internal readonly record struct VisionPrediction(long SessionGeneration, long ShotToken,
     long FrameSequence, long CaptureTimestamp, long CompletedTimestamp, double TimeToReleaseMs,
-    double Confidence, double UncertaintyMs, bool PlayerTracked);
+    double Confidence, double UncertaintyMs, bool PlayerTracked)
+{
+    public bool ContinueCommittedAction { get; init; }
+}
 
 internal enum VisionRunState { Disabled, Observing, Ready, TrackingShot, ReleaseScheduled, ReleasedLatched, Suspended }
 

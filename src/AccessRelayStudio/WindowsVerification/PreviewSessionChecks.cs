@@ -43,7 +43,7 @@ internal static class PreviewSessionChecks
         }
     }
 
-    internal static void Run(string? diagnosticsPath = null)
+    internal static void Run(string? diagnosticsPath = null, bool diagnosticOnly = false)
     {
         Marshal.ThrowExceptionForHR(Native.RoInitialize(1));
         string className = "AccessRelayPreviewCheck_" + Guid.NewGuid().ToString("N");
@@ -121,6 +121,16 @@ internal static class PreviewSessionChecks
             AssertPassthrough(runtime, physical);
 
             Directory.CreateDirectory(directory);
+            session.StartDiagnosticRecording(directory, new { source = "Synthetic preview regression window" });
+            WaitFor(() => session.DiagnosticSnapshot?.ObservedFrames >= 4, "Diagnostic recording did not follow live capture", session);
+            Check(runtime.VisionStatus.SessionGeneration == generation && !runtime.IsVisionTrainingRecording,
+                "Diagnostic recording changed the controller session or entered training mode.");
+            AssertPassthrough(runtime, physical);
+            session.StopDiagnosticRecording();
+            WaitFor(() => session.DiagnosticSnapshot?.IsFinalized == true, "Diagnostic recording did not finalize", session);
+            Check(session.DiagnosticSnapshot is { Failed: false, StoredFrames: >= 3 }, "Diagnostic recording did not preserve live images.");
+            if (!diagnosticOnly)
+            {
             session.StartTraining(directory, profile, "Synthetic preview regression window");
             long recordingFrames = session.Status.Frames;
             WaitFor(() => session.Status.Frames >= recordingFrames + 5, "Hidden training capture stopped advancing", session);
@@ -139,17 +149,37 @@ internal static class PreviewSessionChecks
                     "The hidden training take did not persist captured frames.");
             }
 
+            }
             session.SetPreviewEnabled(true);
             using (var resumed = WaitPreview(session))
                 Check(resumed.Sequence > priorSequence, "Preview did not resume after hidden recording.");
+            session.StartDiagnosticRecording(directory, new { source = "Preview-stop fixture" });
+            WaitFor(() => session.DiagnosticSnapshot?.ObservedFrames >= 2, "Second diagnostic recording did not start", session);
             session.Stop();
+            var saving = session.FinishDiagnosticRecordingAsync(CancellationToken.None);
             AssertNoPreview(session, "Stop retained a pending preview.");
             WaitFor(() => !session.Status.Running, "Preview session did not stop", session);
+            WaitFor(() => session.DiagnosticSnapshot?.IsFinalized == true, "Preview Stop did not finalize diagnostic recording", session);
+            WaitFor(() => saving.IsCompleted, "Diagnostic save barrier did not complete", session);
+            Check(saving.IsCompletedSuccessfully, "The restart barrier completed before diagnostic saving finished.");
             PumpFor(TimeSpan.FromMilliseconds(250));
             AssertNoPreview(session, "An in-flight worker republished a preview after stop.");
             AssertPassthrough(runtime, physical);
+            WaitFor(() => !session.IsStopping, "Capture worker did not exit before restart", session);
+            session.Start(window, settings, loadModel: false);
+            using (var restarted = WaitPreview(session))
+                Check(restarted.Width > 0, "Saving a recorded trial prevented the next capture from starting.");
+            session.StartDiagnosticRecording(directory, new { source = "Trial after feedback restart" });
+            WaitFor(() => session.DiagnosticSnapshot?.ObservedFrames >= 2, "The next trial did not record after restart", session);
+            session.Stop();
+            var savedNext = session.FinishDiagnosticRecordingAsync(CancellationToken.None);
+            WaitFor(() => savedNext.IsCompleted && !session.IsStopping, "The next recorded trial did not finalize", session);
+            Check(savedNext.IsCompletedSuccessfully && session.DiagnosticSnapshot?.IsFinalized == true,
+                "Restart lost the next recording.");
             if (diagnosticsPath is not null) session.ExportDiagnostics(diagnosticsPath);
-            Console.WriteLine("SUCCESS: real session capture continues with preview hidden; visibility toggles preserve the session, consumer leases, training frames and manual output; stop clears pending previews.");
+            Console.WriteLine(diagnosticOnly
+                ? "SUCCESS: native diagnostic recordings preserve manual output, retain images, finalize on stop, keep hidden capture advancing, and restart capture/recording after the save barrier."
+                : "SUCCESS: real session capture continues with preview hidden; visibility toggles preserve the session, consumer leases, training frames and manual output; stop clears pending previews.");
         }
         finally
         {

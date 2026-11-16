@@ -10,9 +10,12 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="CaptureCadenceChecks.cs" />
+    <Compile Include="DiagnosticRecordingChecks.cs" />
+    <Compile Include="RuntimeSignalContextChecks.cs" />
     <Compile Include="RuntimeTrainingChecks.cs" />
     <Compile Include="RuntimeAccessibilityChecks.cs" />
     <Compile Include="RuntimeTestDevices.cs" />
+    <Compile Include="RuntimeShotTrainerChecks.cs" />
     <Compile Include="PreviewSessionChecks.cs" />
     <Compile Include="TestCaptureProfile.cs" />
     <Compile Include="VoiceEffectsChecks.cs" />

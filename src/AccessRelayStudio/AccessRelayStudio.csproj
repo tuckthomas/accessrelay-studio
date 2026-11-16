@@ -10,7 +10,7 @@
     <AssemblyTitle>AccessRelay Studio Beta</AssemblyTitle>
     <Description>Assistive controller input and voice access for Windows</Description>
     <PackageLicenseExpression>0BSD</PackageLicenseExpression>
-    <Version>1.9.0-beta.34</Version>
+    <Version>1.9.0-beta.43</Version>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
@@ -60,6 +60,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
+    <None Update="ControllerIsolation\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\tools\vision\Set-ControllerIsolation.ps1" Link="ControllerIsolation\Set-ControllerIsolation.ps1"
+          TargetPath="ControllerIsolation\Set-ControllerIsolation.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Audio\VirtualMicHost\AccessRelay.VirtualXboxHost.exe;Audio\VirtualMicHost\ViGEmBus.LICENSE.txt;Audio\VirtualMicHost\XBOX360.PROVENANCE.md">
       <TargetPath>VirtualController\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

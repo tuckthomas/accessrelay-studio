@@ -8,12 +8,13 @@ namespace EliteScriptStudio.Vision;
 /// <summary>Native ONNX person/pose and horizontal-text inference. Game adapters own association and region policy.</summary>
 internal sealed class VisionAnalysisModels : IVisionAnalysisModels
 {
-    private readonly Runner _pose, _detector, _recognizer;
+    private readonly Runner? _pose;
+    private readonly Runner _detector, _recognizer;
     private readonly string[] _characters;
     private bool[] _visited = [];
     private int[] _queue = [];
     public string ExecutionProvider { get; }
-    internal VisionAnalysisModels(VisionCaptureModelSet models, VisionExecutionProvider provider, string? assetRoot = null)
+    internal VisionAnalysisModels(VisionCaptureModelSet models, VisionExecutionProvider provider, string? assetRoot = null, bool loadPose = true)
     {
         ExecutionProvider = provider == VisionExecutionProvider.Cuda ? "CUDAExecutionProvider+CPU-operators" : "CPUExecutionProvider";
         if (models.Id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')) throw new InvalidDataException("Invalid capture model set.");
@@ -29,7 +30,7 @@ internal sealed class VisionAnalysisModels : IVisionAnalysisModels
             return path;
         }
         if (provider == VisionExecutionProvider.Cuda) VisionModel.PrepareLocalCudaRuntime();
-        _pose = new(Verified("pose.onnx", models.PoseSha256), provider);
+        _pose = loadPose ? new(Verified("pose.onnx", models.PoseSha256), provider) : null;
         try
         {
             _detector = new(Verified("text-det.onnx", models.TextDetectorSha256), provider);
@@ -42,10 +43,11 @@ internal sealed class VisionAnalysisModels : IVisionAnalysisModels
             }
             catch { _recognizer?.Dispose(); _detector.Dispose(); throw; }
         }
-        catch { _pose.Dispose(); throw; }
+        catch { _pose?.Dispose(); throw; }
     }
     public VisionPersonPose[] DetectPeople(ReadOnlySpan<byte> bgra, int width, int height, int stride, VisionCrop? searchRegion = null)
     {
+        if (_pose is null) throw new InvalidOperationException("Pose detection is unavailable because the pose model was not loaded.");
         var region = searchRegion ?? new(0, 0, 1, 1); region.Validate();
         const int size = 416; double ratio = Math.Min(size / (width * region.Width), size / (height * region.Height));
         int rw = Math.Clamp((int)(width * region.Width * ratio), 1, size), rh = Math.Clamp((int)(height * region.Height * ratio), 1, size);
@@ -228,6 +230,6 @@ internal sealed class VisionAnalysisModels : IVisionAnalysisModels
         internal void Stop() { try { _run.Terminate = true; } catch (ObjectDisposedException) { } }
         public void Dispose() { _input?.Dispose(); _run.Dispose(); Session.Dispose(); }
     }
-    public void RequestStop() { _pose.Stop(); _detector.Stop(); _recognizer.Stop(); }
-    public void Dispose() { _recognizer.Dispose(); _detector.Dispose(); _pose.Dispose(); }
+    public void RequestStop() { _pose?.Stop(); _detector.Stop(); _recognizer.Stop(); }
+    public void Dispose() { _recognizer.Dispose(); _detector.Dispose(); _pose?.Dispose(); }
 }

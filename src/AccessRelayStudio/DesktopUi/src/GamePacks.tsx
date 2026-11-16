@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Select, SelectOption, Slider, Button, Card, DiscardDialog, EmptyState, Field, Notice, useUnsavedChanges, type PageProps } from './ui';
+import { ControllerTrainer } from './ControllerTrainer';
+import { Select, SelectOption, Slider, Button, Card, DiscardDialog, EmptyState, Field, Notice, hasUnsavedChanges, useUnsavedChanges, type PageProps } from './ui';
 
 export function GamePacks({ state, status, command }: PageProps) {
   const packs: any[] = state.gamePacks || [];
-  const [key, setKey] = useState(packs[0]?.key || ''), [next, setNext] = useState<string | null>(null);
+  const preferred = packs.find(item => item.manifest.controllerTrainer && item.manifest.id === state.activeProfile?.gamePack?.id)
+    || packs.find(item => item.manifest.id === state.activeProfile?.gamePack?.id && item.manifest.version === state.activeProfile?.gamePack?.version)
+    || packs.find(item => item.manifest.controllerTrainer) || packs[0];
+  const [key, setKey] = useState(preferred?.key || ''), [next, setNext] = useState<string | null>(null);
   const pack = packs.find(item => item.key === key), manifest = pack?.manifest;
   const current = state.activeProfile?.gamePack;
   const matches = !!manifest && current?.id === manifest.id && current?.version === manifest.version && current?.manifestSha256 === pack.manifestSha256;
@@ -27,20 +31,22 @@ export function GamePacks({ state, status, command }: PageProps) {
       {(state.gamePackErrors || []).map((issue: string, index: number) => <Notice tone="warning" key={index}>{issue}</Notice>)}
       {error && <Notice tone="danger">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
       {!packs.length ? <EmptyState title="No game packs installed" description="Import a pack manifest from a folder containing its declared resources." /> : <>
-        <Field label="Installed package"><Select value={key} disabled={locked} onValueChange={selectionValue => { if (dirty) setNext(selectionValue); else setKey(selectionValue); }}>{packs.map(item => <SelectOption key={item.key} value={item.key}>{item.manifest.name} · {item.manifest.version}</SelectOption>)}</Select></Field>
+        <Field label="Installed package"><Select value={key} disabled={locked} onValueChange={selectionValue => { if (hasUnsavedChanges()) setNext(selectionValue); else setKey(selectionValue); }}>{packs.map(item => <SelectOption key={item.key} value={item.key}>{item.manifest.name} · {item.manifest.version}</SelectOption>)}</Select></Field>
         {manifest && <><p>{manifest.description}</p><p className="subtle">License: {manifest.license}. {manifest.assets.length} declared resources. {matches ? 'This controller profile is linked to this pack and version.' : 'This pack will create a new profile with sequences off.'}</p>
           {!!manifest.presets?.length && <Field label="Tuning preset"><Select value="" disabled={locked} onValueChange={selectionValue => { const preset = manifest.presets[Number(selectionValue)]; if (preset) setValues({ ...Object.fromEntries(manifest.tuning.map((control: any) => [control.id, control.default])), ...preset.values }); }}><SelectOption value="">Choose a preset</SelectOption>{manifest.presets.map((preset: any, index: number) => <SelectOption key={index} value={index}>{preset.name}</SelectOption>)}</Select></Field>}
           <div className="form-grid">{manifest.tuning.map((control: any) => <Field key={control.id} label={control.label} hint={control.kind === 'range' ? String(values[control.id] ?? control.default) : undefined}>
             {control.kind === 'choice' ? <Select disabled={locked} value={values[control.id] ?? control.default} onValueChange={selectionValue => setValues({ ...values, [control.id]: Number(selectionValue) })}>{control.choices.map((choice: any) => <SelectOption key={choice.value} value={choice.value}>{choice.label}</SelectOption>)}</Select>
               : <Slider type="range" min={control.minimum} max={control.maximum} step={control.step} disabled={locked} value={values[control.id] ?? control.default} onChange={event => setValues({ ...values, [control.id]: Number(event.target.value) })} />}
           </Field>)}</div>
-          <div className="row"><Button variant="primary" disabled={locked} onClick={() => void execute('packCreateSetup', { key, values })}>Create profile from plugin</Button>
+          <div className="row"><Button variant="primary" disabled={locked || (matches && !!manifest.controllerTrainer)} onClick={() => void execute('packCreateSetup', { key, values })}>Create profile from plugin</Button>
             <Button disabled={locked || !matches || !dirty} onClick={() => void execute('packTune', { key, values })}>Save pack tuning</Button>
             <Button disabled={locked || !dirty} onClick={() => { setValues(JSON.parse(saved)); setBaseline(saved); }}>Discard pack edits</Button></div>
-          <p className="subtle">Pack tuning updates imported Lua scripts. Edited script sources need a fresh profile. Saving pauses sequences and disarms assistance; enable sequences explicitly when ready. Models retain Game Vision's compatibility, accuracy and calibration requirements.</p>
+          {manifest.controllerTrainer ? <p className="subtle">{matches ? 'Select a shot below to record or tune it. Each shot keeps its own baseline, Lua and controller assignment.' : 'Create a controller profile to begin recording your shots. Existing controller profiles remain available.'}</p>
+            : <p className="subtle">Pack tuning updates imported Lua scripts. Edited script sources need a fresh profile. Saving pauses sequences and disarms assistance; enable sequences explicitly when ready. Models retain Game Vision's compatibility, accuracy and calibration requirements.</p>}
           {(pack.models || []).map((path: string) => <Button key={path} disabled={locked} onClick={() => void execute('packModelImport', { key, path })}>Import model {path.split('/').at(-1)} into Game Vision</Button>)}
           <details><summary>Review pack resources and integrity</summary><p className="subtle">Manifest SHA-256: {pack.manifestSha256}</p><ul>{manifest.assets.map((asset: any) => <li key={asset.path}>{asset.path} · {asset.kind} · {asset.bytes} bytes</li>)}</ul></details>
         </>}
       </>}
-    </div></Card><DiscardDialog open={next !== null} onKeep={() => setNext(null)} onDiscard={() => { setKey(next!); setNext(null); }} /></div>;
+    </div></Card>{matches && manifest?.controllerTrainer && <ControllerTrainer key={key + ':' + state.activeProfile.id} state={state} status={status} command={command} pack={pack} />}
+    <DiscardDialog open={next !== null} onKeep={() => setNext(null)} onDiscard={() => { setKey(next!); setNext(null); }} /></div>;
 }

@@ -7,12 +7,14 @@ namespace EliteScriptStudio.Core;
 public sealed record LuaControllerScript(Guid Id, string Name, string Source)
 {
     public ImmutableDictionary<string, double> Tuning { get; init; } = ImmutableDictionary<string, double>.Empty;
+    public RecordedInputTraining? Training { get; init; }
     public const int MaxScripts = 32;
     public const int MaxSourceLength = 524288;
 
     public void Validate()
     {
         GamePackManifest.ValidateNumbers(Tuning);
+        Training?.Validate();
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 80 || Name.Any(char.IsControl))
             throw new InvalidDataException("A Lua script needs an ID and a name of up to 80 characters.");
         if (string.IsNullOrWhiteSpace(Source) || Source.Length > MaxSourceLength)

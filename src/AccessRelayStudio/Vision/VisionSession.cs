@@ -23,8 +23,25 @@ internal sealed class VisionPreview(byte[] pixels, int width, int height, int st
     public VisionRegionObservation? Tracking { get; } = tracking;
     public VisionSignalObservation? Signal { get; } = signal;
     public int Length => checked(Stride * Height);
+    private static CapturedCropFrame? SliceCrop(CapturedVisionFrame frame, VisionCrop crop)
+    {
+        if (frame.Width <= 0 || frame.Height <= 0) return null;
+        int x0 = Math.Clamp((int)Math.Floor(crop.Left * frame.Width), 0, frame.Width - 1);
+        int y0 = Math.Clamp((int)Math.Floor(crop.Top * frame.Height), 0, frame.Height - 1);
+        int x1 = Math.Clamp((int)Math.Ceiling((crop.Left + crop.Width) * frame.Width), x0 + 1, frame.Width);
+        int y1 = Math.Clamp((int)Math.Ceiling((crop.Top + crop.Height) * frame.Height), y0 + 1, frame.Height);
+        int cw = x1 - x0, ch = y1 - y0, cStride = cw * 4;
+        byte[] pixels = new byte[checked(cStride * ch)];
+        var src = frame.Pixels.Span;
+        for (int y = 0; y < ch; y++)
+            src.Slice((y0 + y) * frame.Stride + x0 * 4, cStride).CopyTo(pixels.AsSpan(y * cStride, cStride));
+        return new(pixels, cw, ch, cStride, frame.CaptureTicks);
+    }
+
     public void Dispose() => ArrayPool<byte>.Shared.Return(Pixels);
 }
+
+internal sealed record CapturedCropFrame(byte[] Pixels, int Width, int Height, int Stride, long CaptureTicks);
 
 /// <summary>Capture and inference live outside controller locks. Only StudioRuntime arbitrates output.</summary>
 internal sealed class VisionSession : IDisposable
@@ -35,6 +52,7 @@ internal sealed class VisionSession : IDisposable
     private Thread? _worker;
     private VisionModel? _model;
     private VisionTrainingRecorder? _recorder;
+    private VisionDiagnosticRecorder? _diagnosticRecorder;
     private VisionRegionObservation? _tracking;
     private IVisionRegionTracker? _regionTracker;
     private IVisionLivePredictor? _livePredictor;
@@ -57,6 +75,7 @@ internal sealed class VisionSession : IDisposable
     private bool _attemptNeedsNeutral;
     private static int _attemptWritePending;
     private static long _attemptReportNumber;
+    private (VisionCrop Crop, TaskCompletionSource<CapturedCropFrame?> Completion)? _cropRequest;
     private bool _disposed;
     private readonly record struct FrameMetric(long Sequence, long CaptureTicks, long CompletedTicks,
         double ProcessingMs, bool PredictionSubmitted, bool PredictionAccepted, VisionStatusSnapshot Output,
@@ -90,6 +109,7 @@ internal sealed class VisionSession : IDisposable
     }
     internal string TrainingStatus { get { lock (_gate) return _recorder?.Message ?? "No training take is recording."; } }
     internal bool IsRecordingTraining { get { lock (_gate) return _recorder?.IsRecording == true; } }
+    internal VisionDiagnosticStatus? DiagnosticSnapshot { get { lock (_gate) return _diagnosticRecorder?.Snapshot; } }
     internal VisionTrainingStatus TrainingSnapshot
     {
         get
@@ -110,6 +130,20 @@ internal sealed class VisionSession : IDisposable
         }
     }
 
+    internal async Task<CapturedCropFrame?> CaptureRegionOnceAsync(VisionCrop crop, CancellationToken cancellation)
+    {
+        crop.Validate();
+        TaskCompletionSource<CapturedCropFrame?> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_gate)
+        {
+            if (_disposed || _stopping || _worker?.IsAlive != true) return null;
+            _cropRequest?.Completion.TrySetResult(null);
+            _cropRequest = (crop, tcs);
+        }
+        using var registration = cancellation.Register(() => tcs.TrySetCanceled(cancellation));
+        return await tcs.Task.ConfigureAwait(false);
+    }
+
     internal void Start(nint hwnd, VisionSettings settings, bool loadModel = true, IVisionRegionTracker? regionTracker = null, IVisionLivePredictor? predictor = null)
     {
         settings.Validate();
@@ -117,6 +151,8 @@ internal sealed class VisionSession : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_worker?.IsAlive == true) throw new InvalidOperationException("Stop the current observation session first.");
+            if (_diagnosticRecorder?.Snapshot is { IsFinalized: false })
+                throw new InvalidOperationException("Wait for the diagnostic recording to finish saving.");
             _stopping = false;
             _stop?.Dispose();
             _stop = new CancellationTokenSource();
@@ -295,26 +331,23 @@ internal sealed class VisionSession : IDisposable
                         bool accepted = false;
                         bool submitted = false;
                         bool hasDecision = false;
-                        VisionSignalContext? signalContext = null;
+                        VisionSignalContext? signalContext = _runtime.ReadVisionSignalContext();
                         if (predictor is not null)
                         {
-                            var input = _runtime.Latest?.Input;
-                            var context = new VisionSignalContext(input is { IsConnected: true } sample ? sample.State : null,
-                                _runtime.LatestInputTimestamp, observedStatus.SessionGeneration, observedStatus.ShotToken,
-                                observedStatus.ShotStartedTimestamp, observedStatus.Armed);
-                            signalContext = context;
+                            var context = signalContext.Value;
                             var signal = predictor.Observe(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride,
                                 frame.Sequence, frame.SourceGeneration, frame.CaptureTicks, context);
                             Volatile.Write(ref _signal, signal); modelMessage = predictor.Status;
-                            if (signal.TimeToTargetMs is { } target || signal.InvalidateAttempt)
+                            if (signal.TimeToTargetMs.HasValue || signal.InvalidateAttempt || signal.ContinueCommittedAction)
                             {
                                 hasDecision = true; predictions++;
                                 if (fresh && sourceReady && predictor.CanArm)
                                 {
                                     submitted = true;
-                                    accepted = _runtime.SubmitVisionPrediction(new(observedStatus.SessionGeneration, observedStatus.ShotToken,
+                                    accepted = _runtime.SubmitVisionPrediction(new(context.SessionGeneration, context.ShotToken,
                                         frame.Sequence, frame.CaptureTicks, Stopwatch.GetTimestamp(), signal.TimeToTargetMs ?? 0,
-                                        signal.Confidence, signal.UncertaintyMs, signal.Acquired && !signal.InvalidateAttempt));
+                                        signal.Confidence, signal.UncertaintyMs, signal.Acquired && !signal.InvalidateAttempt)
+                                    { ContinueCommittedAction = signal.ContinueCommittedAction && !signal.InvalidateAttempt });
                                 }
                             }
                         }
@@ -335,13 +368,26 @@ internal sealed class VisionSession : IDisposable
                         else if (regions is { Valid: false }) model?.ResetTracking();
                         long completed = Stopwatch.GetTimestamp();
                         double processingMs = Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds;
+                        VisionDiagnosticRecorder? diagnostic;
+                        lock (_gate) diagnostic = _diagnosticRecorder;
+                        diagnostic?.Capture(frame, completed, processingMs, predictor is null ? null : _signal,
+                            signalContext, _runtime.Latest?.Output, _runtime.VisionStatus, _runtime.LastVisionAction,
+                            fresh, submitted, accepted, source.Pipeline);
                         double? preprocessingMs = null, inferenceMs = null;
                         model?.Diagnostics.FrameTimings(frame.Sequence, out preprocessingMs, out inferenceMs);
                         if (predictor is not null) { preprocessingMs = _signal?.ProcessingMs; inferenceMs = 0; }
                         frames++;
                         bool buildPreview;
-                        lock (_gate) buildPreview = acquisition is null && _previewEnabled && !cancellation.IsCancellationRequested &&
-                            Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200;
+                        (VisionCrop Crop, TaskCompletionSource<CapturedCropFrame?> Completion)? cropRequest;
+                        lock (_gate)
+                        {
+                            buildPreview = acquisition is null && _previewEnabled && !cancellation.IsCancellationRequested &&
+                                Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200;
+                            cropRequest = _cropRequest;
+                            _cropRequest = null;
+                        }
+                        if (cropRequest is { } pendingCrop)
+                            pendingCrop.Completion.TrySetResult(SliceCrop(frame, pendingCrop.Crop));
                         if (buildPreview)
                         {
                             // GPU readback can wait on the driver. Never hold the
@@ -382,7 +428,9 @@ internal sealed class VisionSession : IDisposable
                             // Trace ordinary attempts, including unarmed or wrongly directed holds.
                             // Neither this trace nor its disk writer changes controller output.
                             bool active = physical.Physical is { } state && (predictor.Action.Kind == VisionActionKind.RightStickStroke
-                                ? Math.Abs((int)state.RightY) >= predictor.Action.AxisThreshold || Math.Abs((int)state.RightX) >= predictor.Action.AxisThreshold
+                                ? (predictor.Action.TriggerPaddle != PaddleButtons.None
+                                    ? (physical.HeldPaddles & predictor.Action.TriggerPaddle) == predictor.Action.TriggerPaddle
+                                    : Math.Abs((int)state.RightY) >= predictor.Action.AxisThreshold || Math.Abs((int)state.RightX) >= predictor.Action.AxisThreshold)
                                 : (state.Buttons & (ushort)settings.ShootButton) != 0);
                             if (!active) { QueueAttemptDiagnostics(completed, "Physical input returned below the hold threshold."); _attemptNeedsNeutral = false; }
                             else if (!_attemptNeedsNeutral)
@@ -407,6 +455,7 @@ internal sealed class VisionSession : IDisposable
         finally
         {
             QueueAttemptDiagnostics(Stopwatch.GetTimestamp(), "Observation ended.");
+            StopDiagnosticRecording();
             lock (_gate) _stopping = true;
             _performance.Finish();
             _runtime.FinishLockMeasurements(_lockMeasurementToken);
@@ -419,6 +468,8 @@ internal sealed class VisionSession : IDisposable
             }
             lock (_gate)
             {
+                _cropRequest?.Completion.TrySetResult(null);
+                _cropRequest = null;
                 if (model is not null) _lastModelEvents = model.Diagnostics.ExportEvents();
                 _model = null;
                 _status = _status with { Running = false, CanArm = false, CaptureFailed = !cancellation.IsCancellationRequested && _status.CaptureFailed,
@@ -443,6 +494,7 @@ internal sealed class VisionSession : IDisposable
             _model?.RequestStop();
             _regionTracker?.RequestStop();
             _recorder?.Stop();
+            _diagnosticRecorder?.Stop("Preview stopped.");
             _preview?.Dispose(); _preview = null;
             _status = _status with { CanArm = false, Message = "Stopping observation…" };
         }
@@ -529,6 +581,8 @@ internal sealed class VisionSession : IDisposable
         lock (_gate)
         {
             if (_stopping) throw new InvalidOperationException("Live view is stopping. Record a training clip after it has stopped.");
+            if (_diagnosticRecorder?.Snapshot is { IsFinalized: false })
+                throw new InvalidOperationException("Finish saving the diagnostic recording before recording a training clip.");
             if (!_status.Running || _activeSettings is null) throw new InvalidOperationException("Start live view before recording training data.");
             if (captureOverride is null && _model is null && _activeSettings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic)
                 captureOverride = profile.PrepareCalibrationCapture(_activeSettings, _status.CaptureWidth, _status.CaptureHeight);
@@ -574,6 +628,55 @@ internal sealed class VisionSession : IDisposable
 
     internal void StopTraining() { lock (_gate) _recorder?.Stop(complete: true); }
 
+    internal void StartDiagnosticRecording(string parent, object context)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_stopping || !_status.Running || _status.CaptureWidth <= 0 || _activeSettings is null)
+                throw new InvalidOperationException("Start the preview and wait for gameplay before recording diagnostics.");
+            if (_diagnosticRecorder?.Snapshot is { IsFinalized: false })
+                throw new InvalidOperationException("A diagnostic recording is already recording or saving.");
+            if (_recorder?.Snapshot is { HasTake: true, IsFinalized: false })
+                throw new InvalidOperationException("Finish the training clip before recording diagnostics.");
+            _diagnosticRecorder?.Dispose();
+            _diagnosticRecorder = new(parent, new
+            {
+                selection = context, settings = _activeSettings,
+                appVersion = System.Reflection.Assembly.GetEntryAssembly()?.GetCustomAttributes(false)
+                    .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion,
+                predictor = _livePredictor is { } predictor ? new { predictor.Name,
+                    assembly = predictor.GetType().Assembly.GetName().Name,
+                    version = predictor.GetType().Assembly.GetName().Version?.ToString(), predictor.Action } : null
+            });
+        }
+    }
+    internal void StopDiagnosticRecording() { lock (_gate) _diagnosticRecorder?.Stop(); }
+
+    internal Task FinishDiagnosticRecordingAsync(CancellationToken cancellation)
+    {
+        VisionDiagnosticRecorder? recorder;
+        lock (_gate) { recorder = _diagnosticRecorder; recorder?.Stop(); }
+        // Waiting for the capture worker alone does not drain the image writer.
+        // Keep its exact recording until it has finalized before restarting capture.
+        return recorder?.Completion.WaitAsync(cancellation) ?? Task.CompletedTask;
+    }
+
+    private static CapturedCropFrame? SliceCrop(CapturedVisionFrame frame, VisionCrop crop)
+    {
+        if (frame.Width <= 0 || frame.Height <= 0) return null;
+        int x0 = Math.Clamp((int)Math.Floor(crop.Left * frame.Width), 0, frame.Width - 1);
+        int y0 = Math.Clamp((int)Math.Floor(crop.Top * frame.Height), 0, frame.Height - 1);
+        int x1 = Math.Clamp((int)Math.Ceiling((crop.Left + crop.Width) * frame.Width), x0 + 1, frame.Width);
+        int y1 = Math.Clamp((int)Math.Ceiling((crop.Top + crop.Height) * frame.Height), y0 + 1, frame.Height);
+        int cw = x1 - x0, ch = y1 - y0, cStride = cw * 4;
+        byte[] pixels = new byte[checked(cStride * ch)];
+        var src = frame.Pixels.Span;
+        for (int y = 0; y < ch; y++)
+            src.Slice((y0 + y) * frame.Stride + x0 * 4, cStride).CopyTo(pixels.AsSpan(y * cStride, cStride));
+        return new(pixels, cw, ch, cStride, frame.CaptureTicks);
+    }
+
     public void Dispose()
     {
         Thread? worker;
@@ -582,6 +685,7 @@ internal sealed class VisionSession : IDisposable
         // The worker owns model/capture disposal and must finish before the controller runtime is disposed.
         if (worker is not null && worker != Thread.CurrentThread) worker.Join();
         _recorder?.Dispose();
+        _diagnosticRecorder?.Dispose();
         lock (_gate) { _stop?.Dispose(); _stop = null; }
     }
 }

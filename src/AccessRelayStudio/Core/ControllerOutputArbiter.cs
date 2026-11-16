@@ -23,6 +23,8 @@ internal sealed class ControllerOutputArbiter
     private readonly string _runId = Guid.NewGuid().ToString("N");
     public VisionActionReceipt? LastAction { get; private set; }
     public VisionControllerAction Action => _action;
+    public long HoldStartedTimestamp => _held ? _holdStarted : 0;
+    public long StrokeAnchorTimestamp => _strokeStarted ? _strokeAnchor : 0;
     public void ClearActionReceipt() => LastAction = null;
 
     public ControllerOutputArbiter(long timestampFrequency)
@@ -60,6 +62,17 @@ internal sealed class ControllerOutputArbiter
         Invalidate("Vision configuration changed. Validate the source and model again.", sourceLost: true, disarm: true);
     }
 
+    public bool TryAdjustTiming(Func<VisionSettings, VisionSettings> update, VisionControllerAction? action = null)
+    {
+        if (_shot != 0 || _strokeStarted || _deadline.HasValue) return false;
+        var nextSettings = update(_settings);
+        nextSettings.Validate();
+        if (action is not null) action.Validate();
+        _settings = nextSettings;
+        if (action is not null) _action = action;
+        return true;
+    }
+
     public long BeginSession()
     {
         Invalidate("Observation ready. Release the shoot button before arming a new attempt.", disarm: true);
@@ -84,7 +97,10 @@ internal sealed class ControllerOutputArbiter
             _message = "Arming requires a validated source/model, connected physical controller, available output, and no conflicting macro or recording.";
             return false;
         }
-        Invalidate(armed ? "Armed. Waiting for a fresh physical press." : "Observation only. Automatic release is off.");
+        bool usingPaddle = _action.Kind == VisionActionKind.RightStickStroke && _action.TriggerPaddle != PaddleButtons.None;
+        Invalidate(armed
+            ? (usingPaddle ? "Armed. Hold the selected paddle while keeping the right stick centered." : "Armed. Waiting for a fresh physical press.")
+            : "Observation only. Automatic release is off.");
         _armed = armed;
         _needsPhysicalRelease = _held || (_action.Kind == VisionActionKind.RightStickStroke && !_physicalNeutral);
         return true;
@@ -114,18 +130,22 @@ internal sealed class ControllerOutputArbiter
     }
 
     public ControllerState Sample(ControllerState physical, ControllerState composed, bool connected,
-        bool outputAvailable, bool conflictingAutomation, long now)
+        bool outputAvailable, bool conflictingAutomation, long now, long? inputTimestamp = null,
+        PaddleButtons heldPaddles = PaddleButtons.None)
     {
         _composed = connected ? composed : default;
         _lastSampleAt = now;
         _latched &= physical.Buttons;
+        bool usingPaddle = _action.Kind == VisionActionKind.RightStickStroke && _action.TriggerPaddle != PaddleButtons.None;
+        bool paddleHeld = usingPaddle && connected && (heldPaddles & _action.TriggerPaddle) == _action.TriggerPaddle;
         bool axisHeld = connected && physical.RightY <= -_action.AxisThreshold && Math.Abs((int)physical.RightX) < _action.AxisThreshold;
         _physicalNeutral = Math.Abs((int)physical.RightY) < 4000 && Math.Abs((int)physical.RightX) < 4000;
-        if (_physicalNeutral || !connected) _axisLatched = false;
-        bool held = _action.Kind == VisionActionKind.RightStickStroke ? axisHeld
+        if ((_physicalNeutral && !paddleHeld) || !connected) _axisLatched = false;
+        bool held = _action.Kind == VisionActionKind.RightStickStroke
+            ? (usingPaddle ? paddleHeld : axisHeld)
             : connected && (physical.Buttons & (ushort)_settings.ShootButton) != 0;
         bool rising = held && !_held;
-        if (rising) _holdStarted = now;
+        if (rising) _holdStarted = inputTimestamp is > 0 && inputTimestamp <= now ? inputTimestamp.Value : now;
         _held = held;
         bool eligible = connected && outputAvailable && !conflictingAutomation && !_trainingRecording;
         if (!eligible)
@@ -138,15 +158,26 @@ internal sealed class ControllerOutputArbiter
         _eligible = true;
         if (!held)
         {
-            if (_shot != 0 || _deadline.HasValue) CancelAttempt("Physical release cancelled the pending action.");
+            if (_shot != 0 || _deadline.HasValue) CancelAttempt(usingPaddle
+                ? "Paddle release cancelled the pending action."
+                : "Physical release cancelled the pending action.");
+            _ownsRightStick = false;
             if (_action.Kind != VisionActionKind.RightStickStroke || _physicalNeutral) _needsPhysicalRelease = false;
             _holdStarted = 0;
-            if (_armed && _sourceReady) _message = "Armed. Waiting for a fresh physical press.";
+            if (_armed && _sourceReady) _message = usingPaddle
+                ? "Armed. Hold the selected paddle while keeping the right stick centered."
+                : "Armed. Waiting for a fresh physical press.";
             return Output;
+        }
+        bool readyForTrigger = _armed && _sourceReady && !_needsPhysicalRelease && !_axisLatched && _latched == 0;
+        if (usingPaddle && readyForTrigger && !_strokeStarted && !_deadline.HasValue)
+        {
+            _ownsRightStick = true;
+            _rightY = short.MinValue;
         }
         bool qualified = _action.Kind == VisionActionKind.RightStickStroke || _action.HoldQualificationMs > 0
             ? _holdStarted != 0 && Milliseconds((double)now - _holdStarted) >= _action.HoldQualificationMs : rising;
-        if (qualified && _shot == 0 && !_needsPhysicalRelease && !_axisLatched && _latched == 0 && _armed && _sourceReady)
+        if (qualified && _shot == 0 && readyForTrigger)
         {
             _shot = ++_nextShot;
             _shotStarted = _action.HoldQualificationMs > 0 || _action.Kind == VisionActionKind.RightStickStroke ? _holdStarted : now;
@@ -177,11 +208,20 @@ internal sealed class ControllerOutputArbiter
         _confidence = prediction.Confidence;
         _uncertainty = prediction.UncertaintyMs;
         double age = Milliseconds((double)now - prediction.CaptureTimestamp);
-        // After the selected timing anchor, meter disappearance is expected. Keep
-        // checking stream/input freshness while completing the already committed stroke.
-        if (_strokeStarted && now >= _strokeAnchor && prediction.CaptureTimestamp <= prediction.CompletedTimestamp
-            && prediction.CompletedTimestamp <= now && age >= 0 && age <= _settings.MaximumFrameAgeMs)
-        { _lastCaptureAt = prediction.CaptureTimestamp; _accepted++; return true; }
+        // Explicit continuation cannot create or move a deadline, or excuse a tracking rejection.
+        if (prediction.ContinueCommittedAction)
+        {
+            if (_action.Kind == VisionActionKind.RightStickStroke && _strokeStarted
+                && prediction.CaptureTimestamp >= _strokeAnchor && prediction.CaptureTimestamp <= prediction.CompletedTimestamp
+                && prediction.CompletedTimestamp <= now && age >= 0 && age <= _settings.MaximumFrameAgeMs)
+            {
+                _lastCaptureAt = prediction.CaptureTimestamp; _accepted++;
+                _message = "Completing the anchored stick stroke; no new timing forecast.";
+                return true;
+            }
+            _rejected++; CancelAttempt("Continuation rejected: no anchored stroke or fresh post-anchor frame.");
+            return false;
+        }
         if (prediction.CaptureTimestamp < _shotStarted || prediction.CaptureTimestamp > prediction.CompletedTimestamp
             || prediction.CompletedTimestamp > now || age < 0 || age > _settings.MaximumFrameAgeMs
             || !double.IsFinite(prediction.TimeToReleaseMs) || prediction.TimeToReleaseMs < 0
@@ -195,6 +235,11 @@ internal sealed class ControllerOutputArbiter
             CancelAttempt("Prediction rejected: stale frame, uncertain player/animation, or invalid timing.");
             return false;
         }
+        // A started ramp has fixed deadlines. Fresh, valid observations still
+        // refresh tracking, but their revised target cannot retroactively make
+        // that ramp's start late. Tracking/input/freshness failures above still cancel.
+        if (_action.Kind == VisionActionKind.RightStickStroke && _strokeStarted)
+        { _lastCaptureAt = prediction.CaptureTimestamp; _accepted++; return true; }
         double waitMs = prediction.TimeToReleaseMs - _settings.EstimatedVideoDelayMs
             - age - _settings.EstimatedInputDelayMs + _settings.CorrectionMs;
         if (!double.IsFinite(waitMs) || waitMs < -_settings.MaximumLatenessMs)
@@ -212,15 +257,14 @@ internal sealed class ControllerOutputArbiter
             CancelAttempt("Release deadline is outside the monotonic clock range.");
             return false;
         }
-        if (_action.Kind == VisionActionKind.RightStickStroke && _strokeStarted)
-        { _lastCaptureAt = prediction.CaptureTimestamp; _accepted++; return true; }
         _deadline = (long)Math.Round(deadline);
         if (_action.Kind == VisionActionKind.RightStickStroke)
         {
             _lastCaptureAt = prediction.CaptureTimestamp;
             _strokeAnchor = _deadline.Value;
             _strokeStart = _strokeAnchor - (long)Math.Round(_action.AnchorTimeFraction * _action.StrokeDurationMs * _frequency / 1000);
-            if (Milliseconds((double)now - _strokeStart) > _settings.MaximumLatenessMs)
+            if (_strokeStart < now && _strokeAnchor > now) _strokeStart = now;
+            if (_strokeAnchor <= now || Milliseconds((double)now - _strokeStart) > _settings.MaximumLatenessMs)
             { _missed++; _rejected++; CancelAttempt("The complete stick stroke cannot start before its calibrated anchor."); return false; }
             _deadline = _strokeStart;
             _ownsRightStick = true; _rightY = short.MinValue;
@@ -229,6 +273,7 @@ internal sealed class ControllerOutputArbiter
         _accepted++;
         _message = "Release scheduled from a current animation prediction.";
         return true;
+
     }
 
     public bool TryAdvanceDeadline(long now)
@@ -271,7 +316,10 @@ internal sealed class ControllerOutputArbiter
     {
         if (_trainingRecording || !_armed || !_sourceReady || !_eligible || !_held || _shot == 0
             || Milliseconds((double)now - _lastSampleAt) > 50
-            || Milliseconds((double)now - _lastCaptureAt) > (_strokeStarted ? _settings.MaximumFrameAgeMs : Math.Min(25, _settings.MaximumFrameAgeMs))
+            // A forecast already accounts for its target horizon. Enforce the configured
+            // freshness bound at stroke start too; a hidden 25 ms cutoff rejected valid
+            // forecasts between 30 fps frames without any new negative observation.
+            || (!_strokeStarted && Milliseconds((double)now - _lastCaptureAt) > _settings.MaximumFrameAgeMs)
             || Milliseconds((double)now - deadline) > _settings.MaximumLatenessMs)
         { _missed++; CancelAttempt("Stick action cancelled: input, capture or scheduler freshness was lost."); return true; }
         _strokeStarted = true;
@@ -283,7 +331,9 @@ internal sealed class ControllerOutputArbiter
             LastAction = new(++_receiptId, _generation, _shot, _strokeStart, _strokeAnchor, now,
                 _action.StrokeDurationMs, _action.AnchorFraction, _action.ConfigurationKey, _runId);
             _strokeStarted = false; _shot = _shotStarted = _upStarted = 0;
-            _message = "Stick stroke completed. Return the physical stick to neutral before another attempt.";
+            _message = _action.Kind == VisionActionKind.RightStickStroke && _action.TriggerPaddle != PaddleButtons.None
+                ? "Stick stroke completed. Release the paddle before another attempt."
+                : "Stick stroke completed. Return the physical stick to neutral before another attempt.";
             return true;
         }
         double phase = Math.Clamp(elapsed / _action.StrokeDurationMs, 0, 1);

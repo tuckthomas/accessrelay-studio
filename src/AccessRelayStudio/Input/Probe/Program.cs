@@ -21,6 +21,37 @@ try
         Thread.Sleep(1000);
         sample = Task.Run(monitor.Poll).GetAwaiter().GetResult();
     }
+    if (args is ["--background-backends-json", var backendsPath])
+    {
+        var device = sample.Device ?? throw new InvalidOperationException("No verified physical gamepad is available.");
+        var results = new List<object>();
+        foreach (string factoryName in new[] { "TryCreateInbox", "TryCreateRedist" })
+        {
+            var began = System.Diagnostics.Stopwatch.StartNew();
+            var factory = typeof(GameInputBackground).GetMethod(factoryName,
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            using var backend = (GameInputBackground?)factory.Invoke(null, null);
+            var readings = new List<object>();
+            for (int i = 0; i < 200; i++)
+            {
+                if (i % 50 == 0 && backend?.IsBound == false)
+                    backend.Bind(new HardwareId(device.VendorId, device.ProductId));
+                if (backend?.TryRead(out var reading) == true)
+                    readings.Add(new { reading.Timestamp, reading.RightThumbstickX, reading.RightThumbstickY, reading.Buttons });
+                Thread.Sleep(10);
+            }
+            results.Add(new { backend = factoryName, created = backend is not null,
+                bound = backend?.IsBound == true, elapsedMs = began.Elapsed.TotalMilliseconds, readings });
+        }
+        string destination = Path.GetFullPath(backendsPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write);
+        JsonSerializer.Serialize(output, new { capturedAtUtc = DateTimeOffset.UtcNow,
+            scope = "Read-only background input backend comparison. No controller output or rumble.", results },
+            new JsonSerializerOptions { WriteIndented = true });
+        Console.WriteLine($"SUCCESS Saved read-only background backend comparison to {destination}");
+        return;
+    }
     if (args is ["--inventory-json", var inventoryPath])
     {
         string destination = Path.GetFullPath(inventoryPath);
@@ -39,7 +70,7 @@ try
         using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write);
         JsonSerializer.Serialize(output, exportReport, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
     }
-    else if (args.Length != 0) throw new ArgumentException("Usage: EliteInputProbe [--inventory-json new-report.json]");
+    else if (args.Length != 0) throw new ArgumentException("Usage: EliteInputProbe [--inventory-json|--background-backends-json new-report.json]");
     Console.WriteLine($"Physical gamepad selected: {sample.IsConnected} · {sample.Source}");
     Console.WriteLine($"Verified selectable gamepads: {sample.Devices.Count}");
     Console.WriteLine($"Controller keyboard found: {sample.IsPaddleInterfacePresent} · {sample.PaddleSource}");
@@ -63,6 +94,11 @@ try
     });
     if (physical != new ControllerState(0x4004, 0, 255, short.MinValue, short.MaxValue, 0, 0))
         throw new InvalidOperationException("Windows gamepad conversion lost a passthrough control.");
+    if (RawHidGamepadInput.HasAnyNonZero(new byte[16], 16) ||
+        !RawHidGamepadInput.HasAnyNonZero([0, 0x80, 0, 0x80], 4))
+        throw new InvalidOperationException("Raw HID zero-report filter failed.");
+    using (var rawHid = new RawHidGamepadInput())
+        rawHid.Bind(Guid.Empty);
     Console.WriteLine("PASS controller-keyboard filter, four numpad mappings and physical X/left-stick conversion.");
 
     var usb = new HardwareId(0x045E, 0x028E);

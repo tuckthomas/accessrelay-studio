@@ -9,6 +9,9 @@ internal static class VisionVerification
         DeadlineAndLatch();
         ManualCancellationAndGeneration();
         PredictionRejectionAndFreshness();
+        CommittedStrokeSurvivesLaterForecasts();
+        PaddleTriggeredRightStickStroke();
+        LiveTimingAdjustmentPreservesArmedSession();
         InvalidationsAndOwnership();
         TrainingInhibitsAuthoritativeOutput();
         SchedulerTimerAdapter();
@@ -303,6 +306,142 @@ internal static class VisionVerification
         Check(arbiter.Status.ShotToken != 0, "Explicit arm plus physical release/new press permits a fresh attempt.");
         Check(!arbiter.Submit(beforeTraining, 116), "Pre-training tokens stay invalid after rearming.");
     }
+    private static void CommittedStrokeSurvivesLaterForecasts()
+    {
+        // Settings from the failing saved-result attempts. At 260 ms, the new
+        // forecast's adjusted deadline is in the past, but the ramp began at 248 ms.
+        var settings = VisionSettings.Default with { EstimatedVideoDelayMs = 60,
+            EstimatedInputDelayMs = 15, CorrectionMs = -80 };
+        var action = new VisionControllerAction { Kind = VisionActionKind.RightStickStroke,
+            StrokeDurationMs = 56, AnchorFraction = .85, EndHoldMs = 48, ConfigurationKey = "trial" };
+        var down = new ControllerState { RightY = short.MinValue };
+        foreach (string failure in new[] { "none", "stale", "untracked", "uncertain", "manual" })
+        {
+            var arbiter = new ControllerOutputArbiter(1000);
+            arbiter.Configure(settings, action); arbiter.BeginSession();
+            arbiter.Sample(default, default, true, true, false, 1);
+            Check(arbiter.SetArmed(true), "Practice shot can arm.");
+            for (int attempt = 0; attempt < (failure == "none" ? 2 : 1); attempt++)
+            {
+                long offset = attempt * 500;
+                arbiter.Sample(down, down, true, true, false, offset + 200);
+                Check(arbiter.Submit(Predict(arbiter, 1, offset + 200, offset + 200, 250), offset + 200), "Initial forecast schedules ramp.");
+                arbiter.Sample(down, down, true, true, false, offset + 248);
+                Check(arbiter.StrokeAnchorTimestamp == offset + 295, "Committed anchor is exposed.");
+                for (long at = offset + 250; at <= offset + 260; at += 2)
+                    arbiter.Sample(down, down, true, true, false, at);
+                var update = Predict(arbiter, 2, offset + 260, offset + 260, 140);
+                if (failure == "manual") arbiter.Sample(default, default, true, true, false, offset + 260);
+                update = failure switch
+                {
+                    "stale" => update with { CaptureTimestamp = offset + 170 },
+                    "untracked" => update with { PlayerTracked = false },
+                    "uncertain" => update with { UncertaintyMs = settings.MaximumUncertaintyMs + 1 },
+                    _ => update
+                };
+                bool accepted = arbiter.Submit(update, offset + 260);
+                if (failure != "none")
+                {
+                    Check(!accepted && arbiter.DeadlineTimestamp is null && arbiter.LastAction is null,
+                        $"A committed ramp still cancels on {failure} failure.");
+                    continue;
+                }
+                Check(accepted, "A fresh forecast cannot cancel an already started ramp because its revised start deadline passed.");
+                Equal(offset + 295, arbiter.StrokeAnchorTimestamp);
+                bool sentUp = false;
+                for (long at = offset + 262; at <= offset + 360; at += 2)
+                {
+                    arbiter.Sample(down, down, true, true, false, at);
+                    sentUp |= arbiter.Output.RightY == short.MaxValue;
+                    if ((at - offset) % 20 == 0 && arbiter.Status.ShotToken != 0)
+                        Check(arbiter.Submit(Predict(arbiter, at, at, at, 100), at), "Fresh post-start forecasts retain the committed action.");
+                }
+                Check(sentUp && arbiter.LastAction?.Id == attempt + 1,
+                    "The up endpoint and hold must complete and produce a new receipt on each attempt.");
+                arbiter.SetArmed(false);
+                arbiter.Sample(default, default, true, true, false, offset + 370);
+                Check(arbiter.SetArmed(true), "The next practice trial can arm after neutral.");
+            }
+        }
+    }
+
+    private static void PaddleTriggeredRightStickStroke()
+    {
+        var settings = VisionSettings.Default with { EstimatedVideoDelayMs = 60, EstimatedInputDelayMs = 15, CorrectionMs = 0 };
+        var action = new VisionControllerAction
+        {
+            Kind = VisionActionKind.RightStickStroke,
+            TriggerPaddle = PaddleButtons.LargeRight,
+            HoldQualificationMs = 70,
+            StrokeDurationMs = 56,
+            AnchorFraction = .85,
+            EndHoldMs = 48,
+            ConfigurationKey = "paddle-trial"
+        };
+        action.Validate();
+        Expect<InvalidDataException>(() => (action with { Kind = VisionActionKind.ButtonRelease }).Validate());
+        Expect<InvalidDataException>(() => (action with { TriggerPaddle = (PaddleButtons)0x40 }).Validate());
+
+        var arbiter = new ControllerOutputArbiter(1000);
+        arbiter.Configure(settings, action);
+        arbiter.BeginSession();
+        arbiter.Sample(default, default, true, true, false, 1);
+        Check(arbiter.SetArmed(true), "Paddle-triggered shot can arm.");
+
+        // Quick tap below HoldQualificationMs holds virtual down immediately and clears cleanly on release.
+        arbiter.Sample(default, default, true, true, false, 10, heldPaddles: PaddleButtons.LargeRight);
+        Equal(short.MinValue, arbiter.Output.RightY);
+        Equal(0L, arbiter.Status.ShotToken);
+        arbiter.Sample(default, default, true, true, false, 40, heldPaddles: PaddleButtons.None);
+        Equal((short)0, arbiter.Output.RightY);
+
+        // Full paddle hold with physical right stick centered (0) opens a shot, schedules ramp, completes stroke, and latches until release.
+        arbiter.Sample(default, default, true, true, false, 100, heldPaddles: PaddleButtons.LargeRight);
+        Equal(short.MinValue, arbiter.Output.RightY);
+        arbiter.Sample(default, default, true, true, false, 170, heldPaddles: PaddleButtons.LargeRight);
+        Check(arbiter.Status.ShotToken > 0, "Hold qualification opens a shot from paddle press.");
+        Check(arbiter.Submit(Predict(arbiter, 1, 200, 200, 220), 200), "Initial forecast schedules paddle-triggered stroke.");
+        bool sentUp = false;
+        long seq = 2;
+        for (long at = 202; at <= 460; at += 2)
+        {
+            arbiter.Sample(default, default, true, true, false, at, heldPaddles: PaddleButtons.LargeRight);
+            sentUp |= arbiter.Output.RightY == short.MaxValue;
+            if (at % 30 == 0 && arbiter.Status.ShotToken != 0 && at < 330)
+                Check(arbiter.Submit(Predict(arbiter, seq++, at, at, Math.Max(20, 420 - at)), at),
+                    "Fresh video frames retain the paddle-triggered forecast.");
+        }
+        Check(sentUp && arbiter.LastAction?.Id == 1, "Paddle-triggered stroke completes the up hold.");
+        Equal((short)0, arbiter.Output.RightY);
+
+        // Holding the paddle after stroke completion must remain latched (even though physical stick is neutral).
+        arbiter.Sample(default, default, true, true, false, 470, heldPaddles: PaddleButtons.LargeRight);
+        Equal((short)0, arbiter.Output.RightY);
+        Equal(0L, arbiter.Status.ShotToken);
+
+        // Releasing the paddle clears the latch and allows another shot.
+        arbiter.Sample(default, default, true, true, false, 480, heldPaddles: PaddleButtons.None);
+        arbiter.Sample(default, default, true, true, false, 500, heldPaddles: PaddleButtons.LargeRight);
+        Equal(short.MinValue, arbiter.Output.RightY);
+    }
+
+    private static void LiveTimingAdjustmentPreservesArmedSession()
+    {
+        var clock = new FakeClock { Now = 100 };
+        var arbiter = Prepare(clock, VisionSettings.Default with { CorrectionMs = 2 });
+        // Updating correctionMs while idle between shots preserves armed state and sourceReady.
+        Check(arbiter.TryAdjustTiming(s => s with { CorrectionMs = 6.5 }), "Idle correction adjustment was rejected.");
+        Equal(6.5, arbiter.Settings.CorrectionMs);
+        Check(arbiter.Status.Armed && arbiter.Status.SourceReady, "Idle live timing adjustment disarmed assistance.");
+
+        // Updating timing mid-shot must be safely rejected without invalidating the active shot.
+        var down = new ControllerState { Buttons = (ushort)ControlId.X };
+        Sample(arbiter, clock, down);
+        Check(arbiter.Status.ShotToken != 0, "Shot did not open.");
+        Check(!arbiter.TryAdjustTiming(s => s with { CorrectionMs = 10 }), "Active shot allowed mid-shot timing mutation.");
+        Equal(6.5, arbiter.Settings.CorrectionMs);
+    }
+
     private static ControllerOutputArbiter Prepare(FakeClock clock, VisionSettings? settings = null)
     {
         var arbiter = new ControllerOutputArbiter(clock.Frequency);

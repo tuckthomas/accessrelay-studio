@@ -31,8 +31,18 @@ internal sealed class DesktopControllerService : IDesktopModule
     private IReadOnlyList<GamePackDefinition> _packs = [];
     private string[] _packErrors = [];
     private CancellationTokenSource? _packOperation;
+    private sealed record TrainerRecording(string Key, Guid ProfileId, string ShotId, string ShotInput);
+    private TrainerRecording? _trainerRecording;
 
     internal StudioProfile ActiveProfile => _active;
+    internal void SaveCalibratedLua(Guid profileId, ControlId control, string expectedKey, LuaControllerScript script)
+    {
+        if (_active.Id != profileId || _active.GetBinding(control).LuaScriptId != script.Id
+            || !_active.LuaScripts.TryGetValue(script.Id, out var current)
+            || LuaShotCalibration.ConfigurationKey(profileId, control, current) != expectedKey)
+            throw new InvalidOperationException("The controller profile or Lua changed. Run a new practice trial before saving feedback.");
+        Save(_active.WithLuaScript(script));
+    }
     internal long AssistantRevision => _revision;
     internal bool AssistantStarting => _outputTask is { IsCompleted: false } || _packOperation is not null;
     internal void ApplyAssistantProfile(StudioProfile profile)
@@ -105,7 +115,8 @@ internal sealed class DesktopControllerService : IDesktopModule
                 return new { control = EnumName(control), label = ControlLabel(control), binding.Script,
                     binding.Enabled, binding.Consume, binding.RecordingId, binding.LuaScriptId };
             }),
-            luaScripts = _active.LuaScripts.Values.OrderBy(script => script.Name).Select(script => new { script.Id, script.Name })
+            luaScripts = _active.LuaScripts.Values.OrderBy(script => script.Name).Select(script => new { script.Id, script.Name,
+                training = script.Training?.Summary(script.Source) })
         },
         devices = _runtime()?.Latest?.Input.Devices ?? [], selectedDeviceId = _runtime()?.Latest?.Input.DeviceId,
         deadzone = _deadzone, feedback = _feedbackSettings,
@@ -147,7 +158,7 @@ internal sealed class DesktopControllerService : IDesktopModule
                 companionConnected = sample?.Input.CompanionConnected == true },
             recording = new { isRecording = recording?.IsRecording == true, hasInput = recording?.HasInput == true,
                 elapsedMs = recording?.ElapsedMs ?? 0, pending = recording?.Pending is { } pending ? RecordingSummary(pending) : null,
-                note = recording?.Note }, message = _notice
+                note = recording?.Note }, trainerRecording = _trainerRecording, message = _notice
         };
     }
 
@@ -242,6 +253,81 @@ internal sealed class DesktopControllerService : IDesktopModule
                 var values = args.GetProperty("values").Read<Dictionary<string, double>>();
                 Runtime.SetScriptsEnabled(false); Save(pack.Retune(_active, values));
                 _notice = "Pack tuning saved. Sequences are paused; enable them explicitly when ready."; break;
+            }
+            case "trainerStart":
+            {
+                RequireEditable();
+                var pack = RequireTrainer(args.Text("key"));
+                string shotId = args.Text("shotId"), input = args.Text("shotInput");
+                _ = TrainingShot(pack, shotId);
+                if (input is not ("rightStick" or "a" or "b" or "x" or "y")) throw new InvalidDataException("Choose the recorded shot input.");
+                Runtime.SetScriptsEnabled(false);
+                Runtime.StartRecording(RecordedInputTraining.ChannelsFor(input));
+                _trainerRecording = new(args.Text("key"), _active.Id, shotId, input);
+                _notice = "Recording one physical attempt. Release the shot input before stopping.";
+                break;
+            }
+            case "trainerConvert":
+            {
+                RequireEditable(allowPending: true);
+                var pack = RequireTrainer(args.Text("key"));
+                var context = _trainerRecording;
+                if (context is null || context.ProfileId != _active.Id || context.Key != args.Text("key") || context.ShotId != args.Text("shotId")
+                    || Runtime.Recording.IsRecording)
+                    throw new InvalidOperationException("Record and stop a baseline for this shot first.");
+                var pending = Runtime.Recording.Pending ?? throw new InvalidOperationException("No physical attempt is available. Record a new baseline.");
+                if (!string.IsNullOrEmpty(Runtime.Recording.Note)) throw new InvalidOperationException("This recording was interrupted. Discard it and record a complete attempt.");
+                var trainer = pack.Manifest.ControllerTrainer!;
+                string timing = args.Text("timingFeedback"), tempo = context.ShotInput == "rightStick" ? args.Text("tempoFeedback") : "none";
+                _ = trainer.Adjustment(timing); _ = trainer.Adjustment(tempo, tempo: true);
+                var shot = TrainingShot(pack, context.ShotId);
+                var previous = _active.LuaScripts.Values.FirstOrDefault(script => script.Training is { } training && training.PackId == pack.Manifest.Id && training.ShotId == shot.Id);
+                var training = RecordedInputTraining.Create(pack.Manifest.Id, shot.Id, context.ShotInput, pending, timing, tempo);
+                // Conversion preserves the measured attempt. Corrections happen only after a subsequent practice attempt.
+                var script = training.ToScript(previous?.Id ?? Guid.NewGuid(), shot.Label);
+                Runtime.SetScriptsEnabled(false); Save(_active.WithLuaScript(script), allowPending: true);
+                Runtime.DiscardRecording(); _trainerRecording = null;
+                _notice = "Baseline converted to Lua. Assign an input, then practice and tune from feedback.";
+                return script;
+            }
+            case "trainerTune":
+            {
+                RequireEditable();
+                var pack = RequireTrainer(args.Text("key"));
+                var script = TrainerScript(pack, args.Id());
+                var training = script.Training!;
+                if (args.Flag("feedback"))
+                {
+                    string timing = args.Text("timingFeedback"), tempo = args.Text("tempoFeedback");
+                    int holdAdjustment = pack.Manifest.ControllerTrainer!.Adjustment(timing);
+                    int tempoAdjustment = pack.Manifest.ControllerTrainer.Adjustment(tempo, tempo: true);
+                    if (training.TempoMs is null && tempo != "none") throw new InvalidDataException("This recording has no measured stick stroke to tune. Choose No tempo feedback.");
+                    training = training with { HoldMs = training.HoldMs + holdAdjustment,
+                        TempoMs = training.TempoMs is int duration ? duration + tempoAdjustment : null, TimingFeedback = timing, TempoFeedback = tempo };
+                }
+                else training = training with { HoldMs = args.GetProperty("holdMs").GetInt32(),
+                    TempoMs = training.TempoMs is null ? null : args.GetProperty("tempoMs").GetInt32() };
+                var updated = training.ToScript(script.Id, script.Name);
+                Save(_active.WithLuaScript(updated));
+                _notice = "Shot Lua updated. Run scripts keeps its current state.";
+                return updated;
+            }
+            case "trainerAssign":
+            {
+                RequireEditable();
+                var pack = RequireTrainer(args.Text("key"));
+                var script = TrainerScript(pack, args.Id());
+                var control = args.EnumValue<ControlId>("control");
+                var existing = _active.GetBinding(control);
+                if (existing.Script != ScriptKind.Passthrough && existing.LuaScriptId != script.Id)
+                    throw new InvalidOperationException("That input already has a mapping. Choose another input or change its mapping on Button mapping first.");
+                if (control is ControlId.SmallLeft or ControlId.SmallRight or ControlId.LargeLeft or ControlId.LargeRight
+                    && Runtime.Latest?.Input.IsPaddleInterfacePresent != true)
+                    throw new InvalidOperationException("Paddle input is unavailable on the selected controller. Choose a button or connect a supported paddle controller.");
+                var profile = _active with { Bindings = _active.Bindings.RemoveRange(_active.Bindings.Where(pair => pair.Value.LuaScriptId == script.Id).Select(pair => pair.Key)) };
+                Save(profile.WithBinding(control, new(ScriptKind.Lua, true, true, null, script.Id)));
+                _notice = "Shot assigned. Start controller and enable Run scripts when ready to practice.";
+                break;
             }
             case "packModelImport":
             {
@@ -355,16 +441,16 @@ internal sealed class DesktopControllerService : IDesktopModule
                         channels |= value;
                     }
                 if (channels == RecordingChannels.None) throw new InvalidDataException("Choose at least one control to record.");
-                Runtime.StartRecording(channels); _notice = "Recording physical controller input."; break;
+                Runtime.StartRecording(channels); _trainerRecording = null; _notice = "Recording physical controller input."; break;
             }
             case "recordStop": Runtime.StopRecording(); _notice = "Recording stopped. Save it or discard it."; break;
-            case "recordDiscard": Runtime.DiscardRecording(); _notice = "Unsaved recording discarded."; break;
+            case "recordDiscard": Runtime.DiscardRecording(); _trainerRecording = null; _notice = "Unsaved recording discarded."; break;
             case "recordSave":
             {
                 var pending = Runtime.Recording.Pending ?? throw new InvalidOperationException("Record and stop controller input first.");
                 var script = RecordedLua.Convert(pending with { Name = args.Text("name", "Recorded input").Trim() });
                 Save(_active.WithLuaScript(script), allowPending: true);
-                Runtime.DiscardRecording(); _notice = "Recording saved as a Lua script."; return script;
+                Runtime.DiscardRecording(); _trainerRecording = null; _notice = "Recording saved as a Lua script."; return script;
             }
             case "recordImport":
             case "luaImport":
@@ -468,6 +554,25 @@ internal sealed class DesktopControllerService : IDesktopModule
     private StudioRuntime Runtime => _runtime() ?? throw new InvalidOperationException("The controller engine is not available.");
     private GamePackDefinition FindPack(string key) => _packs.FirstOrDefault(pack => pack.Manifest.Id + "@" + pack.Manifest.Version == key)
         ?? throw new InvalidOperationException("Choose an installed game pack.");
+    private GamePackDefinition RequireTrainer(string key)
+    {
+        var pack = FindPack(key);
+        if (pack.Manifest.ControllerTrainer is null || _active.GamePack is not { } reference || reference.Id != pack.Manifest.Id
+            || reference.Version != pack.Manifest.Version || reference.ManifestSha256 != pack.ManifestSha256)
+            throw new InvalidOperationException("Create a controller profile from this trainer first.");
+        return pack;
+    }
+    private static ControllerTrainingShot TrainingShot(GamePackDefinition pack, string shotId) => pack.Manifest.ControllerTrainer!.Shots.FirstOrDefault(shot => shot.Id == shotId)
+        ?? throw new InvalidDataException("Choose a shot from this trainer.");
+    private LuaControllerScript TrainerScript(GamePackDefinition pack, Guid id)
+    {
+        if (!_active.LuaScripts.TryGetValue(id, out var script) || script.Training is not { } training || training.PackId != pack.Manifest.Id)
+            throw new InvalidOperationException("Record a baseline for this shot first.");
+        _ = TrainingShot(pack, training.ShotId);
+        if (!training.MatchesGeneratedSource(script.Source))
+            throw new InvalidOperationException("This Lua source was edited outside the trainer. Record a new baseline to tune it without overwriting custom code.");
+        return script;
+    }
     private static object RecordingSummary(MacroRecording recording) => new
     { recording.Id, recording.Name, recording.DurationMs, recording.Channels, frameCount = recording.Frames.Length };
 

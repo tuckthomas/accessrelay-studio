@@ -1,6 +1,20 @@
 using EliteScriptStudio.Core;
 using System.Text.Json.Nodes;
 
+if (args is ["--lua-shot-calibration"]) { LuaShotCalibrationVerification.Run(); return; }
+
+if (args is ["--export-lua-control", var luaProfileDirectory, var luaProfileId, var luaControl, var luaGesturePath])
+{
+    LuaGestureExport.Run(luaProfileDirectory, luaProfileId, luaControl, luaGesturePath); return;
+}
+
+if (args is ["--controller-trainer"]) { ControllerTrainerVerification.Run(); return; }
+if (args is ["--controller-trainer-profile", var trainerProfile]) { ControllerTrainerVerification.VerifySavedProfile(trainerProfile); return; }
+if (args is ["--controller-trainer-fixture", var trainerRoot, var trainerManifest]) { ControllerTrainerVerification.WriteFixture(trainerRoot, trainerManifest); return; }
+
+if (args is ["--vision-only"]) { VisionVerification.Run(); Console.WriteLine("SUCCESS Vision output verification."); return; }
+if (args is ["--committed-stroke-replay", var attempts, var replayOutput]) { CommittedStrokeReplayVerification.Run(attempts, replayOutput); return; }
+
 if (args.Length is 1 or 2 && args[0] == "--lua-conversion")
 {
     LuaVerification.Run();
@@ -27,6 +41,7 @@ if (args is ["--marketplace", var marketplaceOutput])
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Recorded controller training preserves physical baselines and independently retimes shot Lua", ControllerTrainerVerification.Run),
     ("Recorded input and legacy actions migrate to exact Lua playback", () => LuaConversionVerification.Run()),
     ("Bounded allocation-free runtime lock measurements, epochs, freeze and percentiles", RuntimeLockVerification.Run),
     ("Versioned game packs, resource integrity, bounded import, tuning, Lua output and legacy profile compatibility", GamePackVerification.Run),

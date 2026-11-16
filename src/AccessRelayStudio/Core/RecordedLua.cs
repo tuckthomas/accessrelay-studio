@@ -110,8 +110,20 @@ public static class LuaProfileMigration
     public static StudioProfile Convert(StudioProfile source)
     {
         source.Validate();
-        if (source.Recordings.Count == 0 && source.Timings.Count == 0) return source;
         var scripts = source.LuaScripts.ToBuilder();
+        bool repairedTraining = false;
+        foreach (var script in source.LuaScripts.Values)
+        {
+            if (script.Training is not { } training || !training.MatchesGeneratedSource(script.Source)) continue;
+            // Live calibration adopts an existing full replay, including its onset and
+            // neutral tail. The older trainer repair must not trim that saved baseline.
+            if (training.PackId == LuaShotCalibration.AdoptedPackId) continue;
+            var repaired = training.ToScript(script.Id, script.Name) with { Tuning = script.Tuning };
+            if (repaired.Source == script.Source) continue;
+            scripts[script.Id] = repaired; repairedTraining = true;
+        }
+        if (source.Recordings.Count == 0 && source.Timings.Count == 0)
+            return repairedTraining ? source with { LuaScripts = scripts.ToImmutable() } : source;
         var bindings = source.Bindings.ToBuilder();
         var recordingIds = new Dictionary<Guid, Guid>();
         foreach (var recording in source.Recordings.Values)

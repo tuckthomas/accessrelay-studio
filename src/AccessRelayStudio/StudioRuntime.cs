@@ -13,6 +13,9 @@ internal sealed record RuntimeSample(ControllerSample Input, ControllerState Out
 internal readonly record struct RecorderState(bool Connected, bool IsRecording, bool HasInput, bool SupportsBackgroundInput, int ElapsedMs,
     MacroRecording? Pending, string? Note);
 
+internal sealed record LuaCalibrationAction(long Id, string RunId, string Key, Guid ProfileId, ControlId Control,
+    Guid ScriptId, string SourceSha256, long StartedAtMs, long CompletedAtMs);
+
 internal sealed class StudioRuntime : IDisposable
 {
     private readonly IControllerInput _input;
@@ -48,6 +51,164 @@ internal sealed class StudioRuntime : IDisposable
     private bool _visionTrainingRecording;
     private VisionTrainingTrace? _visionTrainingTrace;
     private long _visionTrainingTraceAttachedAt, _latestInputSampleTicks;
+    private ControlId? _luaCalibrationControl, _luaCalibrationTrigger, _luaCalibrationConsumed;
+    private Guid _luaCalibrationScript;
+    private string _luaCalibrationKey = "", _luaCalibrationHash = "";
+    private long _luaCalibrationConnection, _luaCalibrationStarted, _luaCalibrationAfterReceipt, _luaCalibrationTriggerAt;
+    private bool _luaCalibrationRunning, _luaCalibrationButtonDown;
+    private long _luaCalibrationPickupAt, _luaCalibrationPickupConnection;
+    private string _luaCalibrationMessage = "Choose a saved paddle shot to calibrate.";
+    private LuaCalibrationAction? _lastLuaCalibrationAction;
+
+    public bool LuaCalibrationArmed { get { lock (_sync) return _luaCalibrationControl.HasValue; } }
+    public string LuaCalibrationMessage { get { lock (_sync) return _luaCalibrationMessage; } }
+    public LuaCalibrationAction? LastLuaCalibrationAction { get { lock (_sync) return _lastLuaCalibrationAction; } }
+    public bool LuaCalibrationPickupActive { get { lock (_sync) return _luaCalibrationPickupAt != 0; } }
+
+    public void CollectLuaCalibrationBall(int delayMs = 3000)
+    {
+        lock (_sync)
+        {
+            RequireTrainingStoppedLocked("collecting a practice ball");
+            if (_latest?.Input is not { IsConnected: true } input || _output?.IsAvailable != true
+                || _recorder is not null || _navigation.Enabled || _navigationNeedsNeutral || _inputNeedsNeutral
+                || _voiceCommands.Enabled || _engine.Status.IsActive || _luaCalibrationControl.HasValue || _luaCalibrationPickupAt != 0
+                || !LuaCalibrationNeutral(input.State) || input.HeldPaddles != PaddleButtons.None)
+                throw new InvalidOperationException("Finish the current trial and release controls before collecting a practice ball.");
+            _lastLuaCalibrationAction = null;
+            _vision.SetArmed(false); _releaseScheduler.Signal();
+            _luaCalibrationPickupConnection = input.ConnectionVersion;
+            _luaCalibrationPickupAt = _clock.ElapsedMilliseconds + Math.Clamp(delayMs, 3000, 10000);
+            _luaCalibrationMessage = $"Ball pickup in {Math.Clamp(delayMs, 3000, 10000) / 1000} seconds. Resume the game and keep the controller neutral.";
+        }
+    }
+
+    public void StartLuaCalibrationTrial(ControlId control, bool automatic, int delayMs = 3000)
+    {
+        lock (_sync)
+        {
+            RequireTrainingStoppedLocked("starting a paddle calibration trial");
+            if (_latest?.Input is not { IsConnected: true } input || _output?.IsAvailable != true || !_engine.ScriptsEnabled)
+                throw new InvalidOperationException("Connect controller output and enable Run scripts before starting a paddle trial.");
+            if (_recorder is not null || _navigation.Enabled || _navigationNeedsNeutral || _inputNeedsNeutral || _voiceCommands.Enabled || _engine.Status.IsActive || _luaCalibrationPickupAt != 0)
+                throw new InvalidOperationException("Finish the running script, recording or navigation before starting a paddle trial.");
+            if (!LuaCalibrationNeutral(input.State) || input.HeldPaddles != PaddleButtons.None)
+                throw new InvalidOperationException("Release the controller controls before starting the complete scripted shot.");
+            var binding = _visionProfile.GetBinding(control);
+            if (!binding.Enabled || binding.Script != ScriptKind.Lua || binding.LuaScriptId is not { } id
+                || !_visionProfile.LuaScripts.TryGetValue(id, out var script) || !LuaShotCalibration.IsCompatible(script))
+                throw new InvalidOperationException("Choose an enabled recorded right-stick Lua shot.");
+            CancelLuaCalibrationLocked("Previous paddle trial cleared.", clearReceipt: true);
+            // Arming observes a neutral sample under the polling lock, so a first
+            // button edge immediately after Apply is not mistaken for an old hold.
+            _engine.Tick(input.State, PaddleButtons.None, true, _clock.ElapsedMilliseconds);
+            _vision.SetArmed(false); _releaseScheduler.Signal();
+            _luaCalibrationControl = control; _luaCalibrationTrigger = automatic ? control : null;
+            _luaCalibrationConsumed = control; _luaCalibrationButtonDown = false;
+            _luaCalibrationScript = id; _luaCalibrationHash = LuaShotCalibration.SourceSha256(script);
+            _luaCalibrationKey = LuaShotCalibration.ConfigurationKey(_visionProfile.Id, control, script);
+            _luaCalibrationConnection = input.ConnectionVersion;
+            _luaCalibrationStarted = _clock.ElapsedMilliseconds;
+            _luaCalibrationAfterReceipt = _engine.LastLuaCompletion?.Id ?? 0;
+            _luaCalibrationTriggerAt = _luaCalibrationStarted + (automatic ? Math.Clamp(delayMs, 3000, 10000) : 0);
+            _luaCalibrationRunning = false;
+            _luaCalibrationMessage = automatic ? $"One complete scripted shot starts in {Math.Clamp(delayMs, 3000, 10000) / 1000} seconds. Resume the game and keep the controller neutral."
+                : "Press the selected paddle once. The script performs the complete shot; leave the right stick neutral.";
+        }
+    }
+
+    public void PauseLuaCalibrationTrial()
+    {
+        lock (_sync) CancelLuaCalibrationLocked("Paddle trial paused.", clearReceipt: false);
+    }
+
+    private bool LuaCalibrationNeutral(ControllerState state) => _stickDeadzone.Apply(state) == default;
+
+    private void CancelLuaCalibrationLocked(string message, bool clearReceipt = true)
+    {
+        if (_luaCalibrationPickupAt != 0) { _luaCalibrationPickupAt = 0; _output?.Neutralize(); }
+        if (_luaCalibrationControl is { } control)
+        {
+            _engine.CancelLua(control);
+            if (_luaCalibrationRunning) _output?.Neutralize();
+        }
+        _luaCalibrationControl = _luaCalibrationTrigger = null; _luaCalibrationRunning = false;
+        _luaCalibrationMessage = message;
+        if (clearReceipt) _lastLuaCalibrationAction = null;
+    }
+
+    private bool SampleLuaCalibrationPickupLocked(ControllerSample input, long now, out ControllerState state)
+    {
+        state = default;
+        if (_luaCalibrationPickupAt == 0) return false;
+        if (!input.IsConnected || input.ConnectionVersion != _luaCalibrationPickupConnection || _output?.IsAvailable != true
+            || _recorder is not null || _visionTrainingRecording || _navigation.Enabled || _navigationNeedsNeutral
+            || _configuringInput || _inputNeedsNeutral || _voiceCommands.Enabled || _engine.Status.IsActive
+            || !LuaCalibrationNeutral(input.State) || input.HeldPaddles != PaddleButtons.None || input.PressedPaddles != PaddleButtons.None)
+        { CancelLuaCalibrationLocked("Practice ball pickup cancelled because input or output changed."); return false; }
+        if (now >= _luaCalibrationPickupAt + 100)
+        { _luaCalibrationPickupAt = 0; _luaCalibrationMessage = "Ball pickup sent. Confirm possession before running the shot."; }
+        else if (now >= _luaCalibrationPickupAt) state = default(ControllerState) with { Buttons = (ushort)ControlId.A };
+        return true;
+    }
+
+    private ControlId? SampleLuaCalibrationLocked(ControllerSample input, long now)
+    {
+        if (_luaCalibrationControl is not { } control) return null;
+        var paddles = input.HeldPaddles | input.PressedPaddles;
+        bool down = ControlMap.IsPressed(control, input.State, input.HeldPaddles);
+        if (down) _luaCalibrationConsumed = control;
+        bool anotherPress = _luaCalibrationRunning && down && !_luaCalibrationButtonDown;
+        _luaCalibrationButtonDown = down;
+        if (!input.IsConnected || input.ConnectionVersion != _luaCalibrationConnection || _output?.IsAvailable != true
+            || !_engine.ScriptsEnabled || _recorder is not null || _visionTrainingRecording || _navigation.Enabled
+            || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral || _voiceCommands.Enabled
+            || !LuaCalibrationNeutral(ControlMap.Consume(input.State, (uint)control))
+            || (_luaCalibrationRunning && input.PressedPaddles != PaddleButtons.None)
+            || anotherPress
+            || (ControlMap.PressedMask(default, paddles) & ~(uint)control) != 0)
+        {
+            CancelLuaCalibrationLocked("Trial cancelled because physical input, connection or output changed."); return null;
+        }
+        if (_engine.Status is { IsActive: true } active && (active.Control != control || active.Script != ScriptKind.Lua))
+        { CancelLuaCalibrationLocked("Trial cancelled because another script started."); return null; }
+        if (now - _luaCalibrationStarted > 30000)
+        { CancelLuaCalibrationLocked("Paddle trial expired. Start a new trial when ready."); return null; }
+        if (now < _luaCalibrationTriggerAt) return null;
+        var trigger = _luaCalibrationTrigger; _luaCalibrationTrigger = null;
+        return trigger;
+    }
+
+    private void CompleteLuaCalibrationLocked(ControllerSample input, ControllerState output, bool accepted, long now)
+    {
+        if (_luaCalibrationControl is not { } control)
+        {
+            if (_lastLuaCalibrationAction is { } previous && (_engine.Status.IsActive
+                || !LuaCalibrationNeutral(ControlMap.Consume(input.State, (uint)previous.Control))))
+            { _lastLuaCalibrationAction = null; _luaCalibrationMessage = "A newer shot started. Complete a new calibration trial before saving feedback."; }
+            return;
+        }
+        if (!accepted) { CancelLuaCalibrationLocked("Trial cancelled because output did not accept the report."); return; }
+        var status = _engine.Status;
+        if (status.IsActive)
+        {
+            if (status.Control != control || status.Script != ScriptKind.Lua)
+            { CancelLuaCalibrationLocked("Trial cancelled because another script started."); return; }
+            _luaCalibrationRunning = true;
+        }
+        if (status.Error is not null)
+        { CancelLuaCalibrationLocked("Lua trial failed: " + status.Error); return; }
+        var completion = _engine.LastLuaCompletion;
+        if (!_luaCalibrationRunning || completion is null || completion.Id <= _luaCalibrationAfterReceipt || status.IsActive) return;
+        if (!_luaCalibrationRunning || completion.Control != control || completion.ScriptId != _luaCalibrationScript
+            || completion.SourceSha256 != _luaCalibrationHash || input.ConnectionVersion != _luaCalibrationConnection
+            || output.RightX != 0 || output.RightY != 0)
+        { CancelLuaCalibrationLocked("Trial did not complete the selected script at neutral."); return; }
+        _lastLuaCalibrationAction = new(completion.Id, completion.RunId, _luaCalibrationKey, _visionProfile.Id,
+            control, completion.ScriptId, completion.SourceSha256, completion.StartedAtMs, completion.CompletedAtMs);
+        _luaCalibrationControl = _luaCalibrationTrigger = null; _luaCalibrationRunning = false;
+        _luaCalibrationMessage = "Complete scripted shot delivered. Save the game's result to adjust its timing.";
+    }
 
     public RuntimeSample? Latest => Volatile.Read(ref _latest);
     public bool HasOutput { get { lock (_sync) return _output is not null; } }
@@ -156,24 +317,49 @@ internal sealed class StudioRuntime : IDisposable
 
     public void ConfigureVision(VisionSettings settings, VisionControllerAction? action = null)
     {
-        lock (_sync) { _feedback?.Stop(); _vision.Configure(settings, action); }
+        lock (_sync) { CancelLuaCalibrationLocked("Capture configuration changed."); _feedback?.Stop(); _vision.Configure(settings, action); }
         _releaseScheduler.Signal();
     }
 
+    public bool TryAdjustVisionTiming(Func<VisionSettings, VisionSettings> update, VisionControllerAction? action = null)
+    {
+        lock (_sync)
+        {
+            if (!_vision.TryAdjustTiming(update, action)) return false;
+        }
+        _releaseScheduler.Signal();
+        return true;
+    }
+
     public VisionActionReceipt? LastVisionAction { get { lock (_sync) return _vision.LastAction; } }
+    public VisionControllerAction VisionAction { get { lock (_sync) return _vision.Action; } }
     public long LatestInputTimestamp => Volatile.Read(ref _latestInputSampleTicks);
+    public VisionSignalContext ReadVisionSignalContext()
+    {
+        lock (_sync)
+        {
+            var status = _vision.Status;
+            return new(_latest?.Input is { IsConnected: true } input ? input.State : null,
+                _latestInputSampleTicks, status.SessionGeneration, status.ShotToken, status.ShotStartedTimestamp, status.Armed)
+            {
+                HoldStartedTimestamp = _vision.HoldStartedTimestamp,
+                StrokeAnchorTimestamp = _vision.StrokeAnchorTimestamp,
+                HeldPaddles = _latest?.Input is { IsConnected: true } connectedInput ? connectedInput.HeldPaddles : PaddleButtons.None
+            };
+        }
+    }
 
     public long BeginVisionSession()
     {
         long generation;
-        lock (_sync) { _feedback?.Stop(); generation = _vision.BeginSession(); }
+        lock (_sync) { CancelLuaCalibrationLocked("Capture session changed."); _feedback?.Stop(); generation = _vision.BeginSession(); }
         _releaseScheduler.Signal();
         return generation;
     }
 
     public void InvalidateVisionSession(string reason)
     {
-        lock (_sync) { _feedback?.Stop(); _vision.Invalidate(reason, sourceLost: true, disarm: true); }
+        lock (_sync) { CancelLuaCalibrationLocked(reason); _feedback?.Stop(); _vision.Invalidate(reason, sourceLost: true, disarm: true); }
         _releaseScheduler.Signal();
     }
 
@@ -182,6 +368,7 @@ internal sealed class StudioRuntime : IDisposable
         bool accepted;
         lock (_sync)
         {
+            if (armed) CancelLuaCalibrationLocked("Physical-stick assistance selected.");
             if (armed && (_output?.IsAvailable != true || _latest?.Input.IsConnected != true || _recorder is not null
                 || VisionMacroConflict()))
             {
@@ -297,7 +484,7 @@ internal sealed class StudioRuntime : IDisposable
 
     public void SetStickDeadzone(StickDeadzone settings)
     {
-        lock (_sync) { _stickDeadzone = settings; _smoother.Reset(); }
+        lock (_sync) { CancelLuaCalibrationLocked("Controller response changed."); _stickDeadzone = settings; _smoother.Reset(); }
     }
 
     public void SelectController(string? id)
@@ -498,6 +685,7 @@ internal sealed class StudioRuntime : IDisposable
                         InvalidateVisionLocked("Physical controller connection changed. Vision release is disarmed.");
                     }
                     ControllerState state;
+                    bool pickingUp = SampleLuaCalibrationPickupLocked(input, now, out var pickupState);
                     if (!_configuringInput) _navigation.Sample(input.NavigationState, input.HeldPaddles | input.PressedPaddles, input.NavigationConnected, now);
                     if (!_configuringInput && _inputNeedsNeutral && input.IsConnected
                         && ControlMap.PressedMask(input.State, input.HeldPaddles | input.PressedPaddles) == 0
@@ -507,6 +695,8 @@ internal sealed class StudioRuntime : IDisposable
                         && ControlMap.PressedMask(input.State, input.HeldPaddles | input.PressedPaddles) == 0
                         && _stickDeadzone.Apply(input.State) is { LeftX: 0, LeftY: 0, RightX: 0, RightY: 0 })
                         _navigationNeedsNeutral = false;
+                    PaddleButtons visionTrigger = _vision.Status.Armed && _vision.Action.Kind == VisionActionKind.RightStickStroke
+                        ? _vision.Action.TriggerPaddle : PaddleButtons.None;
                     if (_navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral)
                         state = default;
                     else if (_recorder is not null)
@@ -526,20 +716,29 @@ internal sealed class StudioRuntime : IDisposable
                         state = input.IsConnected ? input.State : default;
                     else
                     {
+                        var calibrationTrigger = SampleLuaCalibrationLocked(input, now);
                         bool manualActive = input.IsConnected && _output?.IsAvailable == true;
                         var manual = _smoother.Sample(_stickDeadzone.Apply(input.State), now, manualActive);
                         manual = _sticky.Sample(manual, manualActive);
                         var voice = _voiceCommands.Sample(Stopwatch.GetTimestamp());
-                        state = VoiceCommandArbiter.Compose(_engine.Tick(input.State, input.HeldPaddles, input.IsConnected, now, input.PressedPaddles,
-                            manual, voice.Sequence), voice.Pulse);
+                        var engineHeld = (PaddleButtons)(input.HeldPaddles & ~visionTrigger);
+                        var enginePressed = (PaddleButtons)(input.PressedPaddles & ~visionTrigger);
+                        state = VoiceCommandArbiter.Compose(_engine.Tick(input.State, engineHeld, input.IsConnected, now, enginePressed,
+                            manual, calibrationTrigger ?? voice.Sequence), voice.Pulse);
                     }
+                    if (pickingUp) state = pickupState;
+                    if (_luaCalibrationConsumed is { } consumed && !ControlMap.IsPressed(consumed, input.State, input.HeldPaddles))
+                        _luaCalibrationConsumed = null;
+                    if (_luaCalibrationControl is { } trialControl) state = ControlMap.Consume(state, (uint)trialControl);
+                    else if (_luaCalibrationConsumed is { } heldControl) state = ControlMap.Consume(state, (uint)heldControl);
                     state = _stickDeadzone.Apply(state);
                     var beforeVision = _vision.Status;
                     state = _vision.Sample(input.State, state, input.IsConnected, _output?.IsAvailable == true,
-                        _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp());
+                        _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp(), sampleTicks, input.HeldPaddles);
                     CancelLostLockFeedbackLocked(beforeVision);
                     _latestInputSampleTicks = sampleTicks;
-                    WriteTracedOutputLocked(state, VisionTrainingTraceKind.Poll, sampleTicks, input);
+                    bool accepted = WriteTracedOutputLocked(state, VisionTrainingTraceKind.Poll, sampleTicks, input);
+                    CompleteLuaCalibrationLocked(input, state, accepted, now);
                     PublishReleaseFeedbackLocked();
                     Volatile.Write(ref _latest, new(input, state, _output is not null, _outputStatus,
                         _engine.Status, mean, p95, p99, paddlePulse, lastPaddles, visible));
@@ -607,6 +806,7 @@ internal sealed class StudioRuntime : IDisposable
 
     private void InvalidateVisionLocked(string reason)
     {
+        CancelLuaCalibrationLocked(reason);
         _voiceCommands.Reset(reason); _engine.CancelExternal();
         _feedback?.Stop();
         _vision.Invalidate(reason, disarm: true);
@@ -661,19 +861,18 @@ internal sealed class StudioRuntime : IDisposable
             _feedback?.Stop();
     }
 
-    private void WriteTracedOutputLocked(ControllerState state, VisionTrainingTraceKind kind,
+    private bool WriteTracedOutputLocked(ControllerState state, VisionTrainingTraceKind kind,
         long sampleTicks, ControllerSample input)
     {
         var trace = _visionTrainingTrace;
         if (trace is null || sampleTicks < _visionTrainingTraceAttachedAt)
         {
-            WriteOutputLocked(state);
-            return;
+            return WriteOutputLocked(state);
         }
         bool outputAvailable = _output?.IsAvailable == true;
         long before = Stopwatch.GetTimestamp();
         bool accepted = false;
-        try { accepted = WriteOutputLocked(state); }
+        try { accepted = WriteOutputLocked(state); return accepted; }
         finally
         {
             long after = Stopwatch.GetTimestamp();

@@ -1,0 +1,71 @@
+{
+  "upstreamVersion": "1.5.230.0",
+  "source": "Installed by the pinned signed upstream installer into this project folder",
+  "files": [
+    {
+      "path": "HidHide.man",
+      "bytes": 7695,
+      "sha256": "b31b1a14cc5812492556b0ce84a2872c76d93ab0dd0778dffa60ffb04a86b8d7"
+    },
+    {
+      "path": "x64/HidHide.pdb",
+      "bytes": 839680,
+      "sha256": "456760f76b3c5b0ec71007b33529f77e0251fae03a87335359dac61b1f99688d"
+    },
+    {
+      "path": "x64/HidHideCLI.exe",
+      "bytes": 222632,
+      "sha256": "9dd283fedfbd301e1a574a3d4b8663f6274ccb5c896f468ed55a6239f9ade270"
+    },
+    {
+      "path": "x64/HidHideClient.exe",
+      "bytes": 331688,
+      "sha256": "4af4752f0564e9c2a2b139b05da4bbfcc4ab111a03033319eb38b7ec9b070a45"
+    },
+    {
+      "path": "x64/HidHideWatchdog.exe",
+      "bytes": 1446824,
+      "sha256": "8b41058f5bbcdf85af44489402b808f4e3a2b44b81afc1c89169ac29501aab93"
+    },
+    {
+      "path": "x64/install.cmd",
+      "bytes": 534,
+      "sha256": "e67286e3a77fef32f0b9500a68ef06737e40352167b74d8bf3e876cc70f84f48"
+    },
+    {
+      "path": "x64/nefarius_HidHide_Updater.exe",
+      "bytes": 2347432,
+      "sha256": "128ceb8c6b5e9f32261b55ba904234ed52e26d03c9b92422cd2cf8b101bc1a88"
+    },
+    {
+      "path": "x64/nefconw.exe",
+      "bytes": 556968,
+      "sha256": "1482fa240cad984e02206427f1eb211e62c9a44b058484fc3e83ccb5b1a1fbca"
+    },
+    {
+      "path": "x64/uninstall.cmd",
+      "bytes": 540,
+      "sha256": "41c117393b0c82625a4b05a7ae647e5bbcc350c791b2849fc25bf0bacd6f2d3b"
+    },
+    {
+      "path": "x64/HidHide/hidhide.cat",
+      "bytes": 11893,
+      "sha256": "0e4209963524163b3b75302c60f7b8a965fc349ada5752b74452ad59d417e877"
+    },
+    {
+      "path": "x64/HidHide/HidHide.inf",
+      "bytes": 6889,
+      "sha256": "38bf0541d798991a893e5ddac37430d097361726a00cd714c287da7a774722df"
+    },
+    {
+      "path": "x64/HidHide/HidHide.sys",
+      "bytes": 59088,
+      "sha256": "e3bb8b6a4e4ff90290b34e710edbef88cf71cec6ba0cadcb8e1685d5dd65ddb2"
+    },
+    {
+      "path": "x64/HidHide/LICENSE.rtf",
+      "bytes": 5183,
+      "sha256": "62356ad799305776ddd2fdf7b178ec9755e17ed980da560e3887b883465825e0"
+    }
+  ]
+}

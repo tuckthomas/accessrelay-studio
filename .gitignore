@@ -5,6 +5,7 @@ target/
 node_modules/
 artifacts/
 /AccessRelayStudio-Beta/
+/AccessRelayStudio-Beta-*/
 Run/
 *.user
 *.suo
@@ -46,3 +47,10 @@ AccessRelay.VirtualMicUsbId.txt
 !/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/resources.dll
 !/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/usbip2_ude.sys
 !/src/AccessRelayStudio/Audio/VirtualMicDriver/Package/usbip2_ude.cat
+
+# Pinned signed HidHide installer and project-local controller-isolation tools.
+!/src/AccessRelayStudio/ControllerIsolation/Package/HidHide_1.5.230_x64.exe
+!/src/AccessRelayStudio/ControllerIsolation/HidHide/**/*.exe
+!/src/AccessRelayStudio/ControllerIsolation/HidHide/**/*.dll
+!/src/AccessRelayStudio/ControllerIsolation/HidHide/x64/HidHide/*.sys
+!/src/AccessRelayStudio/ControllerIsolation/HidHide/x64/HidHide/*.cat

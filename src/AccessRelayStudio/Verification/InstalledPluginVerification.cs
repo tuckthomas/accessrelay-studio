@@ -13,6 +13,7 @@ internal static class InstalledPluginVerification
         loader.Reload(); Check(loader.Plugins.Count == 0, "An absent plugin exposed an implementation.");
         var imported = new GamePackLibrary(library).Import(Path.GetFullPath(manifest), CancellationToken.None);
         foreach (var invalid in new[] {
+            imported.Manifest with { Runtime = imported.Manifest.Runtime! with { ContractVersion = 4 } },
             imported.Manifest with { Runtime = imported.Manifest.Runtime! with { AuditEntry = null! } },
             imported.Manifest with { Runtime = imported.Manifest.Runtime! with { Assembly = "runtime/CON.dll" },
                 Assets = imported.Manifest.Assets.Select(a => a.Path == imported.Manifest.Runtime!.Assembly ? a with { Path = "runtime/CON.dll" } : a).ToImmutableArray() }

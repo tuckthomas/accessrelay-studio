@@ -18,11 +18,13 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 const emit = (message: any) => act(() => { harness.listeners.forEach(listener => listener(message)); });
+const draftScriptId = '58d3c7df-c893-4af2-a412-bdd1ddcc49d1';
 async function openMappingDraft() {
+  state.controller.activeProfile.luaScripts = [{ id: draftScriptId, name: 'Recorded shot', source: 'wait(80)' }];
   render(<App />);
   await screen.findByRole('heading', { name: 'Your workspace', exact: true });
   fireEvent.click(screen.getByRole('button', { name: 'Controller', exact: true }));
-  selectValue(screen.getByLabelText('What should it do?'), 'moving');
+  selectValue(screen.getByLabelText('What should it do?'), 'lua:' + draftScriptId);
 }
 describe('workspace draft and capture visibility', () => {
   it('keeps an unsaved mapping through status updates and a cancelled navigation', async () => {
@@ -31,7 +33,7 @@ describe('workspace draft and capture visibility', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Voice', exact: true }));
     expect(screen.getByRole('dialog', { name: 'Discard unsaved changes?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    expect((screen.getByLabelText('What should it do?') as HTMLSelectElement).value).toBe('moving');
+    expect((screen.getByLabelText('What should it do?') as HTMLButtonElement).value).toBe('lua:' + draftScriptId);
     expect(harness.command).toHaveBeenCalledWith('app.draftState', { dirty: true });
   });
   it('changes pages only after the user explicitly discards a draft', async () => {
@@ -46,7 +48,7 @@ describe('workspace draft and capture visibility', () => {
     emit({ type: 'closeRequested' });
     expect(screen.getByRole('dialog', { name: 'Close Studio and discard unsaved work?' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    expect((screen.getByLabelText('What should it do?') as HTMLSelectElement).value).toBe('moving');
+    expect((screen.getByLabelText('What should it do?') as HTMLButtonElement).value).toBe('lua:' + draftScriptId);
     expect(harness.command.mock.calls.some(([method]) => method === 'app.close')).toBe(false);
     let acknowledgeClose!: (value: null) => void;
     const closeAcknowledgement = new Promise<null>(resolve => { acknowledgeClose = resolve; });

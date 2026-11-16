@@ -11,6 +11,33 @@ public sealed record GamePackTuning(string Id, string Label, GamePackTuningKind 
     double Maximum, double Step, double Default, ImmutableArray<GamePackChoice> Choices);
 public sealed record GamePackBinding(ControlId Control, string Script, bool Consume = false);
 public sealed record GamePackPreset(string Name, ImmutableDictionary<string, double> Values);
+public sealed record ControllerTrainingShot(string Id, string Label, string Instructions);
+public sealed record ControllerTrainingFeedback(string Id, string Label, int AdjustmentMs);
+public sealed record ControllerTrainerDefinition(ImmutableArray<ControllerTrainingShot> Shots,
+    ImmutableArray<ControllerTrainingFeedback> TimingFeedback, ImmutableArray<ControllerTrainingFeedback> TempoFeedback)
+{
+    internal void Validate()
+    {
+        if (Shots.IsDefaultOrEmpty || Shots.Length > 8 || Shots.Any(shot => shot is null || !GamePackManifest.Identifier(shot.Id, 40)
+            || !ValidText(shot.Label, 80) || !ValidText(shot.Instructions, 500)) || Shots.Select(shot => shot.Id).Distinct().Count() != Shots.Length)
+            throw new InvalidDataException("A controller trainer needs uniquely named shots and instructions.");
+        ValidateFeedback(TimingFeedback); ValidateFeedback(TempoFeedback);
+    }
+
+    private static bool ValidText(string? value, int max) => !string.IsNullOrWhiteSpace(value) && value.Length <= max && !value.Any(char.IsControl);
+    private static void ValidateFeedback(ImmutableArray<ControllerTrainingFeedback> choices)
+    {
+        if (choices.IsDefaultOrEmpty || choices.Length > 16 || choices.Any(choice => choice is null || !GamePackManifest.Identifier(choice.Id, 40)
+            || !ValidText(choice.Label, 80) || Math.Abs((long)choice.AdjustmentMs) > 100)
+            || choices.Select(choice => choice.Id).Distinct().Count() != choices.Length)
+            throw new InvalidDataException("Trainer feedback needs unique choices with corrections bounded to 100 ms.");
+        if (!choices.Any(choice => choice.Id == "none" && choice.AdjustmentMs == 0))
+            throw new InvalidDataException("Trainer feedback needs a neutral 'none' choice.");
+    }
+
+    public int Adjustment(string id, bool tempo = false) => (tempo ? TempoFeedback : TimingFeedback)
+        .FirstOrDefault(choice => choice.Id == id)?.AdjustmentMs ?? throw new InvalidDataException("Choose the feedback reported by the game.");
+}
 public sealed record GamePackReference(string Id, string Version, string ManifestSha256, ImmutableDictionary<string, double> Tuning)
 {
     internal void Validate()
@@ -33,6 +60,7 @@ public sealed record GamePackManifest
     public string GameId { get; init; } = "";
     public string TrainingAdapter { get; init; } = "none";
     public GamePackRuntime? Runtime { get; init; }
+    public ControllerTrainerDefinition? ControllerTrainer { get; init; }
     public ImmutableArray<GamePackAsset> Assets { get; init; } = [];
     public ImmutableArray<GamePackBinding> Bindings { get; init; } = [];
     public ImmutableArray<GamePackTuning> Tuning { get; init; } = [];
@@ -49,6 +77,9 @@ public sealed record GamePackManifest
     }
     internal void Validate()
     {
+        ControllerTrainer?.Validate();
+        if (ControllerTrainer is not null && (TrainingAdapter != "none" || string.IsNullOrEmpty(GameId)))
+            throw new InvalidDataException("A controller trainer needs its game identity and must be separate from model training.");
         if (!((SchemaVersion == 1 && ApiVersion == 1) || (SchemaVersion == 2 && ApiVersion == 2)) || !Identifier(Id, 60) || !Identifier(Version, 40) || !Text(Name, 80)
             || !Text(Description, 1000) || !Text(License, 300) || VisionAdapter is not ("none" or "temporal-release-v1"))
             throw new InvalidDataException("Unsupported game-pack schema/API, identity, metadata or typed vision adapter.");
@@ -86,7 +117,7 @@ public sealed record GamePackManifest
             || Assets.Count(asset => asset.Kind == GamePackAssetKind.CaptureModel) > 8
             || (VisionAdapter == "none" && Assets.Any(asset => asset.Kind is GamePackAssetKind.Model or GamePackAssetKind.VisionManifest or GamePackAssetKind.CaptureModel)))
             throw new InvalidDataException("Game pack exceeds resource limits or supplies models without a vision adapter.");
-        if (Runtime is { } runtime && (runtime.ContractVersion is < 1 or > 2 || !Text(runtime.Factory, 240)
+        if (Runtime is { } runtime && (runtime.ContractVersion is < 1 or > 3 || !Text(runtime.Factory, 240)
             || runtime.Factory.Split('.').Any(part => part.Length == 0 || !part.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
             || !Assets.Any(a => a.Kind == GamePackAssetKind.Runtime && a.Path == runtime.Assembly)
             || !Assets.Any(a => a.Kind == GamePackAssetKind.Ui && a.Path == runtime.UiEntry)

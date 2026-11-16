@@ -11,5 +11,11 @@
 /src/AccessRelayStudio/Audio/VirtualMicDriver/Package/*.dll binary
 /src/AccessRelayStudio/Audio/VirtualMicDriver/Package/*.exe binary
 
+# Preserve Authenticode signatures and upstream controller-isolation payloads.
+/src/AccessRelayStudio/ControllerIsolation/**/*.exe binary
+/src/AccessRelayStudio/ControllerIsolation/**/*.dll binary
+/src/AccessRelayStudio/ControllerIsolation/**/*.sys binary
+/src/AccessRelayStudio/ControllerIsolation/**/*.cat binary
+
 # Keep the generated Three.js bundle out of language statistics.
 /src/AccessRelayStudio/Viewer/viewer.bundle.js linguist-generated

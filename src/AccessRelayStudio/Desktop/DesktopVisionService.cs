@@ -9,7 +9,7 @@ using Microsoft.Windows.Storage.Pickers;
 namespace EliteScriptStudio.Desktop;
 
 /// <summary>Desktop presentation adapter. Capture, inference and controller arbitration remain in their native workers.</summary>
-internal sealed class DesktopVisionService : IDesktopModule
+internal sealed partial class DesktopVisionService : IDesktopModule
 {
     private sealed record PreviewImage(DesktopMedia Media, long Sequence, int SourceWidth, int SourceHeight, long CapturedAt, long SourceCaptureTicks, VisionRegionObservation? Tracking, VisionSignalObservation? Signal = null);
     private sealed record FrozenImage(string Token, PreviewImage Image, string SourceId, Guid ProfileId, string Fingerprint, VisionSettings Settings, VisionSettings? PreviousSettings = null, VisionSettings? AutomaticProposal = null);
@@ -42,19 +42,24 @@ internal sealed class DesktopVisionService : IDesktopModule
     private VisionPerformanceRun? _baseline;
     private CalibrationProposal? _calibration;
     private VisionPerformanceSnapshot? _performance;
+    private LiveFeedbackOcr? _feedbackOcr;
+    private object? _lastOcrFeedback;
+    private int _consecutiveOcrDir;
+    private readonly object _ocrGate = new();
     private string _notice = "Choose a window to preview gameplay.";
     private int _busy, _encodingPreview, _version;
     private long _sourcesRefreshedAt, _performanceRefreshedAt;
     private CancellationTokenSource _operation = new();
-    internal bool HasActiveTrainingRecording => _session?.TrainingSnapshot.IsRecording == true;
+    internal bool HasActiveTrainingRecording => _session?.TrainingSnapshot.IsRecording == true || _session?.DiagnosticSnapshot is { IsFinalized: false };
     internal bool AssistantBusy => Volatile.Read(ref _busy) != 0 || _session?.IsStopping == true || _trainingJob.Running;
     internal (bool Running, bool ModelReady, bool CanArm, bool SourceStale) AssistantFacts =>
         (_session?.Status.Running == true, _session?.Status.ModelReady == true, _session?.Status.CanArm == true, _session?.Status.SourceStale == true);
 
     internal DesktopVisionService(WindowId owner, Func<StudioRuntime?> runtime, Func<StudioProfile> activeProfile,
-        Func<Task> connectOutput, Func<IReadOnlyList<IVisionGamePlugin>> plugins, InstalledGamePlugins? installedPlugins = null)
+        Func<Task> connectOutput, Func<IReadOnlyList<IVisionGamePlugin>> plugins, InstalledGamePlugins? installedPlugins = null,
+        DesktopControllerService? controller = null)
     {
-        _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput; _plugins = plugins; _installedPlugins = installedPlugins;
+        _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput; _plugins = plugins; _installedPlugins = installedPlugins; _luaController = controller;
         LoadSettings(); RefreshSources();
         var context = _settings;
         _ = Task.Run(() => _library.Discover(context)).ContinueWith(task =>
@@ -84,6 +89,7 @@ internal sealed class DesktopVisionService : IDesktopModule
             sources = _sources.Select(s => new { id = SourceId(s), s.Title, s.ProcessId }), selectedSourceId = _selectedSourceId,
             settings = _settings, cameraViews = _plugin?.CameraViews ?? [],
             assistance = _profile?.DescribeLiveAssistance(_settings),
+            luaCalibration = LuaCalibrationSnapshot(),
             models = _models.Select(m => new { id = ModelId(m), name = m.DisplayName, version = m.ModelVersion,
                 compatible = m.IsCompatible, evidenceAccepted = m.EvidenceAccepted, m.Status }),
             selectedModelId = selectedModel is null ? "" : ModelId(selectedModel), modelScanComplete = _modelScanComplete,
@@ -114,9 +120,11 @@ internal sealed class DesktopVisionService : IDesktopModule
             controllerConnection = new { connected = _runtime()?.HasOutput == true,
                 inputConnected = _runtime()?.Latest?.Input.IsConnected == true,
                 message = _runtime()?.Latest?.OutputStatus ?? "Controller output is off." },
-            training = _session?.TrainingSnapshot, performance = _performance, comparison,
+            training = _session?.TrainingSnapshot, diagnosticRecording = _session?.DiagnosticSnapshot, performance = _performance, comparison,
             tracking = preview?.Tracking ?? _session?.Tracking,
             signal = _session?.Signal, lastAction = _runtime()?.LastVisionAction,
+            ocrFeedback = Volatile.Read(ref _lastOcrFeedback),
+            luaCalibration = LuaCalibrationSnapshot(),
             captureProposal = AutomaticProposal(),
             trainingJob = _trainingJob.Snapshot,
             preview = preview is null ? null : new { url = "https://media.accessrelay.test/vision/preview?v=" + preview.Sequence,
@@ -133,13 +141,15 @@ internal sealed class DesktopVisionService : IDesktopModule
     public async Task<object?> InvokeAsync(string action, JsonElement args)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (action.StartsWith("luaCalibration", StringComparison.Ordinal)) return InvokeLuaCalibration(action, args);
         if (action == "trainingCancel") { _trainingJob.Cancel(); return null; }
         // Stop never waits behind model import, native pickers or startup waits.
+        if (action == "diagnosticStop") { _session?.StopDiagnosticRecording(); return null; }
         if (action is "stop" or "recordStop")
         {
             CancelOperation();
             if (action == "recordStop") { _session?.StopTraining(); _notice = "Saving your clip. Keep the window open until it is saved."; }
-            else { _session?.StopTraining(); _session?.Stop(); _runtime()?.SetVisionArmed(false); _notice = "Live view stopped. Saved clip status is shown below."; }
+            else { _feedbackOcr?.Stop(); _session?.StopTraining(); _session?.Stop(); _runtime()?.SetVisionArmed(false); _runtime()?.PauseLuaCalibrationTrial(); _notice = "Live view stopped. Saved clip status is shown below."; }
             return null;
         }
         if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
@@ -210,7 +220,7 @@ internal sealed class DesktopVisionService : IDesktopModule
                     if (sourceId != _selectedSourceId)
                     {
                         _version++; _selectedSourceId = sourceId; ClearPreview();
-                        _settings = _settings with { CorrectionMs = 0, TrainingCapture = _settings.TrainingCapture with { Configured = false } };
+                        _settings = _settings with { TrainingCapture = _settings.TrainingCapture with { Configured = false } };
                         SaveSettings(); _calibration = null;
                     }
                     return null;
@@ -265,6 +275,8 @@ internal sealed class DesktopVisionService : IDesktopModule
                     {
                         if (_session?.IsRecordingTraining == true) throw new InvalidOperationException("Finish the recording before changing assistance settings.");
                         _session?.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
+                        if (_session is { } stoppedSession) await stoppedSession.FinishDiagnosticRecordingAsync(cancellation);
+                        CheckOperation(version, cancellation);
                     }
                     RequireStopped();
                     _settings = candidate; SaveSettings(); _version++;
@@ -333,6 +345,21 @@ internal sealed class DesktopVisionService : IDesktopModule
                 case "freeze": return await FreezeAsync(version, cancellation, args.Flag("nextShot"));
                 case "layoutSave": SaveLayout(args); await RefreshModelsAsync(); return null;
                 case "recordStart": return await RecordAsync(version, cancellation);
+                case "diagnosticStart":
+                {
+                    var session = _session ?? throw new InvalidOperationException("Start the preview before recording diagnostics.");
+                    session.StartDiagnosticRecording(DesktopEnvironment.DataDirectory("VisionDiagnostics")
+                        ?? Path.Combine(AppContext.BaseDirectory, "Diagnostics", "VisionRecordings"),
+                        new { pluginId = _plugin?.Id, profile = _profile?.ExportProfile(), source = SelectedSource().Title });
+                    _notice = "Recording diagnostics for up to 15 seconds. Take a practice shot with your current assistance settings.";
+                    return null;
+                }
+                case "openDiagnosticFolder":
+                {
+                    string folder = _session?.DiagnosticSnapshot?.DirectoryPath ?? "";
+                    if (folder.Length == 0 || !Directory.Exists(folder)) throw new InvalidOperationException("Record diagnostics first.");
+                    await Windows.System.Launcher.LaunchFolderPathAsync(folder); return null;
+                }
                 case "reviewOpen": return await ReviewOpenAsync(args, version, cancellation);
                 case "reviewSave":
                     if (_review is null || args.Text("token") != _review.Token) throw new InvalidOperationException("Open the clip before saving its review.");
@@ -404,13 +431,15 @@ internal sealed class DesktopVisionService : IDesktopModule
         if (_selectedSourceId.Length != 0 && !sources.Any(s => SourceId(s) == _selectedSourceId))
         {
             _version++; _selectedSourceId = ""; _calibration = null; ClearPreview();
-            _settings = _settings with { CorrectionMs = 0, TrainingCapture = _settings.TrainingCapture with { Configured = false } };
+            _settings = _settings with { TrainingCapture = _settings.TrainingCapture with { Configured = false } };
             _notice = "The selected window closed. Choose the window showing Remote Play.";
         }
         _sources = sources;
     }
     private void RequireStopped()
     {
+        if (_session?.DiagnosticSnapshot is { IsFinalized: false })
+            throw new InvalidOperationException("Finish saving the diagnostic recording before changing its setup.");
         if (_session?.TrainingSnapshot is { HasTake: true, IsFinalized: false })
             throw new InvalidOperationException("Finish saving the current clip before changing its setup.");
         if (_session?.Status.Running == true || _session?.IsStopping == true)
@@ -447,6 +476,9 @@ internal sealed class DesktopVisionService : IDesktopModule
                 throw new InvalidOperationException("Tracked crops currently require CPU image preparation. CUDA model inference remains available.");
             if (manifest.OutputContract != plugin.OutputContract) throw new InvalidDataException("The model does not match this game plugin's vision contract.");
         }
+        _feedbackOcr?.Stop();
+        Volatile.Write(ref _lastOcrFeedback, null);
+        lock (_ocrGate) _consecutiveOcrDir = 0;
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
@@ -454,6 +486,7 @@ internal sealed class DesktopVisionService : IDesktopModule
         try { _session.Start(source.Hwnd, _settings, loadModel, predictor is null ? _profile?.CreateRegionTracker(_settings,
             models => new VisionAnalysisModels(models, captureProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id))) : null, predictor); }
         catch { predictor?.Dispose(); throw; }
+        if (loadModel && predictor is not null) StartFeedbackOcr();
         _lastObservedSourceId = _selectedSourceId;
         _notice = loadModel && (predictor is not null || _settings.ModelManifestPath.Length != 0)
             ? "Preparing live analysis. Assistance remains disarmed until you arm it."
@@ -874,9 +907,85 @@ internal sealed class DesktopVisionService : IDesktopModule
             && int.TryParse(frame, out int index)) return review.ReadFrame(region, index);
         return null;
     }
+    private void StartFeedbackOcr()
+    {
+        try
+        {
+            var pluginId = _plugin?.Id;
+            string? modelDir = pluginId is null ? null : _installedPlugins?.ModelDirectory(pluginId);
+            if (string.IsNullOrWhiteSpace(modelDir) || !File.Exists(Path.Combine(modelDir, "text-det.onnx"))
+                || !File.Exists(Path.Combine(modelDir, "text-rec.onnx")))
+                return;
+            var modelSet = new VisionCaptureModelSet("nba2k27-automatic-v1",
+                "20aad6e2e42359cac1c5b4a0b2da00e29bfe91a72a782fdcf287d273a04c1b24",
+                "ea07c15d38ac40cd69da3c493444ec75b44ff23840553ff8ba102c1219ed39c2",
+                "e8770c967605983d1570cdf5352041dfb68fa0c21664f49f47b155abd3e0e318");
+            _feedbackOcr?.Dispose();
+            _feedbackOcr = new(modelDir, modelSet, HandleOcrFeedback);
+            _feedbackOcr.Start(() => _session, _runtime, () => _settings);
+        }
+        catch { /* OCR banner feedback is optional */ }
+    }
+
+    private void HandleOcrFeedback(OcrFeedbackRead read)
+    {
+        lock (_ocrGate)
+        {
+            if (_disposed || _session?.Status.Running != true) return;
+            bool calibrationTrial = _settings.PluginAssistance is { } json
+                && (!json.TryGetProperty("confirmed", out var conf) || !conf.GetBoolean())
+                && (!json.TryGetProperty("calibrationTrial", out var trial) || trial.GetBoolean());
+            bool autoAdjust = !calibrationTrial && _settings.PluginAssistance is { } cfg
+                && (!cfg.TryGetProperty("autoOcrTiming", out var enabled) || enabled.ValueKind != JsonValueKind.False);
+            bool rhythmMode = _settings.PluginAssistance is { } modeJson
+                && (!modeJson.TryGetProperty("inputMode", out var modeProp) || modeProp.GetString() == "rhythm");
+            bool paddleBound = _runtime()?.VisionAction.TriggerPaddle != PaddleButtons.None;
+            if (autoAdjust && paddleBound && !(rhythmMode && read.ShotType == "timing"))
+            {
+                var step = LiveFeedbackOcr.ComputeAdaptiveStep(_settings.CorrectionMs, read.Timing, ref _consecutiveOcrDir);
+                bool applied = step.DeltaMs == 0;
+                if (!applied)
+                {
+                    // Wait briefly if player is still holding paddle right at shot end.
+                    for (int retry = 0; retry < 8; retry++)
+                    {
+                        if (_runtime()?.TryAdjustVisionTiming(s => s with { CorrectionMs = step.NextCorrectionMs }) == true)
+                        { applied = true; break; }
+                        Thread.Sleep(60);
+                    }
+                    if (applied)
+                    {
+                        _settings = _settings with { CorrectionMs = step.NextCorrectionMs };
+                        _settingsStore.Save(_settingsProfile, _settings);
+                        _version++;
+                        _notice = step.Reason;
+                    }
+                }
+                Volatile.Write(ref _lastOcrFeedback, new
+                {
+                    read.ReceiptId, read.RunId, read.ShotType, read.Timing, read.Tempo, read.RawText,
+                    read.ProcessingMs, adjusted = applied && step.DeltaMs != 0,
+                    previousCorrectionMs = step.PreviousCorrectionMs, nextCorrectionMs = applied ? step.NextCorrectionMs : step.PreviousCorrectionMs,
+                    deltaMs = applied ? step.DeltaMs : 0, message = step.Reason
+                });
+                return;
+            }
+            Volatile.Write(ref _lastOcrFeedback, new
+            {
+                read.ReceiptId, read.RunId, read.ShotType, read.Timing, read.Tempo, read.RawText,
+                read.ProcessingMs, adjusted = false, previousCorrectionMs = _settings.CorrectionMs,
+                nextCorrectionMs = _settings.CorrectionMs, deltaMs = 0d,
+                message = rhythmMode && read.ShotType == "timing"
+                    ? $"OCR ignored non-rhythm TIMING result ({read.Timing}); correction unchanged."
+                    : $"OCR read: {read.ShotType.ToUpperInvariant()} · {read.Timing}"
+            });
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return; _disposed = true; CancelOperation();
+        _feedbackOcr?.Dispose();
         _trainingJob.Dispose();
         _session?.Dispose(); _review?.Dispose(); _operation.Dispose(); ClearPreview();
     }

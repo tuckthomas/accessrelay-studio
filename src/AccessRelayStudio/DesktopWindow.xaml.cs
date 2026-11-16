@@ -107,7 +107,7 @@ public sealed partial class DesktopWindow : Window
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
                 _marketplace ??= new DesktopMarketplaceService(_controller, gamePlugins, () => _vision?.RequirePluginIdle());
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync(),
-                    () => gamePlugins.Plugins, gamePlugins);
+                    () => gamePlugins.Plugins, gamePlugins, _controller);
                 _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
                     () => _runtime, () => _hasUnsavedChanges);
                 _started = true;

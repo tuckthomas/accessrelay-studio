@@ -9,6 +9,7 @@ namespace EliteScriptStudio.Input
         private readonly object _gate = new();
         private ControllerState _state;
         private PaddleButtons _paddles;
+        private PaddleButtons _pressedPaddles;
         private bool _connected = true;
         private long _connectionVersion = 1;
         private CoPilotSettings _coPilot = new();
@@ -20,15 +21,20 @@ namespace EliteScriptStudio.Input
         { lock (_gate) { _companion = state; if (_companionConnected != connected) _connectionVersion++; _companionConnected = connected; } }
         internal void SetState(ControllerState state, PaddleButtons paddles = PaddleButtons.None)
         { lock (_gate) { _state = state; _paddles = paddles; } }
+        internal void TapPaddle(PaddleButtons paddle) { lock (_gate) _pressedPaddles |= paddle; }
         internal void SetConnection(bool connected, long connectionVersion)
         { lock (_gate) { _connected = connected; _connectionVersion = connectionVersion; } }
         public ControllerSample Poll()
         {
-            lock (_gate) return new(_connected || (_coPilot.Enabled && _companionConnected),
+            lock (_gate)
+            {
+            var pressed = _pressedPaddles; _pressedPaddles = PaddleButtons.None;
+            return new(_connected || (_coPilot.Enabled && _companionConnected),
                 CoPilotInput.Merge(_state, _connected, _companion, _companionConnected, _coPilot), "Simulated device", "verification", false, "",
                 _connected ? _paddles : PaddleButtons.None,
-                PaddleButtons.None, _connectionVersion) { SupportsBackgroundInput = true, PrimaryConnected = _connected, CompanionConnected = _coPilot.Enabled && _companionConnected,
+                pressed, _connectionVersion) { SupportsBackgroundInput = true, PrimaryConnected = _connected, CompanionConnected = _coPilot.Enabled && _companionConnected,
                     NavigationState = _state, NavigationConnected = _connected };
+            }
         }
         public void SelectDevice(string? id) { }
         public void SetVirtualOutputActive(bool active) { }

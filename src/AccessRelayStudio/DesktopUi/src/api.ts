@@ -164,7 +164,7 @@ async function previewCommand(method: string, args: any): Promise<any> {
       return script;
     } else if (action === 'luaDelete') controller.activeProfile.luaScripts = controller.activeProfile.luaScripts.filter((item: any) => item.id !== args.id);
     else if (action === 'luaNew') return { id: crypto.randomUUID(), name: 'Controller script', source: 'output.button("A", true)\nwait(80)\noutput.button("A", false)' };
-    else if (['outputStart', 'scriptsSet', 'recordStart', 'deviceSelect'].includes(action)) throw new Error('This is a design preview. Device actions are available in the installed desktop app.');
+    else if (['outputStart', 'scriptsSet', 'recordStart', 'deviceSelect', 'trainerStart', 'trainerConvert', 'trainerTune', 'trainerAssign'].includes(action)) throw new Error('This is a design preview. Device actions are available in the installed desktop app.');
     return null;
   }
   if (method === 'voice.commandsSave') { voice.commands = { ...voice.commands, settings: args.settings }; return null; }

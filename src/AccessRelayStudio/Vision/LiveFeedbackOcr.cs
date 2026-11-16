@@ -1,0 +1,330 @@
+using System.Diagnostics;
+using System.Text;
+using EliteScriptStudio.Core;
+
+namespace EliteScriptStudio.Vision;
+
+internal sealed record OcrFeedbackRead(long ReceiptId, string RunId, string ShotType, string Timing, string Tempo,
+    string RawText, long CaptureTicks, double ProcessingMs);
+
+internal sealed record AdaptiveTimingStep(double PreviousCorrectionMs, double NextCorrectionMs, double DeltaMs, string Reason);
+
+/// <summary>Reads the post-shot HUD feedback banner asynchronously on captured crop frames so the
+/// 60 Hz meter tracker and release scheduler stay untouched.</summary>
+internal sealed class LiveFeedbackOcr : IDisposable
+{
+    private readonly string _modelDirectory;
+    private readonly VisionCaptureModelSet _modelSet;
+    private readonly Action<OcrFeedbackRead> _onFeedback;
+    private readonly object _gate = new();
+    private CancellationTokenSource? _cts;
+    private Task? _worker;
+    private VisionAnalysisModels? _models;
+    private string _lastRunId = "";
+    private long _lastReceiptId;
+    private VisionCrop? _discoveredCrop;
+    private string _priorBannerText = "";
+    private long _priorBannerAt;
+
+    internal LiveFeedbackOcr(string modelDirectory, VisionCaptureModelSet modelSet, Action<OcrFeedbackRead> onFeedback)
+    {
+        _modelDirectory = modelDirectory;
+        _modelSet = modelSet;
+        _onFeedback = onFeedback;
+    }
+
+    internal void Start(Func<VisionSession?> getSession, Func<StudioRuntime?> getRuntime, Func<VisionSettings> getSettings)
+    {
+        lock (_gate)
+        {
+            if (_worker is { IsCompleted: false }) return;
+            if (getRuntime()?.LastVisionAction is { } existing)
+            {
+                _lastRunId = existing.RunId;
+                _lastReceiptId = existing.Id;
+            }
+            _cts?.Dispose();
+            _cts = new();
+            var ct = _cts.Token;
+            _worker = Task.Run(() => RunLoopAsync(getSession, getRuntime, getSettings, ct), ct);
+        }
+    }
+
+    internal void Stop()
+    {
+        Task? worker;
+        lock (_gate)
+        {
+            _cts?.Cancel();
+            worker = _worker;
+            _models?.RequestStop();
+        }
+        try { worker?.Wait(TimeSpan.FromSeconds(1)); } catch { /* cancellation / shutdown timeout */ }
+        lock (_gate)
+        {
+            _cts?.Dispose();
+            _cts = null;
+            _worker = null;
+        }
+    }
+
+    private async Task RunLoopAsync(Func<VisionSession?> getSession, Func<StudioRuntime?> getRuntime,
+        Func<VisionSettings> getSettings, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(50, ct).ConfigureAwait(false);
+                var session = getSession();
+                var runtime = getRuntime();
+                if (session is null || runtime is null || !session.Status.Running) continue;
+                var receipt = runtime.LastVisionAction;
+                if (receipt is null || (receipt.RunId == _lastRunId && receipt.Id == _lastReceiptId)) continue;
+                _lastRunId = receipt.RunId;
+                _lastReceiptId = receipt.Id;
+
+                var settings = getSettings();
+                if (!ShouldRead(settings)) continue;
+                // Only inspect shots triggered by a bound paddle action (never manual stick/button shots).
+                if (runtime.VisionAction.TriggerPaddle == PaddleButtons.None) continue;
+
+                // Ensure OCR reader models are loaded lazily on this background worker (CPU-only, skip pose).
+                _models ??= new(_modelSet, VisionExecutionProvider.Cpu, _modelDirectory, loadPose: false);
+
+                var result = await WatchShotFeedbackAsync(session, receipt, settings, ct).ConfigureAwait(false);
+                if (result is not null)
+                    _onFeedback(result);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch { /* Never crash live session on background OCR read */ }
+        }
+    }
+
+    private static bool ShouldRead(VisionSettings settings)
+    {
+        if (settings.PluginAssistance is not { } json) return false;
+        if (json.TryGetProperty("enabled", out var en) && !en.GetBoolean()) return false;
+        if (json.TryGetProperty("autoOcrTiming", out var auto) && auto.ValueKind is System.Text.Json.JsonValueKind.False)
+            return false;
+        return true;
+    }
+
+    private async Task<OcrFeedbackRead?> WatchShotFeedbackAsync(VisionSession session, VisionActionReceipt receipt,
+        VisionSettings settings, CancellationToken ct)
+    {
+        double elapsedSinceCompleteMs = Stopwatch.GetElapsedTime(receipt.CompletedTimestamp).TotalMilliseconds;
+        if (elapsedSinceCompleteMs < 180)
+            await Task.Delay((int)Math.Ceiling(180 - elapsedSinceCompleteMs), ct).ConfigureAwait(false);
+
+        var crop = BuildBannerSearchCrop(settings.TrainingCapture.FeedbackRegion ?? _discoveredCrop);
+        var startedWatch = Stopwatch.GetTimestamp();
+        bool sawClearedSincePrevious = _priorBannerAt == 0 ||
+            Stopwatch.GetElapsedTime(_priorBannerAt, receipt.CompletedTimestamp).TotalMilliseconds >= 1800;
+
+        for (int attempt = 0; attempt < 9 && !ct.IsCancellationRequested; attempt++)
+        {
+            if (Stopwatch.GetElapsedTime(receipt.CompletedTimestamp).TotalMilliseconds > 2200) break;
+            // If configured/cached crop misses on first two attempts (e.g., mode changed HUD position), widen search.
+            var activeCrop = attempt is 2 or 5 ? new VisionCrop(0, 0, 1, .38) : attempt is 6 ? new VisionCrop(.15, .60, .70, .40) : crop;
+            var frame = await session.CaptureRegionOnceAsync(activeCrop, ct).ConfigureAwait(false);
+            if (frame is null) break;
+
+            long t0 = Stopwatch.GetTimestamp();
+            var regions = _models!.ReadText(frame.Pixels, frame.Width, frame.Height, frame.Stride);
+            double procMs = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+            var parsed = ParseFeedback(regions);
+            if (parsed is null)
+            {
+                sawClearedSincePrevious = true;
+            }
+            else
+            {
+                // Avoid re-applying a lingering banner from the previous shot before NBA 2K refreshes it.
+                if (!sawClearedSincePrevious && parsed.RawText == _priorBannerText
+                    && Stopwatch.GetElapsedTime(startedWatch).TotalMilliseconds < 700)
+                {
+                    await Task.Delay(170, ct).ConfigureAwait(false);
+                    continue;
+                }
+                if (activeCrop.Width < .9 && parsed.BannerBounds is { } localBounds)
+                    _discoveredCrop = ProjectCrop(activeCrop, localBounds);
+                _priorBannerText = parsed.RawText;
+                _priorBannerAt = frame.CaptureTicks;
+                return new(receipt.Id, receipt.RunId, parsed.ShotType, parsed.Timing, parsed.Tempo,
+                    parsed.RawText, frame.CaptureTicks, procMs);
+            }
+            await Task.Delay(175, ct).ConfigureAwait(false);
+        }
+        return null;
+    }
+
+    internal static VisionCrop BuildBannerSearchCrop(VisionCrop? savedFeedback)
+    {
+        if (savedFeedback is { } r)
+        {
+            double cx = r.Left + r.Width / 2;
+            double w = Math.Clamp(Math.Max(r.Width + .16, .42), .30, 1);
+            double l = Math.Clamp(cx - w / 2, 0, 1 - w);
+            double top = Math.Clamp(r.Top - .03, 0, .62);
+            // Text detector drops lines > 0.12 of crop height, so keep crop height >= 0.36.
+            double h = Math.Clamp(Math.Max(r.Height + .14, .36), .36, 1 - top);
+            if (top + h > 1) top = Math.Max(0, 1 - h);
+            return new(l, top, w, h);
+        }
+        return new(.22, 0, .56, .38);
+    }
+
+    private static VisionCrop ProjectCrop(VisionCrop parent, VisionCrop child) =>
+        new(Math.Clamp(parent.Left + child.Left * parent.Width, 0, 1),
+            Math.Clamp(parent.Top + child.Top * parent.Height, 0, 1),
+            Math.Clamp(child.Width * parent.Width, .01, 1),
+            Math.Clamp(child.Height * parent.Height, .01, 1));
+
+    internal sealed record ParsedBanner(string ShotType, string Timing, string Tempo, string RawText, VisionCrop? BannerBounds);
+
+    internal static ParsedBanner? ParseFeedback(VisionTextRegion[] regions)
+    {
+        if (regions.Length == 0) return null;
+        var lines = regions
+            .Where(r => !string.IsNullOrWhiteSpace(r.Text))
+            .OrderBy(r => r.Bounds.Top)
+            .ThenBy(r => r.Bounds.Left)
+            .Select(r => (Text: NormalizeOcrLine(r.Text), r.Bounds))
+            .ToArray();
+        if (lines.Length == 0) return null;
+
+        string joined = string.Join(" | ", lines.Select(l => l.Text));
+        string shotType = "";
+        if (ContainsKeyword(joined, "RHYTHM") || ContainsKeyword(joined, "TEMPO")) shotType = "rhythm";
+        else if (ContainsKeyword(joined, "TIMING")) shotType = "timing";
+
+        string timing = "";
+        string tempo = "none";
+        int excellentCount = 0;
+
+        // First scan lines tagged with timing/rhythm or unmarked feedback lines,
+        // separating TEMPO grade if present.
+        var feedbackLines = lines.Where(l => IsFeedbackToken(l.Text)).ToArray();
+        if (feedbackLines.Length == 0) return null;
+
+        foreach (var line in feedbackLines)
+        {
+            if (ParseTempo(line.Text) is { } parsedTempo)
+            {
+                if (tempo == "none") tempo = parsedTempo;
+                continue;
+            }
+            if (ParseTiming(line.Text) is { } parsedTiming)
+            {
+                if (parsedTiming == "excellent") excellentCount++;
+                if (timing == "") timing = parsedTiming;
+                else if (parsedTiming == "excellent" && tempo == "none" && shotType == "rhythm")
+                    tempo = "excellent";
+            }
+        }
+
+        // If "TIMING" and "TEMPO" headings didn't explicitly contain the grade on the same line, check joined text.
+        if (timing == "")
+            timing = ParseTiming(joined) ?? "";
+        if (timing == "") return null;
+
+        if (shotType == "" && tempo != "none") shotType = "rhythm";
+        if (shotType == "") shotType = ContainsKeyword(joined, "TEMPO") ? "rhythm" : "rhythm";
+        if (shotType == "timing") tempo = "none";
+        if (excellentCount >= 2 && shotType == "rhythm" && tempo == "none") tempo = "excellent";
+
+        double minL = feedbackLines.Min(l => l.Bounds.Left);
+        double minT = feedbackLines.Min(l => l.Bounds.Top);
+        double maxR = feedbackLines.Max(l => l.Bounds.Left + l.Bounds.Width);
+        double maxB = feedbackLines.Max(l => l.Bounds.Top + l.Bounds.Height);
+        var bounds = new VisionCrop(Math.Clamp(minL, 0, 1), Math.Clamp(minT, 0, 1),
+            Math.Clamp(maxR - minL, .01, 1), Math.Clamp(maxB - minT, .01, 1));
+        return new(shotType, timing, tempo, joined, bounds);
+    }
+
+    internal static AdaptiveTimingStep ComputeAdaptiveStep(double currentCorrectionMs, string timing, ref int consecutiveDirection)
+    {
+        int dir = timing switch
+        {
+            "early" or "slightlyEarly" => 1,
+            "late" or "slightlyLate" => -1,
+            _ => 0
+        };
+        if (dir == 0)
+        {
+            consecutiveDirection = 0;
+            return new(currentCorrectionMs, currentCorrectionMs, 0, "Excellent timing confirmed; correction unchanged.");
+        }
+
+        consecutiveDirection = (Math.Sign(consecutiveDirection) == dir)
+            ? consecutiveDirection + dir
+            : dir;
+
+        // First miss gently nudges by 3 / 5 ms (filtering single-shot WebRTC variance);
+        // repeating misses in the same direction (e.g., entering Theater/Rec/Park) lock on faster.
+        bool repeated = Math.Abs(consecutiveDirection) >= 2;
+        double magnitude = timing switch
+        {
+            "slightlyEarly" or "slightlyLate" => repeated ? 4 : 3,
+            "early" or "late" => repeated ? 8 : 5,
+            _ => 0
+        };
+        double delta = dir * magnitude;
+        double next = Math.Clamp(Math.Round((currentCorrectionMs + delta) * 2) / 2, -100, 100);
+        return new(currentCorrectionMs, next, next - currentCorrectionMs,
+            $"OCR {timing}: timing correction {currentCorrectionMs:+0.#;-0.#;0} → {next:+0.#;-0.#;0} ms.");
+    }
+
+    private static string NormalizeOcrLine(string raw)
+    {
+        var sb = new StringBuilder(raw.Length);
+        foreach (char ch in raw.Normalize(NormalizationForm.FormKC).ToUpperInvariant())
+        {
+            if (char.IsAsciiLetter(ch) || ch == ' ') sb.Append(ch);
+            else if (ch is '0') sb.Append('O');
+            else if (ch is '1' or '|') sb.Append('I');
+            else if (ch is '5') sb.Append('S');
+            else if (ch is '-' or '_' or '/' or ':') sb.Append(' ');
+        }
+        return string.Join(' ', sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static bool ContainsKeyword(string text, string keyword)
+        => text.Contains(keyword, StringComparison.Ordinal);
+
+    private static bool IsFeedbackToken(string line) =>
+        line.Contains("RHYTHM", StringComparison.Ordinal) || line.Contains("TIMING", StringComparison.Ordinal)
+        || line.Contains("TEMPO", StringComparison.Ordinal) || ParseTiming(line) is not null
+        || ParseTempo(line) is not null;
+
+    private static string? ParseTiming(string text)
+    {
+        if (text.Contains("SLIGHTLY EARLY", StringComparison.Ordinal) || text.Contains("SLIGHTLYEAR", StringComparison.Ordinal))
+            return "slightlyEarly";
+        if (text.Contains("SLIGHTLY LATE", StringComparison.Ordinal) || text.Contains("SLIGHTLYLAT", StringComparison.Ordinal))
+            return "slightlyLate";
+        if (text.Contains("EXCELLENT", StringComparison.Ordinal) || text.Contains("GREEN", StringComparison.Ordinal))
+            return "excellent";
+        if (text.Contains("EARLY", StringComparison.Ordinal))
+            return "early";
+        if (text.Contains("LATE", StringComparison.Ordinal))
+            return "late";
+        return null;
+    }
+
+    private static string? ParseTempo(string text)
+    {
+        if (text.Contains("SLIGHTLY FAST", StringComparison.Ordinal) || text.Contains("SLIGHTLY RUSHED", StringComparison.Ordinal))
+            return "slightlyFast";
+        if (text.Contains("SLIGHTLY SLOW", StringComparison.Ordinal))
+            return "slightlySlow";
+        if (text.Contains("FAST", StringComparison.Ordinal) || text.Contains("RUSHED", StringComparison.Ordinal))
+            return "fast";
+        if (text.Contains("SLOW", StringComparison.Ordinal))
+            return "slow";
+        return null;
+    }
+
+    public void Dispose() => Stop();
+}

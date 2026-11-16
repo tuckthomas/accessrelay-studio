@@ -50,6 +50,17 @@ internal static partial class PhysicalGamepadInventory
         return new(devices.ToArray(), virtualIds);
     }
 
+    internal static bool TryGetContainerId(string instance, out Guid container)
+    {
+        container = Guid.Empty;
+        if (CM_Locate_DevNodeW(out uint node, instance, 0) != Success)
+            return false;
+        uint size = 16;
+        var key = ContainerId;
+        return CM_Get_DevNode_PropertyW(node, ref key, out uint type, out container, ref size, 0) == Success &&
+            type == GuidProperty && container != Guid.Empty;
+    }
+
     internal static bool TryReadHardwareId(string instance, out HardwareId hardware)
     {
         var match = HardwarePattern().Match(instance);

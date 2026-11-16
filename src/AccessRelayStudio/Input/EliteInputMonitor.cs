@@ -39,6 +39,7 @@ public sealed class EliteInputMonitor : IControllerInput
     private const ushort VirtualXbox360 = 0x028E;
     private readonly RawPaddleInput? _paddles;
     private readonly GameInputBackground? _background;
+    private readonly RawHidGamepadInput _rawHid = new();
     private Gamepad? _gamepad;
     private ControllerDevice? _device;
     private IReadOnlyList<ControllerDevice> _devices = Array.Empty<ControllerDevice>();
@@ -102,8 +103,9 @@ public sealed class EliteInputMonitor : IControllerInput
         {
             try
             {
-                state = ConvertReading(_background is not null && _background.TryRead(out var reading)
-                    ? reading : _gamepad.GetCurrentReading());
+                state = _rawHid.TryRead(out var hidState) ? hidState
+                    : ConvertReading(_background is not null && _background.TryRead(out var reading)
+                        ? reading : _gamepad.GetCurrentReading());
             }
             catch (COMException)
             {
@@ -142,7 +144,7 @@ public sealed class EliteInputMonitor : IControllerInput
             Device = _device,
             Devices = _devices,
             PrimaryConnected = connected, NavigationState = state, NavigationConnected = connected,
-            SupportsBackgroundInput = _background?.IsBound == true
+            SupportsBackgroundInput = _background?.IsBound == true || _rawHid.IsBound
         };
     }
 
@@ -161,7 +163,7 @@ public sealed class EliteInputMonitor : IControllerInput
             {
                 _lastIds = ids;
                 var requested = windowsGamepads.Select(device => device.Hardware).ToHashSet();
-                if (_device is { } current && _background?.IsBound == true)
+                if (_device is { } current && (_background?.IsBound == true || _rawHid.IsBound))
                     requested.Add(new(current.VendorId, current.ProductId));
                 _inventory = PhysicalGamepadInventory.Find(requested);
             }
@@ -190,7 +192,7 @@ public sealed class EliteInputMonitor : IControllerInput
             // Windows.Gaming.Input can omit the physical pad when this window loses focus.
             // Keep the same already verified device while its background handle still reads.
             string? selectedId = Volatile.Read(ref _selectedId);
-            if (_device is { } bound && _gamepad is { } previous && _background?.IsBound == true &&
+            if (_device is { } bound && _gamepad is { } previous && (_background?.IsBound == true || _rawHid.IsBound) &&
                 (selectedId is null || selectedId == bound.Id))
             {
                 var identity = new HardwareId(bound.VendorId, bound.ProductId);
@@ -199,7 +201,7 @@ public sealed class EliteInputMonitor : IControllerInput
                     var physical = _inventory.Physical.Where(device => device.Hardware == identity).ToArray();
                     if (physical.Select(device => device.Container).Distinct().Count() == 1 &&
                         CanSelectIdentity(identity, 1, physical, _inventory.Virtual, Volatile.Read(ref _outputActive) != 0) &&
-                        _background.TryRead(out _))
+                        (_rawHid.IsBound || _background?.TryRead(out _) == true))
                         verified.Add((bound, previous, true));
                 }
             }
@@ -237,19 +239,22 @@ public sealed class EliteInputMonitor : IControllerInput
 
     private void RefreshBackgroundBinding(ControllerDevice device, bool uniqueIdentity, bool refreshTopology)
     {
-        if (_background is null)
-            return;
         if (!uniqueIdentity)
         {
-            _background.Bind(null);
+            _background?.Bind(null);
+            _rawHid.Bind(null);
             return;
         }
 
         long now = Stopwatch.GetTimestamp();
-        if (refreshTopology || (!_background.IsBound && now >= _nextBackgroundBind))
+        if (refreshTopology || ((_background is not null && !_background.IsBound || !_rawHid.IsBound) && now >= _nextBackgroundBind))
         {
             _nextBackgroundBind = now + Stopwatch.Frequency;
-            _background.Bind(new HardwareId(device.VendorId, device.ProductId));
+            var hardware = new HardwareId(device.VendorId, device.ProductId);
+            _background?.Bind(hardware);
+            var container = _inventory.Physical.Where(p => p.Hardware == hardware).Select(p => p.Container).Distinct().FirstOrDefault();
+            if (container != Guid.Empty)
+                _rawHid.Bind(container);
         }
     }
 
@@ -281,6 +286,7 @@ public sealed class EliteInputMonitor : IControllerInput
         {
             _connectionVersion++;
             _background?.Bind(null);
+            _rawHid.Bind(null);
             _nextBackgroundBind = 0;
         }
         _gamepad = controller;
@@ -333,6 +339,7 @@ public sealed class EliteInputMonitor : IControllerInput
         RawGameController.RawGameControllerAdded -= OnControllerChanged;
         RawGameController.RawGameControllerRemoved -= OnControllerChanged;
         _background?.Dispose();
+        _rawHid.Dispose();
         _paddles?.Dispose();
     }
 }

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gameplay diagnostic recording</title>
+<style>
+:root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#111d2b;color:#e9f0ef}body{max-width:1400px;margin:auto;padding:24px}h1{font-size:28px}h2{font-size:20px}p{color:#bdcbd3}button,input{font:inherit}button{padding:10px 16px;background:#203b54;border:1px solid #7193a5;border-radius:8px;color:inherit;cursor:pointer}button:disabled{opacity:.5;cursor:default}input[type=range]{width:100%;min-height:36px;accent-color:#9ad2b6}label{display:block;margin:12px 0}section{padding:20px;border:1px solid #3d566b;border-radius:12px;background:#172839;margin:16px 0}.layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:20px}canvas{max-width:100%;height:auto;background:#0b1521;display:block}#chart{width:100%;height:130px}dl{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:14px}dt{color:#bdcbd3}dd{margin:0;overflow-wrap:anywhere}.buttons{display:flex;gap:12px;flex-wrap:wrap}#error{color:#ffb7ad}#message{font-size:18px;color:#e9f0ef}@media(max-width:850px){.layout{display:block}body{padding:12px}}
+</style>
+<h1>Gameplay diagnostic recording</h1>
+<p>Choose the saved diagnostic folder to inspect its frames and detection details. Everything stays on this computer.</p>
+<label>Diagnostic folder <input id="folder" type="file" webkitdirectory multiple></label>
+<p id="summary" role="status">No recording opened.</p><p id="error" role="alert"></p>
+<section><h2>Meter fill over time</h2><canvas id="chart" width="1200" height="130" aria-label="Meter fill percentage across the recording"></canvas>
+<label>Recorded frame <input id="seek" type="range" min="0" max="0" value="0" disabled></label>
+<div class="buttons"><button id="previous" disabled>Previous frame</button><button id="next" disabled>Next frame</button></div></section>
+<div class="layout"><section><h2 id="position">Frame</h2><p id="imageStatus" role="status"></p><canvas id="image" width="640" height="360" aria-label="Original captured gameplay frame with detected meter region"></canvas></section>
+<section><h2>Detection details</h2><p id="message">Choose a recording to begin.</p><dl id="details"></dl><p>Controller readings accompany each analyzed frame. They do not prove when Xbox received the input. Recording itself adds copying, compression and disk work.</p></section></div>
+<script>
+'use strict';
+const el=id=>document.getElementById(id), files=new Map();
+let report=null, index=0, revision=0;
+const number=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'—';
+const ms=t=>number(t*1000/report.stopwatchFrequency,2);
+const initial=()=>report.frames[0]?.captureTicks??report.startedTicks;
+function plot(){
+  const c=el('chart'),x=c.getContext('2d'),fs=report.frames;x.clearRect(0,0,c.width,c.height);
+  x.strokeStyle='#3d566b';x.lineWidth=1;
+  for(const y of [10,65,120]){x.beginPath();x.moveTo(0,y);x.lineTo(c.width,y);x.stroke()}
+  const first=initial(),duration=Math.max(1,(fs.at(-1)?.captureTicks??first)-first);
+  x.strokeStyle='#a0dcbb';x.lineWidth=2;x.beginPath();let connected=false;
+  for(const f of fs){if(!f.signal?.acquired){connected=false;continue}const px=(f.captureTicks-first)/duration*c.width,py=120-Math.min(1,Math.max(0,f.signal.progress))*110;if(connected)x.lineTo(px,py);else x.moveTo(px,py);connected=true}x.stroke();
+  x.strokeStyle='#f7d88d';x.beginPath();const cursor=(fs[index].captureTicks-first)/duration*c.width;x.moveTo(cursor,0);x.lineTo(cursor,c.height);x.stroke();
+}
+async function show(next){
+  if(!report?.frames.length)return;index=Math.max(0,Math.min(report.frames.length-1,next));const token=++revision,f=report.frames[index],s=f.signal??{};
+  el('seek').value=index;el('previous').disabled=index===0;el('next').disabled=index===report.frames.length-1;
+  el('position').textContent=`Frame ${f.sequence} · ${ms(f.captureTicks-initial())} ms · ${f.width} × ${f.height}`;
+  el('message').textContent=s.message??'No meter observation for this frame.';
+  const pairs=[['Fill',`${number(s.progress*100)}%`],['Fill velocity',s.continueCommittedAction?'—':`${number(s.velocityPerMs*100000)}% / s`],['Target forecast',`${number(s.timeToTargetMs)} ms`],['Uncertainty',s.continueCommittedAction?'—':`${number(s.uncertaintyMs)} ms`],['Geometry score',number(s.confidence,3)],['Fit samples',s.samples??'—'],['Frame interval',index?`${ms(f.captureTicks-report.frames[index-1].captureTicks)} ms`:'—'],['Processing',`${number(f.processingMs,2)} ms`],['Image copy',`${number(f.copyMs,2)} ms`],['Writer queue',`${number(f.queueMs,2)} ms`],['Image write',`${number(f.writeMs,2)} ms`],['Physical right Y',f.physicalContext?.physical?.rightY??'—'],['Requested right Y',f.requestedOutput?.rightY??'—'],['Assistance armed',String(f.output?.armed??false)],['Physical hold age',f.physicalContext?.holdStartedTimestamp>0?ms(f.captureTicks-f.physicalContext.holdStartedTimestamp)+' ms':'Unavailable'],['Action phase',s.continueCommittedAction?'Finishing anchored stroke':s.invalidateAttempt?'Attempt cancelled':s.timeToTargetMs!=null?'Live forecast':'Observing'],['Source fresh',String(f.sourceFresh)],['Forecast submitted',String(f.predictionSubmitted)],['Forecast accepted',String(f.predictionAccepted)],['Output status',f.output?.message??'—']];
+  el('details').replaceChildren(...pairs.flatMap(([key,value])=>{const a=document.createElement('dt'),b=document.createElement('dd');a.textContent=key;b.textContent=value;return[a,b]}));plot();
+  const canvas=el('image'),ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
+  el('imageStatus').textContent=f.file?'Loading saved image…':`Image unavailable: ${f.imageStatus}. Detection details are retained.`;
+  if(!f.file)return;
+  try{
+    const file=files.get(f.file);if(!file)throw Error('The saved image is missing from the selected folder.');
+    const bytes=new Uint8Array(await new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    if(token!==revision)return;if(bytes.length!==f.stride*f.height)throw Error('The saved image has an unexpected byte count.');
+    canvas.width=f.width;canvas.height=f.height;const image=ctx.createImageData(f.width,f.height);
+    for(let y=0;y<f.height;y++)for(let x=0;x<f.width;x++){const src=y*f.stride+x*4,dst=(y*f.width+x)*4;image.data[dst]=bytes[src+2];image.data[dst+1]=bytes[src+1];image.data[dst+2]=bytes[src];image.data[dst+3]=255}ctx.putImageData(image,0,0);
+    if(s.region){ctx.strokeStyle='#9af4bd';ctx.lineWidth=Math.max(2,f.width/700);ctx.strokeRect(s.region.left*f.width,s.region.top*f.height,s.region.width*f.width,s.region.height*f.height)}
+    el('imageStatus').textContent='Original captured pixels. Outline shows the detector’s meter region.';
+  }catch(error){if(token===revision)el('imageStatus').textContent=error.message}
+}
+el('folder').addEventListener('change',async event=>{
+  ++revision;report=null;files.clear();el('seek').disabled=true;el('previous').disabled=el('next').disabled=true;el('error').textContent='';
+  try{for(const file of event.target.files)files.set(file.name,file);const manifest=files.get('diagnostic.json');if(!manifest)throw Error('Choose the folder containing diagnostic.json.');
+    const loaded=JSON.parse(await manifest.text());if(loaded.version!==1||!Array.isArray(loaded.frames))throw Error('This recording format is not supported.');report=loaded;
+    el('summary').textContent=`${report.observedFrames} frames analyzed · ${report.storedFrames} images saved · ${report.droppedFrames} images skipped. ${report.message}`;
+    el('seek').max=Math.max(0,report.frames.length-1);el('seek').disabled=!report.frames.length;
+    if(report.frames.length)await show(0);else el('message').textContent='This recording contains no analyzed frames.';
+  }catch(error){el('error').textContent=error.message}
+});
+el('seek').addEventListener('input',event=>show(Number(event.target.value)));el('previous').addEventListener('click',()=>show(index-1));el('next').addEventListener('click',()=>show(index+1));
+</script></html>

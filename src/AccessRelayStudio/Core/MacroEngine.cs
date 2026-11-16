@@ -7,6 +7,9 @@ public readonly record struct MacroStatus(
     public bool IsActive => Control.HasValue;
 }
 
+public sealed record LuaCompletionReceipt(long Id, string RunId, ControlId Control, Guid ScriptId,
+    string SourceSha256, long StartedAtMs, long CompletedAtMs);
+
 public sealed class MacroEngine
 {
     private sealed record Plan(IReadOnlyList<StickPhase> Phases, int TotalMs, MacroRecording? Recording = null);
@@ -17,14 +20,21 @@ public sealed class MacroEngine
     private Plan[] _plans = [];
     private Dictionary<Guid, Plan> _recordingPlans = [];
     private Dictionary<Guid, LuaControllerProgram> _luaPrograms = [];
+    private Dictionary<Guid, string> _luaSourceHashes = [];
     private LuaControllerProgram? _lua;
     private ControlId? _luaControl;
+    private Guid? _luaScriptId;
     private long _luaStarted;
+    private long _completionId;
+    private LuaCompletionReceipt? _lastLuaCompletion;
+    public string RunId { get; } = Guid.NewGuid().ToString("N");
+    public LuaCompletionReceipt? LastLuaCompletion { get { lock (_sync) return _lastLuaCompletion; } }
     private Run? _active;
     private MacroStatus _status;
     private uint _consume;
     private uint _previous;
     private bool _hasSample;
+    private bool _acceptInitialPaddleEdges;
     private bool _enabled;
     private bool? _enabledOverride;
     private bool _nextMissLate;
@@ -35,7 +45,18 @@ public sealed class MacroEngine
         lock (_sync)
         {
             if (!_externalRun) return;
-            _lua?.Cancel(); _lua = null; _luaControl = null; _active = null; _status = default; _externalRun = false;
+            _lua?.Cancel(); _lua = null; _luaControl = null; _luaScriptId = null;
+            _lastLuaCompletion = null; _active = null; _status = default; _externalRun = false;
+        }
+    }
+
+    internal void CancelLua(ControlId control)
+    {
+        lock (_sync)
+        {
+            if (_luaControl != control) return;
+            _lua?.Cancel(); _lua = null; _luaControl = null; _luaScriptId = null;
+            _lastLuaCompletion = null; _status = default; _externalRun = false;
         }
     }
 
@@ -60,6 +81,7 @@ public sealed class MacroEngine
         var recordingPlans = profile.Recordings.ToDictionary(
             entry => entry.Key, entry => new Plan([], entry.Value.DurationMs, entry.Value));
         var luaPrograms = profile.LuaScripts.ToDictionary(entry => entry.Key, entry => new LuaControllerProgram(entry.Value));
+        var luaSourceHashes = profile.LuaScripts.ToDictionary(entry => entry.Key, entry => LuaShotCalibration.SourceSha256(entry.Value));
         uint consume = 0;
         foreach (var (control, binding) in profile.Bindings)
         {
@@ -74,9 +96,11 @@ public sealed class MacroEngine
             _plans = plans;
             _recordingPlans = recordingPlans;
             _luaPrograms = luaPrograms;
+            _luaSourceHashes = luaSourceHashes;
             _consume = consume;
             _enabled = _enabledOverride ?? profile.ScriptsEnabled;
             Reset();
+            _acceptInitialPaddleEdges = true;
         }
     }
 
@@ -89,6 +113,7 @@ public sealed class MacroEngine
                 return;
             _enabled = enabled;
             Reset();
+            _acceptInitialPaddleEdges = enabled;
         }
     }
 
@@ -115,7 +140,11 @@ public sealed class MacroEngine
             }
 
             uint pressed = ControlMap.PressedMask(input, paddles);
-            uint rising = _hasSample ? (pressed & ~_previous) | ControlMap.PressedMask(default, tapEdges) : 0;
+            // Raw paddle edges are fresh events even on the first sample after a settings apply.
+            // A held level still requires a previously observed neutral sample.
+            uint rising = (_hasSample ? pressed & ~_previous : 0)
+                | (_hasSample || _acceptInitialPaddleEdges ? ControlMap.PressedMask(default, tapEdges) : 0);
+            _acceptInitialPaddleEdges = false;
             _previous = pressed;
             _hasSample = true;
             bool externalEdge = rising == 0 && externalTrigger is { } && Enum.IsDefined(externalTrigger.Value);
@@ -130,21 +159,16 @@ public sealed class MacroEngine
                 _active = null;
             }
 
-            if (rising != 0)
-                StartPressedShot(rising, timestampMs, externalEdge);
-
             ControllerState output = ControlMap.Consume(manualOutput ?? input, _consume);
-            if (_lua is { } lua)
+            ControllerState advancedOutput = output;
+            bool advancedLua = _lua is not null;
+            if (advancedLua) advancedOutput = TickLua(input, paddles, output, timestampMs);
+            // Complete the old coroutine before considering this sample's press. Otherwise a
+            // fresh tap arriving on its completion tick is swallowed by the old trigger guard.
+            bool started = rising != 0 && StartPressedShot(rising, timestampMs, externalEdge);
+            if (_lua is not null)
             {
-                output = lua.Tick(input, paddles, output, timestampMs, out var error);
-                _status = new(ScriptKind.Lua, lua.IsRunning ? _luaControl : null, false, 0,
-                    (int)Math.Min(int.MaxValue, Math.Max(0, timestampMs - _luaStarted)), 0, null, lua.Name, error);
-                if (!lua.IsRunning)
-                {
-                    _lua = null;
-                    _luaControl = null;
-                }
-                return output;
+                return started || !advancedLua ? TickLua(input, paddles, output, timestampMs) : advancedOutput;
             }
             if (_active is not { } active)
             {
@@ -176,7 +200,22 @@ public sealed class MacroEngine
         }
     }
 
-    private void StartPressedShot(uint rising, long timestampMs, bool external = false)
+    private ControllerState TickLua(ControllerState input, PaddleButtons paddles, ControllerState output, long timestampMs)
+    {
+        var lua = _lua!;
+        output = lua.Tick(input, paddles, output, timestampMs, out var error);
+        _status = new(ScriptKind.Lua, lua.IsRunning ? _luaControl : null, false, 0,
+            (int)Math.Min(int.MaxValue, Math.Max(0, timestampMs - _luaStarted)), 0, null, lua.Name, error);
+        if (!lua.IsRunning)
+        {
+            if (error is null && _luaControl is { } control && _luaScriptId is { } scriptId)
+                _lastLuaCompletion = new(++_completionId, RunId, control, scriptId, _luaSourceHashes[scriptId], _luaStarted, timestampMs);
+            _lua = null; _luaControl = null; _luaScriptId = null; _externalRun = false;
+        }
+        return output;
+    }
+
+    private bool StartPressedShot(uint rising, long timestampMs, bool external = false)
     {
         foreach (var control in ControlMap.TriggerOrder)
         {
@@ -189,23 +228,27 @@ public sealed class MacroEngine
             _lua?.Cancel();
             _lua = null;
             _luaControl = null;
+            _luaScriptId = null;
+            _lastLuaCompletion = null;
             _active = null;
             _status = default;
             if (binding.Script == ScriptKind.Lua)
             {
                 _lua = _luaPrograms[binding.LuaScriptId!.Value];
                 _luaControl = control;
+                _luaScriptId = binding.LuaScriptId.Value;
                 _luaStarted = timestampMs;
                 _lua.Start(control, timestampMs);
-                return;
+                return true;
             }
             bool late = binding.Script == ScriptKind.IntentionalMiss && _nextMissLate;
             var plan = binding.Script == ScriptKind.Recorded
                 ? _recordingPlans[binding.RecordingId!.Value]
                 : _plans[(int)Trajectory.VariantFor(binding.Script, late)];
             _active = new(control, binding.Script, late, plan, timestampMs);
-            return;
+            return true;
         }
+        return false;
     }
 
     private static long Elapsed(Run active, long timestampMs) => Math.Max(0, timestampMs - active.StartedAtMs);
@@ -216,10 +259,13 @@ public sealed class MacroEngine
             program.Reset();
         _lua = null;
         _luaControl = null;
+        _luaScriptId = null;
+        _lastLuaCompletion = null;
         _active = null;
         _status = default;
         _previous = 0;
         _hasSample = false;
+        _acceptInitialPaddleEdges = false;
         _nextMissLate = false;
         _externalRun = false;
     }
