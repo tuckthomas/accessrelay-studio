@@ -64,6 +64,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         DesktopControllerService? controller = null)
     {
         _owner = owner; _runtime = runtime; _activeProfile = activeProfile; _connectOutput = connectOutput; _plugins = plugins; _installedPlugins = installedPlugins; _luaController = controller;
+        if (controller is not null) controller.DirectOutput = () => !_direct ? null : (_xbox?.Peer?.AttachController()
+            ?? throw new InvalidOperationException("Connect to your Xbox before enabling direct controller output."));
         LoadSettings(); RefreshSources();
         var context = _settings;
         _ = Task.Run(() => _library.Discover(context)).ContinueWith(task =>
@@ -90,7 +92,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             plugins = _plugins().Select(plugin => new { plugin.Id, plugin.Name, plugin.OutputContract }), pluginErrors = _installedPlugins?.Errors ?? [], selectedPluginId = _plugin?.Id ?? "",
             profiles = _plugin?.Profiles.Select(profile => profile.ExportProfile()) ?? [],
             selectedProfile = _profile?.ExportProfile(), selectedFingerprint = _profile?.ConfigurationFingerprint,
-            sources = _sources.Select(s => new { id = SourceId(s), s.Title, s.ProcessId }), selectedSourceId = _selectedSourceId,
+            xbox = XboxSnapshot(), sources = _sources.Select(s => new { id = SourceId(s), s.Title, s.ProcessId }), selectedSourceId = _selectedSourceId,
             settings = _settings, cameraViews = _plugin?.CameraViews ?? [],
             assistance = _profile?.DescribeLiveAssistance(_settings),
             luaCalibration = LuaCalibrationSnapshot(),
@@ -118,7 +120,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         return new
         {
             notice = _notice, busy = Volatile.Read(ref _busy) != 0 || _areaDetection is { IsCompleted: false }, session = _session?.Status,
-            sources = _sources.Select(source => new { id = SourceId(source), source.Title, source.ProcessId }),
+            xbox = XboxSnapshot(), sources = _sources.Select(source => new { id = SourceId(source), source.Title, source.ProcessId }),
             selectedSourceId = _selectedSourceId, captureLayoutConfirmed = _settings.TrainingCapture.Configured,
             stopping = _session?.IsStopping == true, output = _runtime()?.VisionStatus,
             controllerConnection = new { connected = _runtime()?.HasOutput == true,
@@ -149,6 +151,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     public async Task<object?> InvokeAsync(string action, JsonElement args)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (action == "xboxCancel") { CancelOperation(); return null; }
         if (action.StartsWith("luaCalibration", StringComparison.Ordinal)) return InvokeLuaCalibration(action, args);
         if (action == "trainingCancel") { _trainingJob.Cancel(); return null; }
         // Stop never waits behind model import, native pickers or startup waits.
@@ -166,6 +169,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         CancellationToken cancellation = _operation.Token;
         try
         {
+            if (action == "captureMode" || action.StartsWith("xbox", StringComparison.Ordinal))
+            { await XboxActionAsync(action, args, cancellation); return null; }
             switch (action)
             {
                 case "trainingConfigure":
@@ -221,6 +226,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 case "sourceRefresh": RefreshSources(); return null;
                 case "sourceSelect":
                     RequireStopped();
+                    if (_direct) throw new InvalidOperationException("Select window capture first.");
                     string sourceId = args.Text("id");
                     RefreshSources();
                     if (sourceId.Length != 0 && !_sources.Any(s => SourceId(s) == sourceId))
@@ -395,7 +401,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     var session = _session ?? throw new InvalidOperationException("Start the preview before recording diagnostics.");
                     session.StartDiagnosticRecording(DesktopEnvironment.DataDirectory("VisionDiagnostics")
                         ?? Path.Combine(AppContext.BaseDirectory, "Diagnostics", "VisionRecordings"),
-                        new { pluginId = _plugin?.Id, profile = _profile?.ExportProfile(), source = SelectedSource().Title });
+                        new { pluginId = _plugin?.Id, profile = _profile?.ExportProfile(), source = SelectedSourceTitle });
                     _notice = "Recording diagnostics until you stop it.";
                     return null;
                 }
@@ -499,7 +505,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     {
         _sourcesRefreshedAt = Stopwatch.GetTimestamp();
         var sources = RemotePlayCapture.EnumerateWindows().ToArray();
-        if (_selectedSourceId.Length != 0 && !sources.Any(s => SourceId(s) == _selectedSourceId))
+        if (!_direct && _selectedSourceId.Length != 0 && !sources.Any(s => SourceId(s) == _selectedSourceId))
         {
             _version++; _selectedSourceId = ""; _calibration = null; ClearPreview();
             _settings = _settings with { TrainingCapture = _settings.TrainingCapture with { Configured = false } };
@@ -524,12 +530,18 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private void Start(bool loadModel)
     {
         if (_trainingJob.Running) throw new InvalidOperationException("Stop the offline training job before starting gameplay capture.");
-        RequireStopped(); RefreshSources(); var source = SelectedSource();
-        string process;
-        try { using var owner = Process.GetProcessById(checked((int)source.ProcessId)); process = owner.ProcessName; }
-        catch { process = source.ProcessId.ToString(); }
-        _settings = _settings with { CaptureSourceKey = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(process + "\n" + source.Title))) };
+        RequireStopped(); RefreshSources();
+        var peer = _direct ? _xbox?.Peer ?? throw new InvalidOperationException("Connect to the Xbox first.") : null;
+        var source = _direct ? null : SelectedSource();
+        if (source is not null)
+        {
+            string process;
+            try { using var owner = Process.GetProcessById(checked((int)source.ProcessId)); process = owner.ProcessName; }
+            catch { process = source.ProcessId.ToString(); }
+            _settings = _settings with { CaptureSourceKey = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(process + "\n" + source.Title))) };
+        }
+        else _settings = _settings with { CaptureSourceKey = DirectSourceId };
         var predictor = _profile?.CreateLivePredictor(_settings);
         if (loadModel && predictor is null)
         {
@@ -555,8 +567,13 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
         var captureProvider = _settings.ExecutionProvider;
-        try { _session.Start(source.Hwnd, _settings, loadModel, predictor is null ? _profile?.CreateRegionTracker(_settings,
-            models => new VisionAnalysisModels(models, captureProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id))) : null, predictor); }
+        try
+        {
+            var tracker = predictor is null ? _profile?.CreateRegionTracker(_settings,
+                models => new VisionAnalysisModels(models, captureProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id))) : null;
+            if (peer is not null) _session.StartDirect(peer, _settings, loadModel, tracker, predictor);
+            else _session.Start(source!.Hwnd, _settings, loadModel, tracker, predictor);
+        }
         catch { predictor?.Dispose(); throw; }
         if (loadModel && predictor is not null) StartFeedbackOcr();
         _lastObservedSourceId = _selectedSourceId;
@@ -643,7 +660,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     if (profile.CalibrationTriggered(physical, _session.Tracking))
                     {
                         var calibration = profile.PrepareCalibrationCapture(_settings, source.CaptureWidth, source.CaptureHeight);
-                        _session.StartTraining(_trainingJob.Configuration.DatasetRoot, profile, SelectedSource().Title, calibration);
+                        _session.StartTraining(_trainingJob.Configuration.DatasetRoot, profile, SelectedSourceTitle, calibration);
                         calibrationStarted = true;
                         shotStartedAt = Stopwatch.GetTimestamp();
                         _notice = "Saving the full calibration clip, including the shot and feedback, while detecting capture areas.";
@@ -770,9 +787,9 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         }
         if (_settings != settings || _profile?.ConfigurationFingerprint != profile.ConfigurationFingerprint || sourceId != _selectedSourceId)
             throw new InvalidOperationException("The plugin profile or source changed while selecting a folder. Review the setup and try again.");
-        RefreshSources(); var source = SelectedSource();
+        RefreshSources(); var source = _direct ? null : SelectedSource();
         if (_session?.Status.Running != true) Start(loadModel: false);
-        if (!SetForegroundWindow(source.Hwnd))
+        if (source is not null && !SetForegroundWindow(source.Hwnd))
             throw new InvalidOperationException("The gameplay window could not receive focus. Return to Studio and start the recording again.");
         _notice = "Waiting for the gameplay capture size to settle.";
         long began = Stopwatch.GetTimestamp(), stableAt = began, initialFrames = _session!.Status.Frames;
@@ -790,7 +807,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             await Task.Delay(40, cancellation);
         }
         CheckOperation(version, cancellation);
-        _session.StartTraining(folderPath, profile, source.Title);
+        _session.StartTraining(folderPath, profile, SelectedSourceTitle);
         _notice = "Recording up to 10 seconds in the selected gameplay window.";
         return null;
     }
@@ -1126,6 +1143,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     public void Dispose()
     {
         if (_disposed) return; _disposed = true; CancelOperation();
+        if (_luaController is not null) _luaController.DirectOutput = null;
+        if (_xbox is { } connection) { _xbox = null; _ = connection.CloseAsync(); }
         _feedbackOcr?.Dispose();
         _trainingJob.Dispose();
         _session?.Dispose(); _review?.Dispose(); _operation.Dispose(); ClearPreview();

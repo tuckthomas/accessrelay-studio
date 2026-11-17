@@ -243,7 +243,7 @@ internal sealed class VisionSession : IDisposable
                 }
             }
             cancellation.ThrowIfCancellationRequested();
-            long previewAt = 0, sourceGeneration = -1;
+            long previewAt = 0, sourceGeneration = -1, lastTransportSample = 0;
             int sourceWidth = 0, sourceHeight = 0;
             long frames = 0, predictions = 0, excludedTimingFrames = 0;
             bool sourceReady = false;
@@ -258,6 +258,12 @@ internal sealed class VisionSession : IDisposable
                         _runtime.SetVisionTrainingRecording(false);
                         _trainingInhibited = false;
                     }
+                }
+                if (settings.StreamTelemetry.Enabled && capture is DecodedStreamCapture { LatestTelemetry: { } measurement }
+                    && measurement.CaptureTimestamp > lastTransportSample)
+                {
+                    _runtime.ObserveVisionStreamTelemetry(measurement);
+                    lastTransportSample = measurement.CaptureTimestamp;
                 }
                 var source = capture.Status;
                 long now = Stopwatch.GetTimestamp();

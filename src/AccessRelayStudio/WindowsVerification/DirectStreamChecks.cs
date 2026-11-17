@@ -144,31 +144,37 @@ internal static class DirectStreamChecks
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
         var channel = new TestChannel();
         runtime.Attach(new XboxStreamControllerOutput(channel));
-        input.SetState(new((ushort)ControlId.A, 0, 0, 0, 0, 0, short.MaxValue));
+        input.SetState(new((ushort)ControlId.A, 0, 0, 0, 0, 0, 0));
         Wait(() => channel.Snapshot().Any(p => p.Length == 38 && p[16] == 16 &&
-            BinaryPrimitives.ReadInt16LittleEndian(p.AsSpan(24)) == short.MaxValue), "Physical input missed the direct channel.");
+            BinaryPrimitives.ReadInt16LittleEndian(p.AsSpan(24)) == 0), "Physical input missed the direct channel.");
         Check(!input.VirtualOutputActive, "Direct output reserved the virtual USB identity.");
-        // Keep the physical stick down while the C# scheduler emits the reversal.
+        // Only P4 is held during the shot. Both physical stick axes stay centered.
         input.SetState(default);
         long resetAt = Stopwatch.GetTimestamp();
         Wait(() => runtime.ReadVisionSignalContext() is { Physical: { } physical, InputTimestamp: var timestamp }
             && timestamp > resetAt && physical == default, "Controller did not return to neutral.");
         runtime.ConfigureVision(VisionSettings.Default with { MaximumFrameAgeMs = 1000, MaximumLatenessMs = 100 },
-            new() { Kind = VisionActionKind.RightStickStroke, StrokeDurationMs = 56, AnchorFraction = .85 });
+            new() { Kind = VisionActionKind.RightStickStroke, TriggerPaddle = PaddleButtons.LargeRight, HoldQualificationMs = 70, StrokeDurationMs = 56, AnchorFraction = .85 });
         runtime.BeginVisionSession();
         Check(runtime.SetVisionArmed(true), "Could not arm the direct output fixture.");
-        input.SetState(default(ControllerState) with { RightY = short.MinValue });
+        int firstReport = channel.Snapshot().Length;
+        input.SetState(default, PaddleButtons.LargeRight);
         Wait(() => runtime.VisionStatus.ShotToken != 0, "Held input did not qualify a stroke.");
+        Check(channel.Snapshot().Skip(firstReport).Any(p => p.Length == 38 && BinaryPrimitives.ReadInt16LittleEndian(p.AsSpan(24)) == -32767),
+            "The held paddle did not generate full-down before forecasting.");
         var shot = runtime.VisionStatus;
         long now = Stopwatch.GetTimestamp();
         Check(runtime.SubmitVisionPrediction(new(shot.SessionGeneration, shot.ShotToken, 1, now, now, 100, 1, 0, true)),
             "Direct output rejected a qualified forecast.");
         Wait(() => runtime.LastVisionAction?.ActualAnchorTimestamp > 0, "Scheduled stroke missed its output receipt.");
-        var stroke = channel.Snapshot().Where(report => report.Length == 38)
+        var stroke = channel.Snapshot().Skip(firstReport).Where(report => report.Length == 38)
             .Select(report => BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(24))).ToList();
         int downIndex = stroke.IndexOf(-32767);
-        Check(downIndex >= 0 && stroke.IndexOf(short.MaxValue, downIndex) > downIndex,
-            "Scheduled full-up endpoint missed the stream while physical input stayed down.");
+        int upIndex = stroke.IndexOf(short.MaxValue);
+        Check(downIndex >= 0 && upIndex > downIndex && stroke.Skip(upIndex + 1).Contains((short)0)
+            && runtime.ReadVisionSignalContext() is { HeldPaddles: PaddleButtons.LargeRight, Physical: { RightX: 0, RightY: 0 } },
+            "P4 did not deliver down, up and neutral with the physical stick centered.");
+        input.SetState(default);
 
         runtime.StopOutput(false);
         Check(!channel.IsOpen && IsNeutral(channel.Snapshot()[^1]), "Stopping runtime output did not release the gamepad.");

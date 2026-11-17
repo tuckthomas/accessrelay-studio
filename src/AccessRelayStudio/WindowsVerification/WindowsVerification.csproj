@@ -8,7 +8,9 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <None Update="Fixtures/bars-320x180.h264" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="Program.cs" />
+    <Compile Include="GStreamerLoopbackChecks.cs" />
     <Compile Include="DirectStreamChecks.cs" />
     <Compile Include="CaptureCadenceChecks.cs" />
     <Compile Include="DiagnosticRecordingChecks.cs" />

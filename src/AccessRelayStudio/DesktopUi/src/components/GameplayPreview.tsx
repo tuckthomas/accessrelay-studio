@@ -31,7 +31,7 @@ export function GameplayPreview({ status = {}, actions, window: captureWindow = 
           <rect x={region.left * 1000} y={region.top * 1000} width={region.width * 1000} height={region.height * 1000}
             fill="none" stroke="var(--accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" /></svg>}
       </div>
-        : <p className="subtle">Select a window and start capture.</p>}</div>
+        : <p className="subtle">{status.xbox?.direct ? 'Connect to your Xbox and start capture.' : 'Select a window and start capture.'}</p>}</div>
     <div className="remote-play-preview-details">{status.preview?.sourceWidth ? `${status.preview.sourceWidth} × ${status.preview.sourceHeight}` : ''}</div>
     {session.captureFailed && <Notice tone="danger">{session.message || 'The selected window could not be captured.'}</Notice>}
   </Card>;

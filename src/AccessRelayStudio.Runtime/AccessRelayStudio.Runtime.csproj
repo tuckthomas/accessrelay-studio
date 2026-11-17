@@ -13,6 +13,7 @@
     <Compile Include="../AccessRelayStudio/Input/*.cs" Link="Input/%(Filename)%(Extension)" />
     <Compile Include="../AccessRelayStudio/Output/*.cs" Link="Output/%(Filename)%(Extension)" />
     <Compile Include="../AccessRelayStudio/Audio/*.cs;../AccessRelayStudio/Audio/VirtualMicDriver/VirtualMicDriver.cs" Link="Audio/%(Filename)%(Extension)" />
+    <Compile Include="../AccessRelayStudio/RemotePlay/*.cs" Link="RemotePlay/%(Filename)%(Extension)" />
     <Compile Include="../AccessRelayStudio/Vision/*.cs" Link="Vision/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../AccessRelayStudio/Vision/DiagnosticReview.html" LogicalName="VisionDiagnosticReview.html" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.31.1" />

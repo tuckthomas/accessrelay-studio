@@ -37,7 +37,7 @@ internal sealed partial class DesktopVisionService
 
     private LuaControllerScript SelectedLua()
     {
-        if (_plugin?.Id != "nba2k27" || _luaController is null || !LuaChoices().Any(c => c.Control == _luaControl.ToString()))
+        if (_plugin?.SupportsRhythmLuaCalibration != true || _luaController is null || !LuaChoices().Any(c => c.Control == _luaControl.ToString()))
             throw new InvalidOperationException("Assign a recorded full rhythm-shot Lua to a button or paddle first.");
         var profile = _activeProfile();
         return profile.LuaScripts[profile.GetBinding(_luaControl).LuaScriptId!.Value];
@@ -53,7 +53,7 @@ internal sealed partial class DesktopVisionService
     private object LuaCalibrationSnapshot()
     {
         var choices = LuaChoices();
-        if (_luaController is null || _plugin?.Id != "nba2k27" || choices.Length == 0) return new { available = false };
+        if (_luaController is null || _plugin?.SupportsRhythmLuaCalibration != true || choices.Length == 0) return new { available = false };
         if (!choices.Any(c => c.Control == _luaControl.ToString())) _luaControl = Enum.Parse<ControlId>(choices[0].Control);
         var script = SelectedLua(); var training = LuaShotCalibration.TrainingFor(script);
         var runtime = _runtime();

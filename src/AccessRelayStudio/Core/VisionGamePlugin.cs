@@ -39,6 +39,7 @@ public interface IVisionGamePlugin
     string Id { get; }
     string Name { get; }
     string OutputContract { get; }
+    bool SupportsRhythmLuaCalibration => this is IGameControllerPlugin && OutputContract == "temporal-release-v1";
     string? TrainingWorkflowFile => null;
     IReadOnlyList<string> CameraViews { get; }
     IReadOnlyList<IVisionCaptureProfile> Profiles { get; }

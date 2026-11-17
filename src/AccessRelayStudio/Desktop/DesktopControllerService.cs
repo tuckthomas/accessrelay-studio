@@ -519,10 +519,16 @@ internal sealed class DesktopControllerService : IDesktopModule
         return new { message = _notice };
     }
 
+    internal Func<IControllerOutput?>? DirectOutput { get; set; }
+
     internal Task StartOutputAsync()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (Runtime.HasOutput) return Task.CompletedTask;
+        if (DirectOutput?.Invoke() is { } direct)
+        {
+            Runtime.Attach(direct); _notice = direct.Status; return Task.CompletedTask;
+        }
         if (_outputTask is { IsCompleted: false }) return _outputTask;
         _outputStart?.Dispose();
         var cancellation = _outputStart = new CancellationTokenSource();

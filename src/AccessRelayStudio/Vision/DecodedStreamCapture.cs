@@ -8,6 +8,7 @@ internal readonly record struct DecodedBgraFrame(nint Pixels, int ByteLength, in
 internal interface IDecodedVideoTrack
 {
     // An observation owns only its subscription. A new connection supplies a new track.
+    EliteScriptStudio.Core.StreamTelemetryReading? LatestTelemetry => null;
     IDisposable Subscribe(Action<DecodedBgraFrame> onFrame, Action onEnded);
 }
 
@@ -17,6 +18,8 @@ internal sealed class DecodedStreamCapture : IVisionFrameSource
     private readonly LatestFrameBuffer _frames = new();
     private readonly AutoResetEvent _ready = new(false);
     private readonly IDisposable _subscription;
+    private readonly IDecodedVideoTrack _track;
+    internal EliteScriptStudio.Core.StreamTelemetryReading? LatestTelemetry => _track.LatestTelemetry;
     private bool _running = true;
     private bool _disposed;
     private long _generation, _callbacks, _published, _latestTicks, _changedTicks;
@@ -26,6 +29,7 @@ internal sealed class DecodedStreamCapture : IVisionFrameSource
 
     internal DecodedStreamCapture(IDecodedVideoTrack track)
     {
+        _track = track;
         try { _subscription = track.Subscribe(Publish, () => End("The Xbox video track ended.")); }
         catch
         {

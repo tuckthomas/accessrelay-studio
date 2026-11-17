@@ -1,3 +1,4 @@
+import { CaptureSourceControls } from '../components/CaptureSourceControls';
 import { useState } from 'react';
 import { getGameMeta } from '../games';
 import { useGamePluginError, useGameVisionWorkspace } from '../game-plugins/registry';
@@ -85,13 +86,9 @@ export function GameAddonPage({
     {error && <Notice tone="danger">{error}</Notice>}
     {(state.pluginErrors ?? []).map((message: string) => <Notice key={message} tone="danger">{message}</Notice>)}
 
-    <Card title="Capture settings"><div className="row remote-play-source"><Field label="Gameplay window" hint="A browser window captures its active tab.">
-      <Select aria-label="Gameplay window" value={sourceId} disabled={locked || working}
-        onFocus={() => { if (!locked && !working) command('sourceRefresh').catch(e => setError(e instanceof Error ? e.message : String(e))); }}
-        onValueChange={selectionValue => choose('sourceSelect', selectionValue)}>
-        <SelectOption value="">Choose a window</SelectOption>{sources.map((source: any) => <SelectOption key={source.id} value={source.id}>{source.title}</SelectOption>)}
-      </Select></Field><Button aria-label="Refresh capture windows" disabled={locked || working} onClick={() => void run('sourceRefresh')}><Icon name="refresh" size={18} /></Button>
-    </div></Card>
+    <Card title="Capture settings"><CaptureSourceControls xbox={live.xbox ?? state.xbox} sources={sources} sourceId={sourceId}
+      locked={locked} working={working} busy={busy} choose={choose} run={run}
+      refresh={() => { if (!locked && !working) command('sourceRefresh').catch(e => setError(e instanceof Error ? e.message : String(e))); }} /></Card>
 
     {Plugin
       ? <Plugin key={pluginId + draftEpoch} state={state} status={status} command={command} controller={controller} mode="live" captureWindow={captureWindow} />
