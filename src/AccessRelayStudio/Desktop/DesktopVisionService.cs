@@ -44,7 +44,9 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private VisionPerformanceSnapshot? _performance;
     private LiveFeedbackOcr? _feedbackOcr;
     private object? _lastOcrFeedback;
-    private int _consecutiveOcrDir;
+    private readonly List<object> _ocrHistory = [];
+    private static readonly string OcrHistoryPath = Path.Combine(DesktopEnvironment.DataDirectory("Vision") ?? AppContext.BaseDirectory, "ShotFeedbackHistory.jsonl");
+    private int _consecutiveOcrDir, _consecutiveOcrTempoDir;
     private readonly object _ocrGate = new();
     private string _notice = "Choose a window to preview gameplay.";
     private int _busy, _encodingPreview, _version;
@@ -124,6 +126,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             tracking = preview?.Tracking ?? _session?.Tracking,
             signal = _session?.Signal, lastAction = _runtime()?.LastVisionAction,
             ocrFeedback = Volatile.Read(ref _lastOcrFeedback),
+            ocrHistory = SnapshotOcrHistory(),
+            ocrHistoryPath = OcrHistoryPath,
             luaCalibration = LuaCalibrationSnapshot(),
             captureProposal = AutomaticProposal(),
             trainingJob = _trainingJob.Snapshot,
@@ -265,8 +269,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     edited = edited with { ModelManifestPath = _settings.ModelManifestPath,
                         AnimationProfile = _settings.AnimationProfile, CameraView = _settings.CameraView };
                     edited.Validate();
-                    if ((edited with { CorrectionMs = 0 }) != (_settings with { CorrectionMs = 0 }))
-                        edited = edited with { CorrectionMs = 0 };
+                    if ((edited with { CorrectionMs = 0, TempoCorrectionMs = 0 }) != (_settings with { CorrectionMs = 0, TempoCorrectionMs = 0 }))
+                        edited = edited with { CorrectionMs = 0, TempoCorrectionMs = 0 };
                     _settings = edited; _calibration = null; SaveSettings(); _version++;
                     await RefreshModelsAsync(); _notice = "Vision settings saved."; return null;
                 case "settingsExport": return await ExportSettingsAsync();
@@ -280,6 +284,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                         EstimatedVideoDelayMs = args.GetProperty("videoDelayMs").GetDouble(),
                         EstimatedInputDelayMs = args.GetProperty("inputDelayMs").GetDouble(),
                         CorrectionMs = args.GetProperty("correctionMs").GetDouble(),
+                        TempoCorrectionMs = args.TryGetProperty("tempoCorrectionMs", out var tempoProp) && tempoProp.ValueKind == JsonValueKind.Number
+                            ? tempoProp.GetDouble() : _settings.TempoCorrectionMs,
                         MinimumConfidence = args.GetProperty("minimumConfidence").GetDouble(),
                         MaximumUncertaintyMs = args.GetProperty("maximumUncertaintyMs").GetDouble(),
                         ShootButton = args.GetProperty("shootButton").Read<ControlId>() };
@@ -317,7 +323,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     var model = await Task.Run(() => _library.Import(Path.Combine(folder.Path, "manifest.json"), context, cancellation), cancellation);
                     CheckOperation(version, cancellation);
                     await RefreshModelsAsync();
-                    _settings = _settings with { ModelManifestPath = model.ManifestPath, CorrectionMs = 0 }; SaveSettings();
+                    _settings = _settings with { ModelManifestPath = model.ManifestPath, CorrectionMs = 0, TempoCorrectionMs = 0 }; SaveSettings();
                     _notice = "Model package imported. " + model.Status; return null;
                 }
                 case "modelSelect":
@@ -325,7 +331,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     RequireStopped(); string id = args.Text("id");
                     var model = id.Length == 0 ? null : _models.FirstOrDefault(m => ModelId(m) == id)
                         ?? throw new InvalidOperationException("Import this model package before selecting it.");
-                    _settings = _settings with { ModelManifestPath = model?.ManifestPath ?? "", CorrectionMs = 0 };
+                    _settings = _settings with { ModelManifestPath = model?.ManifestPath ?? "", CorrectionMs = 0, TempoCorrectionMs = 0 };
                     SaveSettings(); _calibration = null; return null;
                 }
                 case "start":
@@ -535,7 +541,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         }
         _feedbackOcr?.Stop();
         Volatile.Write(ref _lastOcrFeedback, null);
-        lock (_ocrGate) _consecutiveOcrDir = 0;
+        lock (_ocrGate) { _consecutiveOcrDir = 0; _consecutiveOcrTempoDir = 0; }
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
@@ -927,7 +933,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             throw new InvalidDataException("Choose the player/camera matching these settings before importing them.");
         if (imported.ModelManifestPath.Length != 0 && !_models.Any(m => m.ManifestPath == imported.ModelManifestPath))
             throw new InvalidDataException("Import the model package into the library before importing its settings.");
-        _settings = imported with { CorrectionMs = 0, TrainingCapture = imported.TrainingCapture with { Configured = false } };
+        _settings = imported with { CorrectionMs = 0, TempoCorrectionMs = 0, TrainingCapture = imported.TrainingCapture with { Configured = false } };
         SaveSettings(); _calibration = null; await RefreshModelsAsync(); _notice = "Settings imported. Confirm capture areas on this PC."; return null;
     }
     private FileSavePicker SavePicker(string name, string label)
@@ -984,6 +990,39 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         catch { /* OCR banner feedback is optional */ }
     }
 
+    private object[] SnapshotOcrHistory() { lock (_ocrGate) return [.. _ocrHistory]; }
+
+    private object BuildOcrEntry(OcrFeedbackRead read, VisionActionReceipt receipt,
+        double expectedPreAnchorMs, double actualPreAnchorMs, bool strokeClamped,
+        double prevCorr, double nextCorr, double prevTempo, double nextTempo, string message) => new
+    {
+        timestampUtc = DateTimeOffset.UtcNow,
+        profileId = _profile?.Id.ToString() ?? "",
+        profileName = _profile?.Name ?? "",
+        read.ReceiptId, read.RunId, read.ShotType, read.Timing, read.Tempo, read.Distance, read.Coverage, read.RawText,
+        read.ProcessingMs, strokeDurationMs = receipt.StrokeDurationMs,
+        expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,
+        adjusted = nextCorr != prevCorr || nextTempo != prevTempo,
+        adjustedTiming = nextCorr != prevCorr,
+        adjustedTempo = nextTempo != prevTempo,
+        previousCorrectionMs = prevCorr, nextCorrectionMs = nextCorr, deltaMs = nextCorr - prevCorr,
+        previousTempoCorrectionMs = prevTempo, nextTempoCorrectionMs = nextTempo, tempoDeltaMs = nextTempo - prevTempo,
+        message
+    };
+
+    private void RecordOcrEntryLocked(object entry)
+    {
+        _ocrHistory.Add(entry);
+        if (_ocrHistory.Count > 100) _ocrHistory.RemoveAt(0);
+        Volatile.Write(ref _lastOcrFeedback, entry);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(OcrHistoryPath)!);
+            File.AppendAllText(OcrHistoryPath, JsonSerializer.Serialize(entry, DesktopJson.Options) + Environment.NewLine);
+        }
+        catch { /* History logging is optional */ }
+    }
+
     private void HandleOcrFeedback(OcrFeedbackRead read)
     {
         lock (_ocrGate)
@@ -999,45 +1038,52 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             bool rhythmMode = _settings.PluginAssistance is { } modeJson
                 && (!modeJson.TryGetProperty("inputMode", out var modeProp) || modeProp.GetString() == "rhythm");
             bool paddleBound = _runtime()?.VisionAction.TriggerPaddle != PaddleButtons.None;
+            double expectedPreAnchorMs = latestReceipt.AnchorFraction * latestReceipt.StrokeDurationMs;
+            double actualPreAnchorMs = latestReceipt.StartedTimestamp > 0 && latestReceipt.AnchorTimestamp > latestReceipt.StartedTimestamp
+                ? Stopwatch.GetElapsedTime(latestReceipt.StartedTimestamp, latestReceipt.AnchorTimestamp).TotalMilliseconds
+                : expectedPreAnchorMs;
+            bool strokeClamped = expectedPreAnchorMs > 0 && actualPreAnchorMs + 2.5 < expectedPreAnchorMs;
             if (autoAdjust && paddleBound && !(rhythmMode && read.ShotType == "timing"))
             {
-                var step = LiveFeedbackOcr.ComputeAdaptiveStep(_settings.CorrectionMs, read.Timing, ref _consecutiveOcrDir);
-                bool applied = step.DeltaMs == 0;
-                if (!applied)
+                var step = LiveFeedbackOcr.ComputeAdaptiveFeedback(_settings.CorrectionMs, _settings.TempoCorrectionMs,
+                    read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir);
+                bool applied = !step.Changed;
+                if (step.Changed)
                 {
                     // Wait briefly if player is still holding paddle right at shot end.
                     for (int retry = 0; retry < 8; retry++)
                     {
-                        if (_runtime()?.TryAdjustVisionTiming(s => s with { CorrectionMs = step.NextCorrectionMs }) == true)
+                        if (_runtime()?.TryAdjustVisionTiming(s => s with
+                        {
+                            CorrectionMs = step.Timing.NextCorrectionMs,
+                            TempoCorrectionMs = step.Tempo.NextCorrectionMs
+                        }) == true)
                         { applied = true; break; }
                         Thread.Sleep(60);
                     }
                     if (applied)
                     {
-                        _settings = _settings with { CorrectionMs = step.NextCorrectionMs };
+                        _settings = _settings with
+                        {
+                            CorrectionMs = step.Timing.NextCorrectionMs,
+                            TempoCorrectionMs = step.Tempo.NextCorrectionMs
+                        };
                         _settingsStore.Save(_settingsProfile, _settings);
                         _version++;
-                        _notice = step.Reason;
+                        _notice = step.Message;
                     }
                 }
-                Volatile.Write(ref _lastOcrFeedback, new
-                {
-                    read.ReceiptId, read.RunId, read.ShotType, read.Timing, read.Tempo, read.RawText,
-                    read.ProcessingMs, adjusted = applied && step.DeltaMs != 0,
-                    previousCorrectionMs = step.PreviousCorrectionMs, nextCorrectionMs = applied ? step.NextCorrectionMs : step.PreviousCorrectionMs,
-                    deltaMs = applied ? step.DeltaMs : 0, message = step.Reason
-                });
+                double nextCorr = applied ? step.Timing.NextCorrectionMs : step.Timing.PreviousCorrectionMs;
+                double nextTempo = applied ? step.Tempo.NextCorrectionMs : step.Tempo.PreviousCorrectionMs;
+                RecordOcrEntryLocked(BuildOcrEntry(read, latestReceipt, expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,
+                    step.Timing.PreviousCorrectionMs, nextCorr, step.Tempo.PreviousCorrectionMs, nextTempo, step.Message));
                 return;
             }
-            Volatile.Write(ref _lastOcrFeedback, new
-            {
-                read.ReceiptId, read.RunId, read.ShotType, read.Timing, read.Tempo, read.RawText,
-                read.ProcessingMs, adjusted = false, previousCorrectionMs = _settings.CorrectionMs,
-                nextCorrectionMs = _settings.CorrectionMs, deltaMs = 0d,
-                message = rhythmMode && read.ShotType == "timing"
-                    ? $"OCR ignored non-rhythm TIMING result ({read.Timing}); correction unchanged."
-                    : $"OCR read: {read.ShotType.ToUpperInvariant()} · {read.Timing}"
-            });
+            string passiveMessage = rhythmMode && read.ShotType == "timing"
+                ? $"OCR ignored non-rhythm TIMING result ({read.Timing}); correction unchanged."
+                : $"OCR read: {read.ShotType.ToUpperInvariant()} · {read.Timing}{(read.Tempo is not ("none" or "") ? $" · {read.Tempo}" : "")}";
+            RecordOcrEntryLocked(BuildOcrEntry(read, latestReceipt, expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,
+                _settings.CorrectionMs, _settings.CorrectionMs, _settings.TempoCorrectionMs, _settings.TempoCorrectionMs, passiveMessage));
         }
     }
 

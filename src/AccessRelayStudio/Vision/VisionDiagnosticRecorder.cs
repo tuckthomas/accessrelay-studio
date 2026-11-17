@@ -15,6 +15,7 @@ internal sealed record VisionDiagnosticStatus(bool IsRecording, bool IsFinalized
 internal sealed class VisionDiagnosticRecorder : IDisposable
 {
     internal const long MaximumBytes = 4L * 1024 * 1024 * 1024;
+    internal const long MinimumFreeDiskBytes = 512L * 1024 * 1024;
     internal const int MaximumFrames = 36000;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { WriteIndented = true, NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals };
@@ -42,7 +43,8 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
     private readonly TimeSpan? _duration;
     private readonly object _context;
     private readonly Func<string, Stream> _createStream;
-    private readonly long _byteLimit;
+    private readonly long? _byteLimit;
+    private readonly string _driveRoot;
     private readonly long _started = Stopwatch.GetTimestamp();
     private readonly DateTimeOffset _createdAt = DateTimeOffset.UtcNow;
     private long _stored, _dropped, _bytes;
@@ -69,7 +71,8 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
             FileShare.Read, 65536, FileOptions.SequentialScan));
         parent = Path.GetFullPath(parent);
         Directory.CreateDirectory(parent);
-        long freeBytes = new DriveInfo(Path.GetPathRoot(parent)!).AvailableFreeSpace;
+        _driveRoot = Path.GetPathRoot(parent)!;
+        long freeBytes = new DriveInfo(_driveRoot).AvailableFreeSpace;
         if (byteLimit is { } requiredLimit)
         {
             if (freeBytes < requiredLimit + 64L * 1024 * 1024)
@@ -78,10 +81,9 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
         }
         else
         {
-            long budget = Math.Min(2L * 1024 * 1024 * 1024, freeBytes - 256L * 1024 * 1024);
-            if (budget < 128L * 1024 * 1024)
-                throw new IOException("Diagnostic recording needs at least 384 MiB free in its destination.");
-            _byteLimit = budget;
+            if (freeBytes < MinimumFreeDiskBytes + 64L * 1024 * 1024)
+                throw new IOException("Diagnostic recording needs at least 576 MiB free in its destination.");
+            _byteLimit = null;
         }
         _message = duration is null
             ? "Recording diagnostics. Stop recording when finished."
@@ -105,7 +107,7 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
         lock (_gate)
         {
             if (_stopped) return;
-            if (_frames.Count >= MaximumFrames) { Stop("The diagnostic frame limit was reached."); return; }
+            if (_duration is not null && _frames.Count >= MaximumFrames) { Stop("The diagnostic frame limit was reached."); return; }
             var entry = new FrameEntry(frame.Sequence, frame.CaptureTicks, frame.CompositorTicks, frame.SourceGeneration,
                 frame.Width, frame.Height, frame.Stride, completedTicks, processingMs, signal, physical,
                 requested, output, receipt, fresh, submitted, accepted, pipeline);
@@ -154,7 +156,7 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
                 {
                     var entry = pending.Entry;
                     if (_failed) { entry.ImageStatus = "writerFailed"; lock (_gate) _dropped++; continue; }
-                    if (_bytes >= _byteLimit) { entry.ImageStatus = "sizeLimit"; lock (_gate) _dropped++; continue; }
+                    if (_byteLimit is { } limitBefore && _bytes >= limitBefore) { entry.ImageStatus = "sizeLimit"; lock (_gate) _dropped++; continue; }
                     long began = Stopwatch.GetTimestamp();
                     entry.QueueMs = Stopwatch.GetElapsedTime(pending.QueuedAt, began).TotalMilliseconds;
                     string name = $"frame-{entry.Sequence:D8}.bgra.gz";
@@ -166,12 +168,17 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
                     }
                     entry.File = name; entry.ImageStatus = "saved";
                     entry.WriteMs = Stopwatch.GetElapsedTime(began).TotalMilliseconds;
+                    bool checkDisk = false;
                     lock (_gate)
                     {
                         _bytes += entry.CompressedBytes; _stored++;
-                        // One final frame can exceed the soft compressed-byte limit.
-                        if (_bytes >= _byteLimit) Stop("The diagnostic size limit was reached.");
+                        if (_byteLimit is { } limitAfter && _bytes >= limitAfter)
+                            Stop("The diagnostic size limit was reached.");
+                        else if (_byteLimit is null && (_stored % 50) == 0)
+                            checkDisk = true;
                     }
+                    if (checkDisk && new DriveInfo(_driveRoot).AvailableFreeSpace < MinimumFreeDiskBytes)
+                        Stop("Free disk space dropped below 512 MiB.");
                 }
                 catch (Exception error) { pending.Entry.ImageStatus = "writeFailed"; lock (_gate) _dropped++; Fail(error); }
                 finally { ArrayPool<byte>.Shared.Return(pending.Pixels); _slots.Release(); }
@@ -201,7 +208,7 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
             version = 1, createdAtUtc = _createdAt, stopwatchFrequency = Stopwatch.Frequency, startedTicks = _started,
             finalized = _finalized, failed = _failed, message = _message, stopReason = _stopReason, context = _context,
             scope = "Diagnostic observations, not training labels. Exact native-resolution BGRA8 images are individually gzip-compressed; row layout is given per frame. Controller states are sampled with each processed frame, not a complete output-delivery trace. Capture timestamps are local PC receipt, not Xbox render time. Recording adds copying/compression/disk work; skipped images and copy/queue/write times are explicit.",
-            limits = new { durationSeconds = _duration?.TotalSeconds, compressedBytes = _byteLimit, sizeLimitMayExceedByOneImage = true, pendingImages = 3, maximumFrames = MaximumFrames },
+            limits = new { durationSeconds = _duration?.TotalSeconds, compressedBytes = _byteLimit, sizeLimitMayExceedByOneImage = true, pendingImages = 3, maximumFrames = _duration is null && _byteLimit is null ? (int?)null : MaximumFrames },
             observedFrames = _frames.Count, storedFrames = _stored, droppedFrames = _dropped, compressedBytes = _bytes, frames = _frames
         }, Json));
         File.Move(temporary, path, true);

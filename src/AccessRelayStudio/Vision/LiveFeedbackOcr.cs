@@ -5,9 +5,12 @@ using EliteScriptStudio.Core;
 namespace EliteScriptStudio.Vision;
 
 internal sealed record OcrFeedbackRead(long ReceiptId, string RunId, string ShotType, string Timing, string Tempo,
-    string RawText, long CaptureTicks, double ProcessingMs);
+    string RawText, long CaptureTicks, double ProcessingMs, string? Distance = null, string? Coverage = null);
 
 internal sealed record AdaptiveTimingStep(double PreviousCorrectionMs, double NextCorrectionMs, double DeltaMs, string Reason);
+
+internal sealed record AdaptiveFeedbackResult(AdaptiveTimingStep Timing, AdaptiveTimingStep Tempo, bool TimingClampedSkipped,
+    bool Changed, string Message);
 
 /// <summary>Reads the post-shot HUD feedback banner asynchronously on captured crop frames so the
 /// 60 Hz meter tracker and release scheduler stay untouched.</summary>
@@ -161,7 +164,7 @@ internal sealed class LiveFeedbackOcr : IDisposable
                 _priorBannerText = parsed.RawText;
                 _priorBannerAt = frame.CaptureTicks;
                 return new(receipt.Id, receipt.RunId, parsed.ShotType, parsed.Timing, parsed.Tempo,
-                    parsed.RawText, frame.CaptureTicks, procMs);
+                    parsed.RawText, frame.CaptureTicks, procMs, parsed.Distance, parsed.Coverage);
             }
             await Task.Delay(175, ct).ConfigureAwait(false);
         }
@@ -205,7 +208,8 @@ internal sealed class LiveFeedbackOcr : IDisposable
             Math.Clamp(child.Width * parent.Width, .01, 1),
             Math.Clamp(child.Height * parent.Height, .01, 1));
 
-    internal sealed record ParsedBanner(string ShotType, string Timing, string Tempo, string RawText, VisionCrop? BannerBounds);
+    internal sealed record ParsedBanner(string ShotType, string Timing, string Tempo, string RawText, VisionCrop? BannerBounds,
+        string? Distance = null, string? Coverage = null);
 
     internal static ParsedBanner? ParseFeedback(VisionTextRegion[] regions)
     {
@@ -214,14 +218,16 @@ internal sealed class LiveFeedbackOcr : IDisposable
             .Where(r => !string.IsNullOrWhiteSpace(r.Text))
             .OrderBy(r => r.Bounds.Top)
             .ThenBy(r => r.Bounds.Left)
-            .Select(r => (Text: NormalizeOcrLine(r.Text), r.Bounds))
+            .Select(r => (Raw: CleanOcrLine(r.Text), Match: NormalizeOcrLine(r.Text), r.Bounds))
+            .Where(l => l.Raw.Length > 0)
             .ToArray();
         if (lines.Length == 0) return null;
 
-        string joined = string.Join(" | ", lines.Select(l => l.Text));
+        string joinedRaw = string.Join(" | ", lines.Select(l => l.Raw));
+        string joinedMatch = string.Join(" | ", lines.Select(l => l.Match));
         string shotType = "";
-        if (ContainsKeyword(joined, "RHYTHM") || ContainsKeyword(joined, "TEMPO")) shotType = "rhythm";
-        else if (ContainsKeyword(joined, "TIMING")) shotType = "timing";
+        if (ContainsKeyword(joinedMatch, "RHYTHM") || ContainsKeyword(joinedMatch, "TEMPO")) shotType = "rhythm";
+        else if (ContainsKeyword(joinedMatch, "TIMING")) shotType = "timing";
 
         string timing = "";
         string tempo = "none";
@@ -229,17 +235,17 @@ internal sealed class LiveFeedbackOcr : IDisposable
 
         // First scan lines tagged with timing/rhythm or unmarked feedback lines,
         // separating TEMPO grade if present.
-        var feedbackLines = lines.Where(l => IsFeedbackToken(l.Text)).ToArray();
+        var feedbackLines = lines.Where(l => IsFeedbackToken(l.Match, l.Raw)).ToArray();
         if (feedbackLines.Length == 0) return null;
 
         foreach (var line in feedbackLines)
         {
-            if (ParseTempo(line.Text) is { } parsedTempo)
+            if (ParseTempo(line.Match) is { } parsedTempo)
             {
                 if (tempo == "none") tempo = parsedTempo;
                 continue;
             }
-            if (ParseTiming(line.Text) is { } parsedTiming)
+            if (ParseTiming(line.Match) is { } parsedTiming)
             {
                 if (parsedTiming == "excellent") excellentCount++;
                 if (timing == "") timing = parsedTiming;
@@ -250,21 +256,22 @@ internal sealed class LiveFeedbackOcr : IDisposable
 
         // If "TIMING" and "TEMPO" headings didn't explicitly contain the grade on the same line, check joined text.
         if (timing == "")
-            timing = ParseTiming(joined) ?? "";
+            timing = ParseTiming(joinedMatch) ?? "";
         if (timing == "") return null;
 
         if (shotType == "" && tempo != "none") shotType = "rhythm";
-        if (shotType == "") shotType = ContainsKeyword(joined, "TEMPO") ? "rhythm" : "rhythm";
+        if (shotType == "") shotType = ContainsKeyword(joinedMatch, "TEMPO") ? "rhythm" : "rhythm";
         if (shotType == "timing") tempo = "none";
         if (excellentCount >= 2 && shotType == "rhythm" && tempo == "none") tempo = "excellent";
 
+        var (distance, coverage) = ExtractShotContext(lines);
         double minL = feedbackLines.Min(l => l.Bounds.Left);
         double minT = feedbackLines.Min(l => l.Bounds.Top);
         double maxR = feedbackLines.Max(l => l.Bounds.Left + l.Bounds.Width);
         double maxB = feedbackLines.Max(l => l.Bounds.Top + l.Bounds.Height);
         var bounds = new VisionCrop(Math.Clamp(minL, 0, 1), Math.Clamp(minT, 0, 1),
             Math.Clamp(maxR - minL, .01, 1), Math.Clamp(maxB - minT, .01, 1));
-        return new(shotType, timing, tempo, joined, bounds);
+        return new(shotType, timing, tempo, joinedRaw, bounds, distance, coverage);
     }
 
     internal static AdaptiveTimingStep ComputeAdaptiveStep(double currentCorrectionMs, string timing, ref int consecutiveDirection)
@@ -275,28 +282,102 @@ internal sealed class LiveFeedbackOcr : IDisposable
             "late" or "slightlyLate" => -1,
             _ => 0
         };
+        bool slight = timing is "slightlyEarly" or "slightlyLate";
+        return ComputeAdaptiveStepCore(currentCorrectionMs, dir, slight, ref consecutiveDirection,
+            firstMagnitude: slight ? 1.5 : 2.5, repeatedMagnitude: slight ? 2.5 : 4.0, -100, 100,
+            unchangedReason: "Excellent timing confirmed; correction unchanged.",
+            stepReason: (prev, next) => $"OCR {timing}: timing correction {FormatMs(prev)} → {FormatMs(next)} ms.");
+    }
+
+    internal static AdaptiveTimingStep ComputeAdaptiveTempoStep(double currentTempoCorrectionMs, string tempo, ref int consecutiveDirection)
+    {
+        int dir = tempo switch
+        {
+            "fast" or "slightlyFast" => 1,
+            "slow" or "slightlySlow" => -1,
+            _ => 0
+        };
+        bool slight = tempo is "slightlyFast" or "slightlySlow";
+        return ComputeAdaptiveStepCore(currentTempoCorrectionMs, dir, slight, ref consecutiveDirection,
+            firstMagnitude: slight ? 2.0 : 4.0, repeatedMagnitude: slight ? 3.0 : 6.0, -100, 100,
+            unchangedReason: "Tempo unchanged.",
+            stepReason: (prev, next) => $"tempo correction {FormatMs(prev)} → {FormatMs(next)} ms.");
+    }
+
+    internal static AdaptiveFeedbackResult ComputeAdaptiveFeedback(double currentCorrectionMs, double currentTempoCorrectionMs,
+        OcrFeedbackRead read, bool strokeClamped, ref int consecutiveTimingDir, ref int consecutiveTempoDir)
+    {
+        bool suppressLateClamp = strokeClamped && read.Timing is "late" or "slightlyLate";
+        AdaptiveTimingStep timingStep;
+        if (suppressLateClamp)
+        {
+            consecutiveTimingDir = 0;
+            timingStep = new(currentCorrectionMs, currentCorrectionMs, 0,
+                "Timing correction unchanged (stroke started behind schedule).");
+        }
+        else
+        {
+            timingStep = ComputeAdaptiveStep(currentCorrectionMs, read.Timing, ref consecutiveTimingDir);
+        }
+
+        var tempoStep = read.ShotType == "timing" || read.Tempo is "none" or ""
+            ? new AdaptiveTimingStep(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, "Tempo unchanged.")
+            : ComputeAdaptiveTempoStep(currentTempoCorrectionMs, read.Tempo, ref consecutiveTempoDir);
+
+        bool timingMoved = timingStep.DeltaMs != 0;
+        bool tempoMoved = tempoStep.DeltaMs != 0;
+        string summary;
+        if (!timingMoved && !tempoMoved)
+        {
+            summary = suppressLateClamp
+                ? timingStep.Reason
+                : timingStep.Reason;
+        }
+        else
+        {
+            var parts = new List<string>(2);
+            if (timingMoved)
+                parts.Add($"timing {FormatMs(timingStep.PreviousCorrectionMs)} → {FormatMs(timingStep.NextCorrectionMs)} ms");
+            else if (suppressLateClamp)
+                parts.Add("timing held (stroke started late)");
+            if (tempoMoved)
+                parts.Add($"tempo {FormatMs(tempoStep.PreviousCorrectionMs)} → {FormatMs(tempoStep.NextCorrectionMs)} ms");
+            string tag = read.Tempo is not ("none" or "") && read.Tempo != read.Timing
+                ? $"{read.Tempo} {read.Timing}"
+                : read.Timing;
+            summary = $"OCR {tag}: {string.Join("; ", parts)}.";
+        }
+        return new(timingStep, tempoStep, suppressLateClamp, timingMoved || tempoMoved, summary);
+    }
+
+    private static AdaptiveTimingStep ComputeAdaptiveStepCore(double current, int dir, bool _, ref int consecutiveDirection,
+        double firstMagnitude, double repeatedMagnitude, double min, double max, string unchangedReason,
+        Func<double, double, string> stepReason)
+    {
         if (dir == 0)
         {
             consecutiveDirection = 0;
-            return new(currentCorrectionMs, currentCorrectionMs, 0, "Excellent timing confirmed; correction unchanged.");
+            return new(current, current, 0, unchangedReason);
         }
-
         consecutiveDirection = (Math.Sign(consecutiveDirection) == dir)
             ? consecutiveDirection + dir
             : dir;
+        double magnitude = Math.Abs(consecutiveDirection) >= 2 ? repeatedMagnitude : firstMagnitude;
+        double next = Math.Clamp(Math.Round((current + dir * magnitude) * 2) / 2, min, max);
+        return new(current, next, next - current, stepReason(current, next));
+    }
 
-        // Damped nudges avoid chasing single-shot WebRTC/Remote Play jitter while still tracking real drift.
-        bool repeated = Math.Abs(consecutiveDirection) >= 2;
-        double magnitude = timing switch
+    private static string FormatMs(double value) => value.ToString("+0.#;-0.#;0");
+
+    private static string CleanOcrLine(string raw)
+    {
+        var sb = new StringBuilder(raw.Length);
+        foreach (char ch in raw.Normalize(NormalizationForm.FormKC).ToUpperInvariant())
         {
-            "slightlyEarly" or "slightlyLate" => repeated ? 2.5 : 1.5,
-            "early" or "late" => repeated ? 4 : 2.5,
-            _ => 0
-        };
-        double delta = dir * magnitude;
-        double next = Math.Clamp(Math.Round((currentCorrectionMs + delta) * 2) / 2, -100, 100);
-        return new(currentCorrectionMs, next, next - currentCorrectionMs,
-            $"OCR {timing}: timing correction {currentCorrectionMs:+0.#;-0.#;0} → {next:+0.#;-0.#;0} ms.");
+            if (char.IsAsciiLetterOrDigit(ch) || ch is ' ' or '.' or '\'') sb.Append(ch);
+            else if (ch is '-' or '_' or '/' or ':') sb.Append(' ');
+        }
+        return string.Join(' ', sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
     private static string NormalizeOcrLine(string raw)
@@ -316,10 +397,51 @@ internal sealed class LiveFeedbackOcr : IDisposable
     private static bool ContainsKeyword(string text, string keyword)
         => text.Contains(keyword, StringComparison.Ordinal);
 
-    private static bool IsFeedbackToken(string line) =>
-        line.Contains("RHYTHM", StringComparison.Ordinal) || line.Contains("TIMING", StringComparison.Ordinal)
-        || line.Contains("TEMPO", StringComparison.Ordinal) || ParseTiming(line) is not null
-        || ParseTempo(line) is not null;
+    private static bool IsFeedbackToken(string matchLine, string rawLine) =>
+        matchLine.Contains("RHYTHM", StringComparison.Ordinal) || matchLine.Contains("TIMING", StringComparison.Ordinal)
+        || matchLine.Contains("TEMPO", StringComparison.Ordinal) || matchLine.Contains("DISTANCE", StringComparison.Ordinal)
+        || ParseTiming(matchLine) is not null || ParseTempo(matchLine) is not null
+        || ParseCoverage(matchLine) is not null || ExtractDistanceToken(rawLine) is not null;
+
+    private static (string? Distance, string? Coverage) ExtractShotContext((string Raw, string Match, VisionCrop Bounds)[] lines)
+    {
+        string? distance = null, coverage = null;
+        bool sawDistanceHeading = lines.Any(l => ContainsKeyword(l.Match, "DISTANCE"));
+        for (int i = 0; i < lines.Length; i++)
+        {
+            coverage ??= ParseCoverage(lines[i].Match);
+            distance ??= ExtractDistanceToken(lines[i].Raw, allowBareNumber: sawDistanceHeading && (i > 0 && ContainsKeyword(lines[i - 1].Match, "DISTANCE") || (lines[i].Raw.All(ch => char.IsAsciiDigit(ch) || ch == '\'' || ch == ' ') && lines[i].Raw.Length <= 4)));
+        }
+        return (distance, coverage);
+    }
+
+    private static string? ExtractDistanceToken(string raw, bool allowBareNumber = false)
+    {
+        var tokens = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            string tok = tokens[i].TrimEnd('\'', '.');
+            if (tok.EndsWith("FT", StringComparison.Ordinal) && tok.Length > 2 && int.TryParse(tok[..^2], out int attachedFt) && attachedFt is >= 1 and <= 94)
+                return $"{attachedFt} ft";
+            if (int.TryParse(tok, out int feet) && feet is >= 1 and <= 94)
+            {
+                bool hasFt = (i + 1 < tokens.Length && tokens[i + 1].StartsWith("FT", StringComparison.Ordinal)) || tokens[i].EndsWith('\'');
+                if (hasFt || allowBareNumber) return $"{feet} ft";
+            }
+        }
+        return null;
+    }
+
+    private static string? ParseCoverage(string text)
+    {
+        if (text.Contains("WIDE OPEN", StringComparison.Ordinal)) return "Wide Open";
+        if (text.Contains("LIGHTLY CONTESTED", StringComparison.Ordinal)) return "Lightly Contested";
+        if (text.Contains("SMOTHERED", StringComparison.Ordinal)) return "Smothered";
+        if (text.Contains("TIGHT", StringComparison.Ordinal)) return "Tight";
+        if (text.Contains("CONTESTED", StringComparison.Ordinal)) return "Contested";
+        if (text.Contains("OPEN", StringComparison.Ordinal)) return "Open";
+        return null;
+    }
 
     private static string? ParseTiming(string text)
     {

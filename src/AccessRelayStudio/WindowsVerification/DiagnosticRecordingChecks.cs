@@ -29,8 +29,9 @@ internal static class DiagnosticRecordingChecks
         using (var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "diagnostic.json"))))
         {
             var root = report.RootElement; var frame = root.GetProperty("frames")[0];
-            Check(root.GetProperty("limits").GetProperty("durationSeconds").ValueKind == JsonValueKind.Null,
-                "Default diagnostic recording should not enforce a fixed time limit.");
+            Check(root.GetProperty("limits").GetProperty("durationSeconds").ValueKind == JsonValueKind.Null
+                && root.GetProperty("limits").GetProperty("compressedBytes").ValueKind == JsonValueKind.Null,
+                "Default diagnostic recording should not enforce fixed time or byte caps.");
             Check(root.GetProperty("finalized").GetBoolean(), "Saved report is still marked incomplete.");
             Check(frame.GetProperty("sequence").GetInt64() == 41 && frame.GetProperty("compositorTicks").GetInt64() == 120
                 && frame.GetProperty("signal").GetProperty("progress").GetDouble() == .57

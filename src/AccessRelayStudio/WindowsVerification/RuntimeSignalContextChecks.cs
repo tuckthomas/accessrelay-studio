@@ -57,6 +57,28 @@ internal static class RuntimeSignalContextChecks
         Check(s2.NextCorrectionMs == 7.5 && streak == 2, $"Repeated slightlyEarly step unexpected: {s2}");
         var s3 = LiveFeedbackOcr.ComputeAdaptiveStep(s2.NextCorrectionMs, "excellent", ref streak);
         Check(s3.NextCorrectionMs == 7.5 && streak == 0, $"Excellent changed correction: {s3}");
+        var distanceBanner = LiveFeedbackOcr.ParseFeedback([
+            new("RHYTHM", .95, new(.42, .02, .09, .03)),
+            new("DISTANCE", .93, new(.42, .05, .10, .03)),
+            new("24 FT", .91, new(.53, .05, .06, .03)),
+            new("OPEN", .92, new(.42, .08, .06, .03)),
+            new("FAST", .91, new(.42, .11, .06, .03)),
+            new("LATE", .91, new(.50, .11, .06, .03))
+        ]);
+        Check(distanceBanner is { ShotType: "rhythm", Timing: "late", Tempo: "fast", Distance: "24 ft", Coverage: "Open" }
+            && distanceBanner.RawText.Contains("24 FT", StringComparison.Ordinal), "Distance/coverage OCR extraction altered digits or failed.");
+        int tStreak = 0, tempoStreak = 0;
+        var fastLate = LiveFeedbackOcr.ComputeAdaptiveFeedback(-10, 0,
+            new(1, "run", "rhythm", "late", "fast", "RHYTHM | FAST | LATE", 1, 1, "24 ft", "Open"),
+            strokeClamped: false, ref tStreak, ref tempoStreak);
+        Check(fastLate.Timing.NextCorrectionMs == -12.5 && fastLate.Tempo.NextCorrectionMs == 4.0,
+            $"Combined FAST + LATE step unexpected: {fastLate}");
+        int clampedT = 0, clampedTempo = 0;
+        var clampedLate = LiveFeedbackOcr.ComputeAdaptiveFeedback(-10, 0,
+            new(2, "run", "rhythm", "late", "fast", "RHYTHM | FAST | LATE", 1, 1, "24 ft", "Open"),
+            strokeClamped: true, ref clampedT, ref clampedTempo);
+        Check(clampedLate.TimingClampedSkipped && clampedLate.Timing.NextCorrectionMs == -10 && clampedLate.Tempo.NextCorrectionMs == 4.0,
+            $"Clamped LATE did not guard timing correction: {clampedLate}");
         Check(LiveFeedbackOcr.BuildBannerSearchCrop(new(.41, .004, .197, .111)).Height >= .36, "Banner search crop too short for OCR detector threshold.");
         Check(LiveFeedbackOcr.SelectSearchCrop(3, new(.3, 0, .4, .36)).Top == .24, "Above-player middle band missing from OCR search rotation.");
 

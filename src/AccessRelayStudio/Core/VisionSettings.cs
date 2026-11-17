@@ -50,6 +50,7 @@ public sealed record VisionSettings
     public double EstimatedVideoDelayMs { get; init; }
     public double EstimatedInputDelayMs { get; init; }
     public double CorrectionMs { get; init; }
+    public double TempoCorrectionMs { get; init; }
     public double MaximumLatenessMs { get; init; } = 5;
     public double MaximumShotDurationMs { get; init; } = 5000;
 
@@ -80,6 +81,7 @@ public sealed record VisionSettings
         Check(EstimatedVideoDelayMs, 0, 1000, "Estimated video delay");
         Check(EstimatedInputDelayMs, 0, 1000, "Estimated input delay");
         Check(CorrectionMs, -1000, 1000, "Timing correction");
+        Check(TempoCorrectionMs, -200, 200, "Tempo correction");
         Check(MaximumLatenessMs, 0, 100, "Deadline lateness");
         Check(MaximumShotDurationMs, 1, 10000, "Shot duration");
     }
