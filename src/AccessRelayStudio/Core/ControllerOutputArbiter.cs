@@ -38,6 +38,7 @@ internal sealed class ControllerOutputArbiter
         _telemetry = new(timestampFrequency);
     }
 
+    public void ObserveStreamTelemetry(DirectStreamMetrics reading) => _telemetry.Add(reading);
     public void ObserveStreamTelemetry(StreamTelemetryReading reading) => _telemetry.Add(reading);
     public StreamTelemetryAssessment StreamTelemetry(long now) => _telemetry.Assess(_shotStarted > 0 ? _shotStarted : now, now,
         _settings.MaximumUncertaintyMs, _settings.StreamTelemetry.Enabled);

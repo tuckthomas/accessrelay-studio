@@ -292,8 +292,8 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
         finally { g_bytes_unref(bytes); }
     }
 
-    private StreamTelemetryReading? _latest;
-    public StreamTelemetryReading? LatestTelemetry => Volatile.Read(ref _latest);
+    private DirectStreamMetrics? _latest;
+    public DirectStreamMetrics? LatestTelemetry => Volatile.Read(ref _latest);
     internal XboxTransportStats ReadStats(CancellationToken ct)
     {
         var stats = WithPromise("get-stats", 0, _stats.Sample, ct);

@@ -15,7 +15,7 @@ internal sealed partial class DesktopVisionService
     private XboxConsole? _console;
     private XboxRemoteConnection? _xbox;
     private bool _direct, _signedIn;
-    private string _windowSelection = "";
+    private string _windowSelection = "", _consoleMessage = "";
 
     private sealed class RefreshStore : IXboxRefreshStore
     {
@@ -42,13 +42,13 @@ internal sealed partial class DesktopVisionService
     {
         direct = _direct, signedIn = _signedIn, consoles = _consoles, consoleId = _console?.Id,
         signInCode = _signInPrompt?.Code, verificationPage = _signInPrompt?.VerificationUri.AbsoluteUri,
-        connected = _xbox?.Peer is not null, message = _xbox?.Status, statistics = _xbox?.Stats
+        connected = _xbox?.Peer is not null, message = _xbox?.Status ?? _consoleMessage, statistics = _xbox?.Stats
     };
 
     private void InvalidateSource(string id)
     {
         _selectedSourceId = id; _version++; ClearPreview(); _calibration = null;
-        _settings = _settings with { TrainingCapture = _settings.TrainingCapture with { Configured = false } };
+        _settings = _settings with { CaptureSourceKey = _direct ? id : WindowSourceKey(id), TrainingCapture = _settings.TrainingCapture with { Configured = false } };
         _runtime()?.SetVisionArmed(false);
     }
 
@@ -72,7 +72,7 @@ internal sealed partial class DesktopVisionService
             if (direct == _direct) return;
             if (direct)
             {
-                _signedIn = _xboxAccount.HasAccount; _windowSelection = _selectedSourceId;
+                _signedIn = _xboxAccount.HasAccount; _windowSelection = _selectedSourceId; _consoleMessage = "";
                 _luaController?.StopOutput();
             }
             else await DisconnectXboxAsync();
@@ -99,7 +99,7 @@ internal sealed partial class DesktopVisionService
                     var consoles = await service.ConsolesAsync(ct);
                     ct.ThrowIfCancellationRequested(); _consoles = consoles;
                     if (_xbox is null) _console = consoles.FirstOrDefault(x => x.Id == _console?.Id) ?? consoles.FirstOrDefault();
-                    _notice = consoles.Count == 0 ? "No home consoles were found for this account." : "Choose a console to connect.";
+                    _consoleMessage = _notice = consoles.Count == 0 ? "No home consoles were found for this account." : "Choose a console to connect.";
                 }
                 finally { _signedIn = _xboxAccount.HasAccount; }
                 break;
@@ -120,10 +120,10 @@ internal sealed partial class DesktopVisionService
                 }
                 InvalidateSource(DirectSourceId); _notice = "Xbox connected. Start capture to observe the stream.";
                 break;
-            case "xboxDisconnect": await DisconnectXboxAsync(); _notice = "Xbox disconnected."; break;
+            case "xboxDisconnect": await DisconnectXboxAsync(); _consoleMessage = _notice = "Xbox disconnected."; break;
             case "xboxSignOut":
                 await DisconnectXboxAsync(); _xboxAccount.SignOut(); _signedIn = false; _consoles = []; _console = null; InvalidateSource("");
-                _notice = "Signed out of Xbox."; break;
+                _consoleMessage = _notice = "Signed out of Xbox."; break;
             default: throw new InvalidDataException("Unknown Xbox Remote Play command.");
         }
     }

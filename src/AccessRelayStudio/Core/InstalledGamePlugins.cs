@@ -89,6 +89,14 @@ internal sealed class InstalledGamePlugins(string directory, Func<string, string
         foreach (var asset in item.Pack.Manifest.Assets.Where(a => a.Kind == GamePackAssetKind.Workflow)) _ = ReadChecked(item.Pack, asset);
         return item.Pack.ResourcePath(item.Pack.Manifest.Assets.Single(a => a.Path == path));
     }
+    internal VisionCaptureModelSet? FeedbackModels(string gameId)
+    {
+        var pack = Require(gameId).Pack;
+        string? Hash(string name) => pack.Manifest.Assets.FirstOrDefault(a =>
+            a.Kind == GamePackAssetKind.CaptureModel && a.Path == "capture-models/" + name)?.Sha256;
+        return Hash("pose.onnx") is { } pose && Hash("text-det.onnx") is { } detector && Hash("text-rec.onnx") is { } recognizer
+            ? new(gameId + "-" + pack.Manifest.Version, pose, detector, recognizer) : null;
+    }
     internal string ModelDirectory(string gameId) => Path.Combine(Require(gameId).Pack.DirectoryPath, "capture-models");
     private Loaded Require(string gameId) => _active.FirstOrDefault(item => item.Vision.Id == gameId)
         ?? throw new InvalidOperationException("The game implementation is not installed.");

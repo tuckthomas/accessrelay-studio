@@ -109,7 +109,12 @@ internal sealed partial class DesktopVisionService : IDesktopModule
 
     public object GetStatus()
     {
-        if (!_disposed && _visible && _session?.Status.Running != true &&
+        if (!_disposed && _direct && _selectedSourceId.Length != 0 && _xbox?.Peer is null)
+        {
+            _luaController?.StopOutput();
+            InvalidateSource("");
+        }
+        if (!_disposed && !_direct && _visible && _session?.Status.Running != true &&
             (_sourcesRefreshedAt == 0 || Stopwatch.GetElapsedTime(_sourcesRefreshedAt).TotalSeconds >= 2)) RefreshSources();
         UpdatePreview();
         if (_session is not null && (_performanceRefreshedAt == 0 || Stopwatch.GetElapsedTime(_performanceRefreshedAt).TotalSeconds >= 1))
@@ -233,9 +238,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                         throw new InvalidOperationException("That window closed. Choose another Remote Play window.");
                     if (sourceId != _selectedSourceId)
                     {
-                        _version++; _selectedSourceId = sourceId; ClearPreview();
-                        _settings = _settings with { TrainingCapture = _settings.TrainingCapture with { Configured = false } };
-                        SaveSettings(); _calibration = null;
+                        InvalidateSource(sourceId); SaveSettings();
                     }
                     return null;
                 case "profileSelect":
@@ -501,8 +504,21 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private static string ModelId(VisionModelLibraryEntry model) => Path.GetFileName(Path.GetDirectoryName(model.ManifestPath))!;
     private CaptureSource SelectedSource() => _sources.FirstOrDefault(s => SourceId(s) == _selectedSourceId)
         ?? throw new InvalidOperationException("Choose a gameplay window.");
+    private string WindowSourceKey(string id)
+    {
+        var source = _sources.FirstOrDefault(s => SourceId(s) == id);
+        if (source is null) return "";
+        string process;
+        try { using var owner = Process.GetProcessById(checked((int)source.ProcessId)); process = owner.ProcessName; }
+        catch (ArgumentException) { process = source.ProcessId.ToString(); }
+        catch (InvalidOperationException) { process = source.ProcessId.ToString(); }
+        catch (System.ComponentModel.Win32Exception) { process = source.ProcessId.ToString(); }
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(process + "\n" + source.Title)));
+    }
+
     private void RefreshSources()
     {
+        if (_direct) return;
         _sourcesRefreshedAt = Stopwatch.GetTimestamp();
         var sources = RemotePlayCapture.EnumerateWindows().ToArray();
         if (!_direct && _selectedSourceId.Length != 0 && !sources.Any(s => SourceId(s) == _selectedSourceId))
@@ -533,15 +549,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         RequireStopped(); RefreshSources();
         var peer = _direct ? _xbox?.Peer ?? throw new InvalidOperationException("Connect to the Xbox first.") : null;
         var source = _direct ? null : SelectedSource();
-        if (source is not null)
-        {
-            string process;
-            try { using var owner = Process.GetProcessById(checked((int)source.ProcessId)); process = owner.ProcessName; }
-            catch { process = source.ProcessId.ToString(); }
-            _settings = _settings with { CaptureSourceKey = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes(process + "\n" + source.Title))) };
-        }
-        else _settings = _settings with { CaptureSourceKey = DirectSourceId };
+        _settings = _settings with { CaptureSourceKey = _direct ? DirectSourceId : WindowSourceKey(_selectedSourceId) };
         var predictor = _profile?.CreateLivePredictor(_settings);
         if (loadModel && predictor is null)
         {
@@ -1005,10 +1013,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             if (string.IsNullOrWhiteSpace(modelDir) || !File.Exists(Path.Combine(modelDir, "text-det.onnx"))
                 || !File.Exists(Path.Combine(modelDir, "text-rec.onnx")))
                 return;
-            var modelSet = new VisionCaptureModelSet("nba2k27-automatic-v1",
-                "20aad6e2e42359cac1c5b4a0b2da00e29bfe91a72a782fdcf287d273a04c1b24",
-                "ea07c15d38ac40cd69da3c493444ec75b44ff23840553ff8ba102c1219ed39c2",
-                "e8770c967605983d1570cdf5352041dfb68fa0c21664f49f47b155abd3e0e318");
+            var modelSet = _installedPlugins?.FeedbackModels(pluginId!);
+            if (modelSet is null) return;
             _feedbackOcr?.Dispose();
             _feedbackOcr = new(modelDir, modelSet, HandleOcrFeedback);
             _feedbackOcr.Start(() => _session, _runtime, () => _settings);

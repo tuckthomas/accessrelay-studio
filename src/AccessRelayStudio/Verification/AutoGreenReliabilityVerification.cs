@@ -101,6 +101,15 @@ internal static class AutoGreenReliabilityVerification
         window.Add(parsed! with { CaptureTimestamp = 2600, PingMs = 80 });
         Check(window.Assess(2500, 2700, 12, true) is { State: "unstable", CanAdapt: false }, "Latency spike qualified for tuning.");
         Check(window.Assess(6000, 6000, 12, true) is { State: "unavailable", CanAdapt: false }, "Stale statistics stayed healthy.");
+        var direct = new StreamTelemetryWindow(1000);
+        var sample = new DirectStreamMetrics(1000, null, null, 2, 4, 60, null, null, 0, null, 1920, 1080);
+        direct.Add(sample); direct.Add(sample with { CaptureTimestamp = 1800 });
+        Check(direct.Assess(1800, 2100, 12, true) is { CanAdapt: true, Latest: null, Direct.RttMs: null, Direct.Width: 1920 },
+            "Missing RTT hid measured native statistics or fabricated overlay evidence.");
+        direct.Add(sample with { CaptureTimestamp = 2100, PacketLossPercent = 2 });
+        Check(!direct.Assess(2100, 2200, 12, true).CanAdapt, "Native packet loss permitted adaptation.");
+        direct.Add(sample with { CaptureTimestamp = 3000, DecodeMs = null });
+        Check(direct.Assess(3000, 3200, 12, true).State == "unavailable", "Missing decoder statistics permitted adaptation.");
         var combined = Paddle();
         combined.ObserveStreamTelemetry(parsed! with { CaptureTimestamp = 20, JitterMs = 8 });
         combined.ObserveStreamTelemetry(parsed! with { CaptureTimestamp = 80, JitterMs = 8 });

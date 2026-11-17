@@ -121,7 +121,7 @@ export function App() {
       <main className="app-main" id="main-content"><div className="content-width">
         {page === 'workspace' && <WorkspacePage state={state} status={{ controller: controllerStatus, voice: voiceStatus, vision: visionStatus, system: status.system || state.system }}
           command={invoke} navigate={navigate} />}
-        {page === 'controller' && <ControllerPage state={state.controller || {}} status={controllerStatus} command={controllerCommand} />}
+        {page === 'controller' && <ControllerPage state={{ ...state.controller, directXbox: (status.vision?.xbox ?? state.vision?.xbox)?.direct }} status={controllerStatus} command={controllerCommand} />}
         {page === 'vision' && <VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="live" captureWindow={captureWindow} />}
         {page === 'training' && <div className="page-stack"><VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="training" captureWindow={captureWindow} openMarketplace={() => navigate('marketplace')} />
           <details><summary>Assistant offline workflows</summary><TrainingJobsPanel initial={state.settings?.assistant} command={appCommand} /></details></div>}

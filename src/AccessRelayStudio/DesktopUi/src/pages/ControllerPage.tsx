@@ -49,7 +49,7 @@ export function ControllerPage({ state, status, command }: PageProps) {
       <Button active={!!live.outputActive} aria-busy={connectingOutput || undefined} disabled={!live.outputActive && !connectingOutput && (!!busy || !live.connected || !!live.training || !!live.recording?.isRecording)}
         onClick={() => live.outputActive || connectingOutput ? perform('outputStop') : perform('scriptsSet', { enabled: true })}><Icon name="power" size={17} />{live.outputActive ? 'Stop controller' : connectingOutput ? 'Cancel connection' : 'Start controller'}</Button>
     </div>
-    {!state.driverAvailable && <Notice tone="warning" title="One-time device setup">Open Settings to install the virtual device driver before connecting output.</Notice>}
+    {!state.directXbox && !state.driverAvailable && <Notice tone="warning" title="One-time device setup">Open Settings to install the virtual device driver before connecting output.</Notice>}
     {live.training && <Notice tone="warning">Gameplay training is recording manual input. Finish that clip before changing controller profiles or scripts.</Notice>}
     <Tabs value={tab} onChange={next => { if (next !== tab) transition(() => setTab(next)); }} ariaLabel="Controller workspace" items={[{ id: 'mapping', label: 'Button mapping' }, { id: 'lua', label: 'Scripts', count: profile.luaScripts?.length || 0 }, { id: 'packs', label: 'Plugins' }, { id: 'input', label: 'Input & response' }, { id: 'accessibility', label: 'Accessibility' }]} />
     {tab === 'packs' && <GamePacks state={state} status={live} command={command} />}

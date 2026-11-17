@@ -67,10 +67,26 @@ internal sealed class XboxHomeService(HttpClient http, Uri region, string bearer
                 await Task.Delay(500, timeout.Token);
             }
         }
-        catch { await session.DisposeAsync(); throw; }
+        catch
+        {
+            try { await session.DisposeAsync(); }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException) { /* Preserve the provisioning failure. */ }
+            throw;
+        }
     }
 
     internal async Task<JsonElement> RequestAsync(HttpMethod method, string path, object? body, CancellationToken ct)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try { return await SendAsync(method, path, body, ct); }
+            catch (HttpRequestException e) when (method == HttpMethod.Get && attempt < 2 &&
+                (e.StatusCode is null or System.Net.HttpStatusCode.TooManyRequests || (int)e.StatusCode >= 500))
+            { await Task.Delay(250 << attempt, ct); }
+        }
+    }
+
+    private async Task<JsonElement> SendAsync(HttpMethod method, string path, object? body, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, new Uri(region, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);

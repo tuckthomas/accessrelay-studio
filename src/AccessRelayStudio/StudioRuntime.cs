@@ -333,6 +333,7 @@ internal sealed class StudioRuntime : IDisposable
 
     public VisionActionReceipt? LastVisionAction { get { lock (_sync) return _vision.LastAction; } }
     public StreamTelemetryAssessment VisionStreamTelemetry { get { lock (_sync) return _vision.StreamTelemetry(Stopwatch.GetTimestamp()); } }
+    internal void ObserveVisionStreamTelemetry(DirectStreamMetrics reading) { lock (_sync) _vision.ObserveStreamTelemetry(reading); }
     public void ObserveVisionStreamTelemetry(StreamTelemetryReading reading) { lock (_sync) _vision.ObserveStreamTelemetry(reading); }
     public VisionActionReceipt? LastVisionAttempt { get { lock (_sync) return _vision.LastAttempt; } }
     public VisionControllerAction VisionAction { get { lock (_sync) return _vision.Action; } }

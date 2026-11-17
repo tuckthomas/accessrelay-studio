@@ -11,7 +11,8 @@ internal sealed class XboxRemoteConnection
     private XboxTransportStats? _stats;
     internal string Status => Volatile.Read(ref _status);
     internal XboxTransportStats? Stats => Volatile.Read(ref _stats);
-    internal GStreamerPeer? Peer => _ready.Task.IsCompletedSuccessfully && !_worker.IsCompleted ? _ready.Task.Result : null;
+    private GStreamerPeer? _livePeer;
+    internal GStreamerPeer? Peer => Volatile.Read(ref _livePeer);
     internal bool Ended => _worker.IsCompleted;
     internal Task<GStreamerPeer> Ready => _ready.Task;
 
@@ -41,6 +42,7 @@ internal sealed class XboxRemoteConnection
         connecting.CancelAfter(TimeSpan.FromSeconds(25));
         while (!peer.AdvanceHandshake()) await Task.Delay(30, connecting.Token);
         Volatile.Write(ref _status, "Xbox Remote Play connected.");
+        Volatile.Write(ref _livePeer, peer);
         _ready.TrySetResult(peer);
         long sample = Stopwatch.GetTimestamp(), keepAlive = sample;
         Task? ping = null;
@@ -62,6 +64,7 @@ internal sealed class XboxRemoteConnection
         }
         finally
         {
+            Volatile.Write(ref _livePeer, null);
             peer.Dispose();
             if (ping is not null) try { await ping; } catch (HttpRequestException) { }
         }

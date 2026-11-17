@@ -76,7 +76,8 @@ internal sealed class VisionSession : IDisposable
     private static long _attemptReportNumber;
     private readonly List<(VisionCrop Crop, TaskCompletionSource<CapturedCropFrame?> Completion)> _cropRequests = [];
     private XboxStreamTelemetryReader? _telemetryReader;
-    internal string StreamTelemetryReaderStatus => _telemetryReader?.Status ?? "Stream statistics reader has not started.";
+    private volatile bool _directTelemetry;
+    internal string StreamTelemetryReaderStatus => _directTelemetry ? "Reading Xbox WebRTC statistics." : _telemetryReader?.Status ?? "Stream statistics reader has not started.";
     private bool _disposed;
     private readonly record struct FrameMetric(long Sequence, long CaptureTicks, long CompletedTicks,
         double ProcessingMs, bool PredictionSubmitted, bool PredictionAccepted, VisionStatusSnapshot Output,
@@ -180,7 +181,7 @@ internal sealed class VisionSession : IDisposable
             _activeSettings = settings;
             Volatile.Write(ref _tracking, null);
             _runtime.InvalidateVisionSession("Preparing capture and model.");
-            _telemetryReader = null;
+            _telemetryReader = null; _directTelemetry = false;
             _status = new(true, false, false, startingMessage, 0, 0, 0, 0, 0);
             _metricCount = _metricIndex = 0;
             _attemptBeganAt = 0; _attemptNeedsNeutral = false;
@@ -219,6 +220,7 @@ internal sealed class VisionSession : IDisposable
         {
             using var capture = openSource();
             var window = capture as RemotePlayCapture;
+            _directTelemetry = capture is DecodedStreamCapture;
             if (window is not null)
             {
                 _telemetryReader = new();

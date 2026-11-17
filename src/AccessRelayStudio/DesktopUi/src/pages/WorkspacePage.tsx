@@ -25,11 +25,12 @@ export function WorkspacePage({ state, status, command, navigate }: {
   const savingClip = vision.training?.hasTake && !vision.training?.isRecording && !vision.training?.isFinalized;
   const voiceModel = state.voice?.models?.find((model: any) => model.id === state.voice?.selectedModelId);
   const microphoneReady = state.voice?.devices?.microphones?.some((device: any) => device.id === state.voice?.microphoneId);
+  const xbox = vision.xbox ?? state.vision?.xbox;
   const unavailable = {
     controller: controller.training ? 'Finish the training clip before connecting output.'
-      : !controller.connected ? 'Connect a gamepad in Controller.' : !state.controller?.driverAvailable ? 'Install the output driver in Settings.' : '',
+      : !controller.connected ? 'Connect a gamepad in Controller.' : xbox?.direct ? (xbox.connected ? '' : 'Connect your Xbox in Live Gameplay.') : !state.controller?.driverAvailable ? 'Install the output driver in Settings.' : '',
     vision: vision.stopping || savingClip ? 'Waiting for capture and clip saving to finish.' : vision.busy ? 'Live Gameplay setup is busy.'
-      : !sourceId ? 'Choose a gameplay window in Live Gameplay.' : '',
+      : !sourceId ? (xbox?.direct ? 'Connect your Xbox in Live Gameplay.' : 'Choose a gameplay window in Live Gameplay.') : '',
     voice: voice.busy && !voice.isStarting ? 'Finish the current Voice operation.' : !microphoneReady ? 'Choose a microphone in Voice.'
       : voiceModel?.isAvailable === false ? 'Choose an installed voice model in Voice.'
       : voiceModel?.usesReference && !state.voice?.selectedProfileId ? 'Choose a reference voice in Voice.'

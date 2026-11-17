@@ -114,7 +114,8 @@ internal sealed class XboxHomeAccount(HttpClient http, IXboxRefreshStore store)
     private string Refresh() => store.Read() ?? throw new InvalidOperationException("Sign in to your Microsoft account first.");
     private void AcceptToken(JsonElement token, bool requireRefresh)
     {
-        string access = token.GetProperty("access_token").GetString()!;
+        string? access = token.GetProperty("access_token").GetString();
+        if (string.IsNullOrWhiteSpace(access)) throw new InvalidDataException("Microsoft returned an empty access token.");
         var expires = DateTimeOffset.UtcNow.AddSeconds(Math.Clamp(token.GetProperty("expires_in").GetInt32(), 1, 86400));
         if (token.TryGetProperty("refresh_token", out var refresh) && !string.IsNullOrEmpty(refresh.GetString())) store.Save(refresh.GetString()!);
         else if (requireRefresh) throw new InvalidDataException("Microsoft did not return a refresh token.");
@@ -142,7 +143,7 @@ internal sealed class XboxHomeAccount(HttpClient http, IXboxRefreshStore store)
         if (!response.IsSuccessStatusCode)
         {
             string code = "";
-            try { using var error = JsonDocument.Parse(bytes); if (error.RootElement.TryGetProperty("error", out var field) && field.ValueKind == JsonValueKind.String) code = field.GetString() ?? ""; }
+            try { using var error = JsonDocument.Parse(bytes); if (error.RootElement.ValueKind == JsonValueKind.Object && error.RootElement.TryGetProperty("error", out var field) && field.ValueKind == JsonValueKind.String) code = field.GetString() ?? ""; }
             catch (JsonException) { }
             throw new XboxHomeHttpException(response.StatusCode, code);
         }
