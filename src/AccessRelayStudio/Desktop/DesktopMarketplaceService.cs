@@ -11,9 +11,11 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
     private readonly HttpClient _http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
     private readonly CancellationTokenSource _stop = new();
     private readonly ConcurrentDictionary<string, (byte[] Bytes, string ContentType)> _covers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _taskGate = new();
     private MarketplaceCatalog? _catalog;
     private string? _statusMessage;
-    private bool _busy;
+    private Task<bool>? _refreshTask;
+    private bool _installing;
 
     internal object GetState() => new { repositoryUrl = MarketplaceClient.RepositoryUrl, loaded = _catalog is not null, statusMessage = _statusMessage,
         entries = (_catalog?.Entries ?? []).Select(entry =>
@@ -46,14 +48,17 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
 
     internal async Task<bool> RefreshAndUpdateInstalledAsync()
     {
-        if (_busy || _stop.IsCancellationRequested) return false;
-        _busy = true;
-        try
+        if (_stop.IsCancellationRequested) return false;
+        Task<bool> task;
+        lock (_taskGate)
         {
-            var client = new MarketplaceClient(_http);
-            return await RefreshCoreAsync(client, suppressErrors: true);
+            if (_installing) return false;
+            task = _refreshTask is { IsCompleted: false } existing
+                ? existing
+                : (_refreshTask = RunRefreshTaskAsync());
         }
-        finally { _busy = false; }
+        try { return await task.ConfigureAwait(false); }
+        catch { return false; }
     }
 
     internal async Task<object?> InvokeAsync(string action, JsonElement args)
@@ -65,34 +70,72 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
             var url = entry is null ? MarketplaceClient.RepositoryUrl : MarketplaceClient.RepositoryUrl + "/tree/main/" + entry.ManifestPath[..^"pack.json".Length];
             await Windows.System.Launcher.LaunchUriAsync(new Uri(url)); return null;
         }
-        if (_busy) throw new InvalidOperationException("A marketplace operation is already running.");
-        _busy = true;
+        if (action == "refresh")
+        {
+            Task<bool> task;
+            lock (_taskGate)
+            {
+                if (_installing) throw new InvalidOperationException("A marketplace operation is already running.");
+                task = _refreshTask is { IsCompleted: false } existing
+                    ? existing
+                    : (_refreshTask = RunRefreshTaskAsync());
+            }
+            await task.ConfigureAwait(false);
+            return GetState();
+        }
+        if (action != "install") throw new InvalidDataException("Unknown marketplace action.");
+
+        // If startup/mount refresh is currently running, wait for it so auto-update and explicit install never collide.
+        Task<bool>? pendingRefresh;
+        lock (_taskGate)
+        {
+            pendingRefresh = _refreshTask is { IsCompleted: false } running ? running : null;
+        }
+        if (pendingRefresh is not null)
+        {
+            try { await pendingRefresh.ConfigureAwait(false); } catch { /* explicit install proceeds cleanly */ }
+        }
+
+        lock (_taskGate)
+        {
+            if (_installing || _refreshTask is { IsCompleted: false })
+                throw new InvalidOperationException("A marketplace operation is already running.");
+            _installing = true;
+        }
         try
         {
             var client = new MarketplaceClient(_http);
-            if (action == "refresh")
-            {
-                await RefreshCoreAsync(client, suppressErrors: false);
-                return GetState();
-            }
-            if (action != "install") throw new InvalidDataException("Unknown marketplace action.");
             string id = args.Text("id"), version = args.Text("version");
             var entry = _catalog?.Entries.FirstOrDefault(item => item.Id == id && item.Version == version)
                 ?? throw new InvalidOperationException("Refresh the marketplace and choose a listed package.");
+            if (controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256))
+                return GetState();
             _statusMessage = null;
             await InstallEntryAsync(client, entry);
             return GetState();
         }
-        finally { _busy = false; }
+        finally
+        {
+            lock (_taskGate) _installing = false;
+        }
     }
 
-    private async Task<bool> RefreshCoreAsync(MarketplaceClient client, bool suppressErrors)
+    private async Task<bool> RunRefreshTaskAsync()
     {
         try
         {
-            _catalog = await client.ReadAsync(_stop.Token);
+            var client = new MarketplaceClient(_http);
+            return await RefreshCoreAsync(client).ConfigureAwait(false);
         }
-        catch when (suppressErrors) { return false; }
+        finally
+        {
+            lock (_taskGate) _refreshTask = null;
+        }
+    }
+
+    private async Task<bool> RefreshCoreAsync(MarketplaceClient client)
+    {
+        _catalog = await client.ReadAsync(_stop.Token);
         await CacheCoversAsync(client, _catalog);
         var updated = new List<string>();
         foreach (var entry in _catalog.Entries)
@@ -106,7 +149,7 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
                 await InstallEntryAsync(client, entry);
                 updated.Add($"{entry.Name} ({entry.Version})");
             }
-            catch (OperationCanceledException) when (suppressErrors) { break; }
+            catch (OperationCanceledException) { break; }
             catch (Exception) { /* Leave updateAvailable flagged so user can retry when idle. */ }
         }
         if (updated.Count != 0) _statusMessage = "Updated add-on: " + string.Join(", ", updated) + ".";

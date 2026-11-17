@@ -60,25 +60,36 @@ internal static class RuntimeSignalContextChecks
         var distanceBanner = LiveFeedbackOcr.ParseFeedback([
             new("RHYTHM", .95, new(.42, .02, .09, .03)),
             new("DISTANCE", .93, new(.42, .05, .10, .03)),
-            new("24 FT", .91, new(.53, .05, .06, .03)),
+            new("25'6", .91, new(.53, .05, .06, .03)),
             new("OPEN", .92, new(.42, .08, .06, .03)),
             new("FAST", .91, new(.42, .11, .06, .03)),
-            new("LATE", .91, new(.50, .11, .06, .03))
+            new("LAT3", .91, new(.50, .11, .06, .03))
         ]);
-        Check(distanceBanner is { ShotType: "rhythm", Timing: "late", Tempo: "fast", Distance: "24 ft", Coverage: "Open" }
-            && distanceBanner.RawText.Contains("24 FT", StringComparison.Ordinal), "Distance/coverage OCR extraction altered digits or failed.");
-        int tStreak = 0, tempoStreak = 0;
+        Check(distanceBanner is { ShotType: "rhythm", Timing: "late", Tempo: "fast", Distance: "25'6", Coverage: "Open" }
+            && distanceBanner.RawText.Contains("25'6", StringComparison.Ordinal), "Distance/coverage OCR extraction altered feet-inches or failed.");
+        int tStreak = 0, tempoStreak = 0, excStreak = 0;
         var fastLate = LiveFeedbackOcr.ComputeAdaptiveFeedback(-10, 0,
-            new(1, "run", "rhythm", "late", "fast", "RHYTHM | FAST | LATE", 1, 1, "24 ft", "Open"),
-            strokeClamped: false, ref tStreak, ref tempoStreak);
+            new(1, "run", "rhythm", "late", "fast", "RHYTHM | FAST | LATE", 1, 1, "25'6", "Open"),
+            strokeClamped: false, ref tStreak, ref tempoStreak, ref excStreak);
         Check(fastLate.Timing.NextCorrectionMs == -12.5 && fastLate.Tempo.NextCorrectionMs == 4.0,
             $"Combined FAST + LATE step unexpected: {fastLate}");
-        int clampedT = 0, clampedTempo = 0;
-        var clampedLate = LiveFeedbackOcr.ComputeAdaptiveFeedback(-10, 0,
-            new(2, "run", "rhythm", "late", "fast", "RHYTHM | FAST | LATE", 1, 1, "24 ft", "Open"),
-            strokeClamped: true, ref clampedT, ref clampedTempo);
-        Check(clampedLate.TimingClampedSkipped && clampedLate.Timing.NextCorrectionMs == -10 && clampedLate.Tempo.NextCorrectionMs == 4.0,
-            $"Clamped LATE did not guard timing correction: {clampedLate}");
+        int clampedT = 0, clampedTempo = 0, clampedExc = 0;
+        var clampedEarly = LiveFeedbackOcr.ComputeAdaptiveFeedback(-3.5, 0,
+            new(2, "run", "rhythm", "early", "fast", "RHYTHM | FAST | EARLY", 1, 1, "25'6", "Open"),
+            strokeClamped: true, ref clampedT, ref clampedTempo, ref clampedExc);
+        Check(clampedEarly.TimingClampedSkipped && clampedEarly.Timing.NextCorrectionMs == -3.5 && clampedEarly.Tempo.NextCorrectionMs == 4.0,
+            $"Clamped EARLY did not guard timing correction: {clampedEarly}");
+        int hTiming = 0, hTempo = 0, hExc = 2;
+        var heldMiss = LiveFeedbackOcr.ComputeAdaptiveFeedback(-3.5, 4,
+            new(3, "run", "rhythm", "early", "none", "RHYTHM | EARLY", 1, 1, "25'6"),
+            strokeClamped: false, ref hTiming, ref hTempo, ref hExc);
+        Check(heldMiss.Timing.NextCorrectionMs == -3.5 && hExc == 2 && hTiming == 1,
+            $"Single miss after 2 Excellents did not hold correction: {heldMiss}");
+        var confirmedMiss = LiveFeedbackOcr.ComputeAdaptiveFeedback(-3.5, 4,
+            new(4, "run", "rhythm", "early", "none", "RHYTHM | EARLY", 1, 1, "25'6"),
+            strokeClamped: false, ref hTiming, ref hTempo, ref hExc);
+        Check(confirmedMiss.Timing.NextCorrectionMs == 0.5 && hExc == 0 && hTiming == 2,
+            $"Confirmed consecutive miss after Excellent streak failed to adjust: {confirmedMiss}");
         Check(LiveFeedbackOcr.BuildBannerSearchCrop(new(.41, .004, .197, .111)).Height >= .36, "Banner search crop too short for OCR detector threshold.");
         Check(LiveFeedbackOcr.SelectSearchCrop(3, new(.3, 0, .4, .36)).Top == .24, "Above-player middle band missing from OCR search rotation.");
 

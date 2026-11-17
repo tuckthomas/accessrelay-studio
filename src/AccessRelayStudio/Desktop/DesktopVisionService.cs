@@ -46,7 +46,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private object? _lastOcrFeedback;
     private readonly List<object> _ocrHistory = [];
     private static readonly string OcrHistoryPath = Path.Combine(DesktopEnvironment.DataDirectory("Vision") ?? AppContext.BaseDirectory, "ShotFeedbackHistory.jsonl");
-    private int _consecutiveOcrDir, _consecutiveOcrTempoDir;
+    private int _consecutiveOcrDir, _consecutiveOcrTempoDir, _excellentOcrStreak;
     private readonly object _ocrGate = new();
     private string _notice = "Choose a window to preview gameplay.";
     private int _busy, _encodingPreview, _version;
@@ -541,7 +541,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         }
         _feedbackOcr?.Stop();
         Volatile.Write(ref _lastOcrFeedback, null);
-        lock (_ocrGate) { _consecutiveOcrDir = 0; _consecutiveOcrTempoDir = 0; }
+        lock (_ocrGate) { _consecutiveOcrDir = 0; _consecutiveOcrTempoDir = 0; _excellentOcrStreak = 0; }
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
         SaveSettings(); ClearPreview();
         _session ??= new VisionSession(runtime); _session.SetPreviewEnabled(_visible);
@@ -1043,10 +1043,10 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 ? Stopwatch.GetElapsedTime(latestReceipt.StartedTimestamp, latestReceipt.AnchorTimestamp).TotalMilliseconds
                 : expectedPreAnchorMs;
             bool strokeClamped = expectedPreAnchorMs > 0 && actualPreAnchorMs + 2.5 < expectedPreAnchorMs;
-            if (autoAdjust && paddleBound && !(rhythmMode && read.ShotType == "timing"))
+            if (autoAdjust && paddleBound && read.ShotType != "unrecognized" && !(rhythmMode && read.ShotType == "timing"))
             {
                 var step = LiveFeedbackOcr.ComputeAdaptiveFeedback(_settings.CorrectionMs, _settings.TempoCorrectionMs,
-                    read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir);
+                    read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir, ref _excellentOcrStreak);
                 bool applied = !step.Changed;
                 if (step.Changed)
                 {
@@ -1079,7 +1079,9 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     step.Timing.PreviousCorrectionMs, nextCorr, step.Tempo.PreviousCorrectionMs, nextTempo, step.Message));
                 return;
             }
-            string passiveMessage = rhythmMode && read.ShotType == "timing"
+            string passiveMessage = read.ShotType == "unrecognized"
+                ? $"Shot #{read.ReceiptId} completed, but OCR did not find a RHYTHM/TIMING banner{(string.IsNullOrWhiteSpace(read.RawText) ? "." : $" (saw: {read.RawText}).")}"
+                : rhythmMode && read.ShotType == "timing"
                 ? $"OCR ignored non-rhythm TIMING result ({read.Timing}); correction unchanged."
                 : $"OCR read: {read.ShotType.ToUpperInvariant()} · {read.Timing}{(read.Tempo is not ("none" or "") ? $" · {read.Tempo}" : "")}";
             RecordOcrEntryLocked(BuildOcrEntry(read, latestReceipt, expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,

@@ -126,6 +126,9 @@ internal sealed class LiveFeedbackOcr : IDisposable
         var crop = BuildBannerSearchCrop(preferredSourceCrop);
         bool sawClearedSincePrevious = _priorBannerAt == 0 ||
             Stopwatch.GetElapsedTime(_priorBannerAt, receipt.CompletedTimestamp).TotalMilliseconds >= 3500;
+        string bestUnparsedRaw = "";
+        long lastCaptureTicks = receipt.CompletedTimestamp;
+        double lastProcMs = 0;
 
         for (int attempt = 0; attempt < 14 && !ct.IsCancellationRequested; attempt++)
         {
@@ -140,9 +143,18 @@ internal sealed class LiveFeedbackOcr : IDisposable
             long t0 = Stopwatch.GetTimestamp();
             var regions = _models!.ReadText(frame.Pixels, frame.Width, frame.Height, frame.Stride);
             double procMs = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+            lastCaptureTicks = frame.CaptureTicks;
+            lastProcMs = procMs;
             var parsed = ParseFeedback(regions);
             if (parsed is null)
             {
+                if (regions.Length > 0)
+                {
+                    string rawCandidate = string.Join(" | ", regions.Where(r => !string.IsNullOrWhiteSpace(r.Text))
+                        .Select(r => CleanOcrLine(r.Text)).Where(t => t.Length > 0));
+                    if (rawCandidate.Length > bestUnparsedRaw.Length)
+                        bestUnparsedRaw = rawCandidate;
+                }
                 // Only scanning the primary banner crop proves the previous shot's banner disappeared.
                 if (activeCrop == crop)
                     sawClearedSincePrevious = true;
@@ -173,7 +185,7 @@ internal sealed class LiveFeedbackOcr : IDisposable
             _discoveredCrop = null;
             _discoveredMisses = 0;
         }
-        return null;
+        return new(receipt.Id, receipt.RunId, "unrecognized", "none", "none", bestUnparsedRaw, lastCaptureTicks, lastProcMs);
     }
 
     internal static VisionCrop SelectSearchCrop(int attempt, VisionCrop configuredOrDiscovered) =>
@@ -305,41 +317,59 @@ internal sealed class LiveFeedbackOcr : IDisposable
     }
 
     internal static AdaptiveFeedbackResult ComputeAdaptiveFeedback(double currentCorrectionMs, double currentTempoCorrectionMs,
-        OcrFeedbackRead read, bool strokeClamped, ref int consecutiveTimingDir, ref int consecutiveTempoDir)
+        OcrFeedbackRead read, bool strokeClamped, ref int consecutiveTimingDir, ref int consecutiveTempoDir, ref int excellentStreak)
     {
-        bool suppressLateClamp = strokeClamped && read.Timing is "late" or "slightlyLate";
+        bool timingAdjusted = false;
+        bool heldAfterExcellent = false;
         AdaptiveTimingStep timingStep;
-        if (suppressLateClamp)
+        if (strokeClamped && read.Timing != "excellent")
         {
             consecutiveTimingDir = 0;
             timingStep = new(currentCorrectionMs, currentCorrectionMs, 0,
                 "Timing correction unchanged (stroke started behind schedule).");
         }
+        else if (read.Timing == "excellent")
+        {
+            excellentStreak++;
+            timingStep = ComputeAdaptiveStep(currentCorrectionMs, read.Timing, ref consecutiveTimingDir);
+        }
         else
         {
-            timingStep = ComputeAdaptiveStep(currentCorrectionMs, read.Timing, ref consecutiveTimingDir);
+            var candidateStep = ComputeAdaptiveStep(currentCorrectionMs, read.Timing, ref consecutiveTimingDir);
+            if (excellentStreak >= 2 && Math.Abs(consecutiveTimingDir) == 1 && candidateStep.DeltaMs != 0)
+            {
+                heldAfterExcellent = true;
+                timingStep = new(currentCorrectionMs, currentCorrectionMs, 0,
+                    $"Timing correction held at {FormatMs(currentCorrectionMs)} ms after {excellentStreak} Excellents (confirming with next shot).");
+            }
+            else
+            {
+                if (candidateStep.DeltaMs != 0) excellentStreak = 0;
+                timingStep = candidateStep;
+                timingAdjusted = candidateStep.DeltaMs != 0;
+            }
         }
 
         var tempoStep = read.ShotType == "timing" || read.Tempo is "none" or ""
             ? new AdaptiveTimingStep(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, "Tempo unchanged.")
             : ComputeAdaptiveTempoStep(currentTempoCorrectionMs, read.Tempo, ref consecutiveTempoDir);
 
-        bool timingMoved = timingStep.DeltaMs != 0;
+        bool timingMoved = timingAdjusted && timingStep.DeltaMs != 0;
         bool tempoMoved = tempoStep.DeltaMs != 0;
         string summary;
         if (!timingMoved && !tempoMoved)
         {
-            summary = suppressLateClamp
-                ? timingStep.Reason
-                : timingStep.Reason;
+            summary = timingStep.Reason;
         }
         else
         {
             var parts = new List<string>(2);
             if (timingMoved)
                 parts.Add($"timing {FormatMs(timingStep.PreviousCorrectionMs)} → {FormatMs(timingStep.NextCorrectionMs)} ms");
-            else if (suppressLateClamp)
+            else if (strokeClamped && read.Timing != "excellent")
                 parts.Add("timing held (stroke started late)");
+            else if (heldAfterExcellent)
+                parts.Add($"timing held after {excellentStreak} Excellents");
             if (tempoMoved)
                 parts.Add($"tempo {FormatMs(tempoStep.PreviousCorrectionMs)} → {FormatMs(tempoStep.NextCorrectionMs)} ms");
             string tag = read.Tempo is not ("none" or "") && read.Tempo != read.Timing
@@ -347,7 +377,7 @@ internal sealed class LiveFeedbackOcr : IDisposable
                 : read.Timing;
             summary = $"OCR {tag}: {string.Join("; ", parts)}.";
         }
-        return new(timingStep, tempoStep, suppressLateClamp, timingMoved || tempoMoved, summary);
+        return new(timingStep, tempoStep, strokeClamped && read.Timing != "excellent", timingMoved || tempoMoved, summary);
     }
 
     private static AdaptiveTimingStep ComputeAdaptiveStepCore(double current, int dir, bool _, ref int consecutiveDirection,
@@ -388,7 +418,10 @@ internal sealed class LiveFeedbackOcr : IDisposable
             if (char.IsAsciiLetter(ch) || ch == ' ') sb.Append(ch);
             else if (ch is '0') sb.Append('O');
             else if (ch is '1' or '|') sb.Append('I');
+            else if (ch is '3') sb.Append('E');
+            else if (ch is '4') sb.Append('A');
             else if (ch is '5') sb.Append('S');
+            else if (ch is '8') sb.Append('B');
             else if (ch is '-' or '_' or '/' or ':') sb.Append(' ');
         }
         return string.Join(' ', sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
@@ -420,12 +453,21 @@ internal sealed class LiveFeedbackOcr : IDisposable
         var tokens = raw.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i < tokens.Length; i++)
         {
-            string tok = tokens[i].TrimEnd('\'', '.');
+            string rawTok = tokens[i].TrimEnd('.');
+            int quoteIdx = rawTok.IndexOf('\'');
+            if (quoteIdx > 0 && int.TryParse(rawTok[..quoteIdx], out int ftWithInches) && ftWithInches is >= 1 and <= 94)
+            {
+                string inchesPart = rawTok[(quoteIdx + 1)..];
+                if (inchesPart.Length == 0) return $"{ftWithInches} ft";
+                if (int.TryParse(inchesPart, out int inches) && inches is >= 0 and <= 11)
+                    return $"{ftWithInches}'{inches}";
+            }
+            string tok = rawTok.TrimEnd('\'');
             if (tok.EndsWith("FT", StringComparison.Ordinal) && tok.Length > 2 && int.TryParse(tok[..^2], out int attachedFt) && attachedFt is >= 1 and <= 94)
                 return $"{attachedFt} ft";
             if (int.TryParse(tok, out int feet) && feet is >= 1 and <= 94)
             {
-                bool hasFt = (i + 1 < tokens.Length && tokens[i + 1].StartsWith("FT", StringComparison.Ordinal)) || tokens[i].EndsWith('\'');
+                bool hasFt = (i + 1 < tokens.Length && tokens[i + 1].StartsWith("FT", StringComparison.Ordinal)) || rawTok.EndsWith('\'');
                 if (hasFt || allowBareNumber) return $"{feet} ft";
             }
         }
