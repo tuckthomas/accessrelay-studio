@@ -12,7 +12,8 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
   const live = status ?? state.status ?? {}, session = live.session ?? {};
   const sources = live.sources ?? state.sources ?? [], sourceId = live.selectedSourceId ?? state.selectedSourceId ?? '';
   const plugins = state.plugins ?? [];
-  const pluginId = state.selectedPluginId ?? '', installed = plugins.some((plugin: any) => plugin.id === pluginId);
+  const pluginId = mode === 'training' ? (state.selectedPluginId ?? '') : '';
+  const installed = mode === 'training' && plugins.some((plugin: any) => plugin.id === pluginId);
   const Workspace = useGameVisionWorkspace(pluginId), Plugin = installed ? Workspace : undefined;
   const pluginError = useGamePluginError(pluginId);
   const saving = (!!live.training?.hasTake && !live.training?.isFinalized)
@@ -26,10 +27,10 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
   }
   const choose = (action: string, id: string) => { if (hasUnsavedChanges()) setPending({ action, id }); else void run(action, { id }); };
   return <div className="page-stack remote-play-page">
-    <SectionHeader title={mode === 'training' ? 'Model Training' : 'Live Gameplay'} actions={<Field label={mode === 'training' ? 'Training plugin' : 'Game plugin'}><Select aria-label={mode === 'training' ? 'Training plugin' : 'Game plugin'} disabled={locked || working}
+    <SectionHeader title={mode === 'training' ? 'Model Training' : 'Live Gameplay'} actions={mode === 'training' ? <Field label="Training plugin"><Select aria-label="Training plugin" disabled={locked || working}
       value={pluginId} onValueChange={selectionValue => choose('pluginSelect', selectionValue)}>
       <SelectOption value="">None</SelectOption>{plugins.map((plugin: any) => <SelectOption key={plugin.id} value={plugin.id}>{plugin.name}</SelectOption>)}
-    </Select></Field>} />
+    </Select></Field> : undefined} />
     {error && <Notice tone="danger">{error}</Notice>}
     {(state.pluginErrors ?? []).map((message: string) => <Notice key={message} tone="danger">{message}</Notice>)}
     <Card title="Capture settings"><div className="row remote-play-source"><Field label="Gameplay window" hint="A browser window captures its active tab.">
@@ -39,14 +40,16 @@ export function VisionPage({ state = {}, status, command, mode = 'live', capture
           <SelectOption value="">Choose a window</SelectOption>{sources.map((source: any) => <SelectOption key={source.id} value={source.id}>{source.title}</SelectOption>)}
         </Select></Field><Button aria-label="Refresh capture windows" disabled={locked || working} onClick={() => void run('sourceRefresh')}><Icon name="refresh" size={18} /></Button>
       </div>{mode === 'training' && <div className="form-grid training-folder-settings">{[['dataset', 'Training data folder', state.trainingSetup?.datasetRoot], ['workspace', 'Model output folder', state.trainingSetup?.workspaceRoot]].map(([kind, label, path]) => <Field key={kind} label={label}><Button disabled={locked || working} onClick={() => void run('trainingConfigure', { kind })}>{path ? 'Change…' : kind === 'python' ? 'Choose interpreter…' : 'Choose folder…'}</Button>{path && <span className="subtle training-folder-path" title={path}>{path}</span>}</Field>)}</div>}{mode === 'training' && <details className="training-folder-settings"><summary>Training environment</summary><Field label="Python interpreter"><Button disabled={locked || working} onClick={() => void run('trainingConfigure', { kind: 'python' })}>{state.trainingSetup?.python ? 'Change interpreter…' : 'Choose interpreter…'}</Button>{state.trainingSetup?.python && <span className="subtle training-folder-path" title={state.trainingSetup.python}>{state.trainingSetup.python}</span>}</Field></details>}</Card>
-    {Plugin ? <Plugin key={pluginId + mode + draftEpoch} state={state} status={status} command={command} mode={mode} captureWindow={captureWindow} /> : installed
-      ? <Card>{pluginError ? <Notice tone="danger">{pluginError}</Notice> : <p>Loading plugin…</p>}</Card> : mode === 'training'
-      ? <Card title={plugins.length ? 'Choose a training plugin' : 'No training plugins installed'}><p className="subtle">{plugins.length ? 'Select an installed plugin above.' : 'Install a model training plugin from Marketplace.'}</p>
-        {openMarketplace && <Button onClick={openMarketplace}><Icon name="store" size={17} />Browse Marketplace</Button>}</Card> : <>
+    {mode === 'training' ? (
+      Plugin ? <Plugin key={pluginId + mode + draftEpoch} state={state} status={status} command={command} mode={mode} captureWindow={captureWindow} />
+        : installed ? <Card>{pluginError ? <Notice tone="danger">{pluginError}</Notice> : <p>Loading plugin…</p>}</Card>
+        : <Card title={plugins.length ? 'Choose a training plugin' : 'No training plugins installed'}><p className="subtle">{plugins.length ? 'Select an installed plugin above.' : 'Install a game add-on from Add-Ons.'}</p>
+          {openMarketplace && <Button onClick={openMarketplace}><Icon name="store" size={17} />Browse Add-Ons</Button>}</Card>
+    ) : (
       <GameplayPreview status={live} window={captureWindow} onError={setError} actions={session.running || live.stopping
         ? <Button active={true} disabled={!!live.stopping} onClick={() => void run('stop')}><Icon name="stop" size={17} />Stop capture</Button>
         : <Button active={false} disabled={!sourceId || working} busy={busy === 'start'} onClick={() => void run('start', { loadModel: false })}><Icon name="play" size={17} />Start capture</Button>} />
-    </>}
+    )}
     <DiscardDialog open={pending !== null} onKeep={() => setPending(null)} onDiscard={() => { const next = pending; setPending(null); setDraftEpoch(value => value + 1); if (next) void run(next.action, { id: next.id }); }} />
   </div>;
 }

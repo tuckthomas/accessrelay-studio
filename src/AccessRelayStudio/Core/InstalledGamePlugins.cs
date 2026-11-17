@@ -15,10 +15,38 @@ internal sealed class InstalledGamePlugins(string directory, Func<string, string
     internal string[] Errors { get; private set; } = [];
     internal object Presentations => _active.Select(item => new {
         id = item.Vision.Id, packageId = item.Pack.Manifest.Id, version = item.Pack.Manifest.Version,
-        uiModule = BaseUrl(item.Pack) + item.Pack.Manifest.Runtime!.UiEntry
+        uiModule = BaseUrl(item.Pack) + item.Pack.Manifest.Runtime!.UiEntry,
+        coverUrl = FindCover(item.Pack) is { } cover ? BaseUrl(item.Pack) + cover.Path : null
     }).ToArray();
     internal static bool Supports(GamePackManifest manifest) => manifest is { SchemaVersion: 2, ApiVersion: 2, Runtime.ContractVersion: >= 1 and <= 3 };
     private static string BaseUrl(GamePackDefinition pack) => "https://plugins.accessrelay.test/plugins/" + pack.Manifest.Id + "/" + pack.ManifestSha256 + "/";
+    private static GamePackAsset? FindCover(GamePackDefinition pack) => pack.Manifest.Assets.FirstOrDefault(a =>
+        a.Kind == GamePackAssetKind.Data && a.Path is "data/cover.jpg" or "data/cover.jpeg" or "data/cover.png" or "data/cover.webp");
+    internal (byte[] Bytes, string ContentType)? ReadCover(Uri uri)
+    {
+        if (uri.Scheme != "https" || uri.Host != "plugins.accessrelay.test" || !uri.IsDefaultPort || uri.Query.Length != 0 || uri.Fragment.Length != 0) return null;
+        var item = _active.FirstOrDefault(entry => uri.AbsoluteUri.StartsWith(BaseUrl(entry.Pack), StringComparison.Ordinal));
+        if (item is null) return null;
+        string path = uri.AbsoluteUri[BaseUrl(item.Pack).Length..];
+        var asset = FindCover(item.Pack);
+        if (asset is null || !string.Equals(asset.Path, path, StringComparison.Ordinal)) return null;
+        return (ReadChecked(item.Pack, asset), ContentTypeForImage(asset.Path));
+    }
+    internal (byte[] Bytes, string ContentType)? ReadCoverByPackage(string id, string version)
+    {
+        var item = _active.FirstOrDefault(entry => entry.Pack.Manifest.Id == id && entry.Pack.Manifest.Version == version);
+        if (item is null) return null;
+        var asset = FindCover(item.Pack);
+        return asset is null ? null : (ReadChecked(item.Pack, asset), ContentTypeForImage(asset.Path));
+    }
+    internal bool HasCover(string id, string version) =>
+        _active.Any(entry => entry.Pack.Manifest.Id == id && entry.Pack.Manifest.Version == version && FindCover(entry.Pack) is not null);
+    internal static string ContentTypeForImage(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".webp" => "image/webp",
+        _ => "image/jpeg",
+    };
 
     internal void Reload()
     {

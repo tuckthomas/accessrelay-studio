@@ -55,7 +55,7 @@ test('task navigation remains usable at desktop widths without horizontal overfl
   await expect(page.getByText('Design preview — no hardware, capture or audio sessions are connected.')).toBeVisible();
   for (const width of [1100, 1440, 1700]) {
     await page.setViewportSize({ width, height: 930 });
-    for (const name of ['Workspace', 'Controller', 'Live Gameplay', 'Model Training', 'Voice', 'Marketplace', 'Settings']) {
+    for (const name of ['Workspace', 'Controller', 'Live Gameplay', 'Model Training', 'Voice', 'Add-Ons', 'Settings']) {
       await page.getByRole('complementary', { name: 'Main navigation' }).getByRole('button', { name, exact: true }).click();
       await expect(page.locator('main h1')).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);

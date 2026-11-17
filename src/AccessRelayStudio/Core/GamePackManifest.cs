@@ -78,8 +78,8 @@ public sealed record GamePackManifest
     internal void Validate()
     {
         ControllerTrainer?.Validate();
-        if (ControllerTrainer is not null && (TrainingAdapter != "none" || string.IsNullOrEmpty(GameId)))
-            throw new InvalidDataException("A controller trainer needs its game identity and must be separate from model training.");
+        if (ControllerTrainer is not null && string.IsNullOrEmpty(GameId))
+            throw new InvalidDataException("A controller trainer needs its game identity.");
         if (!((SchemaVersion == 1 && ApiVersion == 1) || (SchemaVersion == 2 && ApiVersion == 2)) || !Identifier(Id, 60) || !Identifier(Version, 40) || !Text(Name, 80)
             || !Text(Description, 1000) || !Text(License, 300) || VisionAdapter is not ("none" or "temporal-release-v1"))
             throw new InvalidDataException("Unsupported game-pack schema/API, identity, metadata or typed vision adapter.");
@@ -107,7 +107,7 @@ public sealed record GamePackManifest
                 || !asset.Path.EndsWith(extension, StringComparison.Ordinal) || asset.Path.Split('/').Any(segment => !Identifier(SchemaVersion == 2 ? segment.ToLowerInvariant() : segment, 80)
                     || segment is "." or ".." || segment.EndsWith('.') || segment.ToLowerInvariant().Split('.')[0] is "con" or "prn" or "aux" or "nul"
                     || (segment.Length >= 4 && (segment.StartsWith("com", StringComparison.OrdinalIgnoreCase) || segment.StartsWith("lpt", StringComparison.OrdinalIgnoreCase)) && char.IsDigit(segment[3])))
-                || (asset.Kind == GamePackAssetKind.Data && Path.GetExtension(asset.Path) is not (".json" or ".txt" or ".md"))
+                || (asset.Kind == GamePackAssetKind.Data && Path.GetExtension(asset.Path) is not (".json" or ".txt" or ".md" or ".jpg" or ".jpeg" or ".png" or ".webp"))
                 || !Hash(asset.Sha256) || asset.Bytes <= 0 || asset.Bytes > limit)
                 throw new InvalidDataException("Invalid resource path, size, type or SHA-256.");
             total += asset.Bytes;

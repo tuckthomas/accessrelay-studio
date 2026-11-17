@@ -239,7 +239,7 @@ public sealed partial class DesktopWindow : Window
                 _ready = true; DesktopLoading.Visibility = Visibility.Collapsed; UpdatePresentation(); return Snapshot();
             case "app.page":
                 string page = args.Text("page", "workspace");
-                if (page is not ("workspace" or "controller" or "vision" or "training" or "voice" or "marketplace" or "settings")) throw new InvalidDataException("Choose an available workspace.");
+                if (page is not ("workspace" or "controller" or "vision" or "training" or "voice" or "marketplace" or "gameAddon" or "settings")) throw new InvalidDataException("Choose an available workspace.");
                 _page = page; _clientVisible = args.Flag("visible", true); UpdatePresentation(); return null;
             case "app.gameplayDetach": await DetachGameplayAsync(); return null;
             case "app.gameplayAttach": DispatcherQueue.TryEnqueue(AttachGameplay); return null;
@@ -327,7 +327,7 @@ public sealed partial class DesktopWindow : Window
     {
         bool visible = !_closing && _ready && IsPresenting();
         _performance.Enabled = _resourceMonitoringEnabled && visible && _page == "workspace";
-        _vision?.SetVisible((_gameplayWindow is null && visible && _page is "vision" or "training") || _gameplayWindow?.IsPresenting == true);
+        _vision?.SetVisible((_gameplayWindow is null && visible && _page is "vision" or "training" or "gameAddon") || _gameplayWindow?.IsPresenting == true);
         _voice?.SetVisible(visible && _page == "voice");
     }
 
@@ -374,7 +374,13 @@ public sealed partial class DesktopWindow : Window
         await DesktopMediaResponse.SendAsync(sender, args, uri =>
         {
             if (_closing) return null;
-            if (uri.Host == "plugins.accessrelay.test" && _gamePlugins?.ReadUi(uri) is { } module) return new(module, "text/javascript; charset=utf-8");
+            if (uri.Host == "plugins.accessrelay.test")
+            {
+                if (_gamePlugins?.ReadUi(uri) is { } module) return new(module, "text/javascript; charset=utf-8");
+                if (_gamePlugins?.ReadCover(uri) is { } cover) return new(cover.Bytes, cover.ContentType);
+                return null;
+            }
+            if (uri.AbsolutePath.StartsWith("/marketplace/cover/", StringComparison.Ordinal)) return _marketplace?.ReadCover(uri.AbsolutePath["/marketplace/cover/".Length..]);
             if (uri.AbsolutePath.StartsWith("/vision/", StringComparison.Ordinal)) return _vision?.ReadMedia(uri.AbsolutePath[8..]);
             if (uri.AbsolutePath.StartsWith("/voice/", StringComparison.Ordinal)) return _voice?.ReadMedia(uri.AbsolutePath[7..]);
             return null;

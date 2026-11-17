@@ -26,7 +26,7 @@ test('shared dropdown remains usable inside a modal and follows dark mode', asyn
   await page.goto('/');
   await page.getByRole('button', { name: 'Switch to dark mode' }).click();
   await page.getByRole('button', { name: 'Model Training', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Game plugin', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Training plugin', exact: true }).click();
   await page.getByRole('option', { name: 'NBA 2K27', exact: true }).click();
   await page.getByRole('button', { name: 'Create shot profile', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Create a shot profile' });

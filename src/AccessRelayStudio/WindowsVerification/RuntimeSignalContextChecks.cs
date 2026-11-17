@@ -52,12 +52,13 @@ internal static class RuntimeSignalContextChecks
         Check(timingOnly is { ShotType: "timing", Timing: "slightlyLate", Tempo: "none" }, "Normalized TIMING slightlyLate parse failed.");
         int streak = 0;
         var s1 = LiveFeedbackOcr.ComputeAdaptiveStep(3.5, "slightlyEarly", ref streak);
-        Check(s1.NextCorrectionMs == 6.5 && streak == 1, $"First slightlyEarly step unexpected: {s1}");
+        Check(s1.NextCorrectionMs == 5.0 && streak == 1, $"First slightlyEarly step unexpected: {s1}");
         var s2 = LiveFeedbackOcr.ComputeAdaptiveStep(s1.NextCorrectionMs, "slightlyEarly", ref streak);
-        Check(s2.NextCorrectionMs == 10.5 && streak == 2, $"Repeated slightlyEarly step unexpected: {s2}");
+        Check(s2.NextCorrectionMs == 7.5 && streak == 2, $"Repeated slightlyEarly step unexpected: {s2}");
         var s3 = LiveFeedbackOcr.ComputeAdaptiveStep(s2.NextCorrectionMs, "excellent", ref streak);
-        Check(s3.NextCorrectionMs == 10.5 && streak == 0, $"Excellent changed correction: {s3}");
+        Check(s3.NextCorrectionMs == 7.5 && streak == 0, $"Excellent changed correction: {s3}");
         Check(LiveFeedbackOcr.BuildBannerSearchCrop(new(.41, .004, .197, .111)).Height >= .36, "Banner search crop too short for OCR detector threshold.");
+        Check(LiveFeedbackOcr.SelectSearchCrop(3, new(.3, 0, .4, .36)).Top == .24, "Above-player middle band missing from OCR search rotation.");
 
         Console.WriteLine("SUCCESS Runtime signal context: coherent polling snapshots, live auto-OCR feedback parsing/adaptation, and neutral/repress transitions.");
     }

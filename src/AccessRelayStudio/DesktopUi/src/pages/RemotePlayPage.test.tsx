@@ -1,4 +1,3 @@
-import { selectValue } from '../select-test-helper';
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -6,14 +5,15 @@ import { VisionPage } from './VisionPage';
 
 afterEach(cleanup);
 const state = {
-  plugins: [], selectedPluginId: '',
+  plugins: [{ id: 'nba2k27', name: 'NBA 2K27' }], selectedPluginId: 'nba2k27',
   sources: [{ id: 'game-window', title: 'A different game' }], selectedSourceId: 'game-window',
   profiles: [], settings: {}, status: {}
 };
 
-it('previews any game without an NBA profile, training controls, or an idle tag', async () => {
+it('previews any game without game plugin controls, NBA profiles, or training clutter', async () => {
   const command = vi.fn().mockResolvedValue(null);
   render(<VisionPage state={state} status={{}} command={command} />);
+  expect(screen.queryByRole('combobox', { name: 'Game plugin' })).toBeNull();
   expect(screen.queryByRole('combobox', { name: 'Shot profile' })).toBeNull();
   expect(screen.queryByText('Shot meter')).toBeNull();
   expect(screen.queryByText('Ready when you are')).toBeNull();
@@ -22,15 +22,13 @@ it('previews any game without an NBA profile, training controls, or an idle tag'
   await waitFor(() => expect(command).toHaveBeenCalledWith('start', { loadModel: false }));
 });
 
-
-it('does not require an installed game plugin and locks selection during capture', () => {
+it('locks gameplay window selection during live capture', () => {
   const command = vi.fn();
   render(<VisionPage state={{ ...state, plugins: [] }} status={{ session: { running: true } }} command={command} />);
-  expect((screen.getByRole('combobox', { name: 'Game plugin' }) as HTMLSelectElement).disabled).toBe(true);
+  expect((screen.getByRole('combobox', { name: 'Gameplay window' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByRole('button', { name: 'Stop capture' })).toBeTruthy();
   expect(command).not.toHaveBeenCalled();
 });
-
 
 it('detaches through the host and renders the preview in only one window', async () => {
   const command = vi.fn().mockResolvedValue(null), detach = vi.fn().mockResolvedValue(null), attach = vi.fn().mockResolvedValue(null);

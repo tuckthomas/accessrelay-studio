@@ -1,9 +1,10 @@
 import * as React from 'react';
 import * as ui from '../ui';
+import { ControllerTrainer } from '../ControllerTrainer';
 import { GameplayPreview } from '../components/GameplayPreview';
 import type { GameUiDescriptor, GameUiHost, GameUiModule } from './api';
 
-export const gameUiHost: GameUiHost = { apiVersion: 1, React, ui, GameplayPreview };
+export const gameUiHost: GameUiHost = { apiVersion: 1, React, ui, GameplayPreview, ControllerTrainer };
 type Entry = { module?: GameUiModule; error?: string };
 const Context = React.createContext<Record<string, Entry>>({});
 const cache = new Map<string, Promise<GameUiModule>>();

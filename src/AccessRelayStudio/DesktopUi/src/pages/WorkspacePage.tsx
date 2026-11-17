@@ -92,7 +92,7 @@ export function WorkspacePage({ state, status, command, navigate }: {
       </Button>
       <Button variant="unstyled" type="button" className="tool-card" onClick={() => navigate('vision')}>
         <div className="tool-card-top"><span className="tool-card-icon"><Icon name="camera" size={24} /></span><Icon name="arrowUpRight" size={20} /></div>
-        <div><h3>Bring gameplay into view</h3><p>Capture your game and configure live assistance.</p></div>
+        <div><h3>Bring gameplay into view</h3><p>Capture your game window and inspect live gameplay.</p></div>
         <span className="tool-card-link">Open Live Gameplay</span>
       </Button>
       <Button variant="unstyled" type="button" className="tool-card" onClick={() => navigate('voice')}>

@@ -23,6 +23,7 @@ internal sealed class LiveFeedbackOcr : IDisposable
     private string _lastRunId = "";
     private long _lastReceiptId;
     private VisionCrop? _discoveredCrop;
+    private int _discoveredMisses;
     private string _priorBannerText = "";
     private long _priorBannerAt;
 
@@ -92,8 +93,9 @@ internal sealed class LiveFeedbackOcr : IDisposable
                 // Ensure OCR reader models are loaded lazily on this background worker (CPU-only, skip pose).
                 _models ??= new(_modelSet, VisionExecutionProvider.Cpu, _modelDirectory, loadPose: false);
 
-                var result = await WatchShotFeedbackAsync(session, receipt, settings, ct).ConfigureAwait(false);
-                if (result is not null)
+                var result = await WatchShotFeedbackAsync(session, receipt, settings,
+                    () => getRuntime()?.LastVisionAction?.Id ?? 0, ct).ConfigureAwait(false);
+                if (result is not null && (getRuntime()?.LastVisionAction?.Id ?? 0) == receipt.Id)
                     _onFeedback(result);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -111,24 +113,26 @@ internal sealed class LiveFeedbackOcr : IDisposable
     }
 
     private async Task<OcrFeedbackRead?> WatchShotFeedbackAsync(VisionSession session, VisionActionReceipt receipt,
-        VisionSettings settings, CancellationToken ct)
+        VisionSettings settings, Func<long> getLatestReceiptId, CancellationToken ct)
     {
         double elapsedSinceCompleteMs = Stopwatch.GetElapsedTime(receipt.CompletedTimestamp).TotalMilliseconds;
         if (elapsedSinceCompleteMs < 180)
             await Task.Delay((int)Math.Ceiling(180 - elapsedSinceCompleteMs), ct).ConfigureAwait(false);
 
-        var crop = BuildBannerSearchCrop(settings.TrainingCapture.FeedbackRegion ?? _discoveredCrop);
-        var startedWatch = Stopwatch.GetTimestamp();
+        var preferredSourceCrop = _discoveredCrop ?? settings.TrainingCapture.FeedbackRegion;
+        var crop = BuildBannerSearchCrop(preferredSourceCrop);
         bool sawClearedSincePrevious = _priorBannerAt == 0 ||
-            Stopwatch.GetElapsedTime(_priorBannerAt, receipt.CompletedTimestamp).TotalMilliseconds >= 1800;
+            Stopwatch.GetElapsedTime(_priorBannerAt, receipt.CompletedTimestamp).TotalMilliseconds >= 3500;
 
-        for (int attempt = 0; attempt < 9 && !ct.IsCancellationRequested; attempt++)
+        for (int attempt = 0; attempt < 14 && !ct.IsCancellationRequested; attempt++)
         {
-            if (Stopwatch.GetElapsedTime(receipt.CompletedTimestamp).TotalMilliseconds > 2200) break;
-            // If configured/cached crop misses on first two attempts (e.g., mode changed HUD position), widen search.
-            var activeCrop = attempt is 2 or 5 ? new VisionCrop(0, 0, 1, .38) : attempt is 6 ? new VisionCrop(.15, .60, .70, .40) : crop;
+            if (getLatestReceiptId() != receipt.Id) return null;
+            if (Stopwatch.GetElapsedTime(receipt.CompletedTimestamp).TotalMilliseconds > 2600) break;
+            // Cycle across configured/discovered crop, top band, middle above-player band (y=0.24..0.72), and lower band
+            // so custom HUD or above-player banners are never stranded in a vertical blind spot.
+            var activeCrop = SelectSearchCrop(attempt, crop);
             var frame = await session.CaptureRegionOnceAsync(activeCrop, ct).ConfigureAwait(false);
-            if (frame is null) break;
+            if (frame is null || getLatestReceiptId() != receipt.Id) return null;
 
             long t0 = Stopwatch.GetTimestamp();
             var regions = _models!.ReadText(frame.Pixels, frame.Width, frame.Height, frame.Stride);
@@ -136,19 +140,24 @@ internal sealed class LiveFeedbackOcr : IDisposable
             var parsed = ParseFeedback(regions);
             if (parsed is null)
             {
-                sawClearedSincePrevious = true;
+                // Only scanning the primary banner crop proves the previous shot's banner disappeared.
+                if (activeCrop == crop)
+                    sawClearedSincePrevious = true;
             }
             else
             {
-                // Avoid re-applying a lingering banner from the previous shot before NBA 2K refreshes it.
+                // Previous-shot banners commonly remain visible 750-950 ms into quick follow-up shots.
                 if (!sawClearedSincePrevious && parsed.RawText == _priorBannerText
-                    && Stopwatch.GetElapsedTime(startedWatch).TotalMilliseconds < 700)
+                    && Stopwatch.GetElapsedTime(receipt.CompletedTimestamp).TotalMilliseconds < 1350)
                 {
                     await Task.Delay(170, ct).ConfigureAwait(false);
                     continue;
                 }
-                if (activeCrop.Width < .9 && parsed.BannerBounds is { } localBounds)
+                if (parsed.BannerBounds is { } localBounds)
+                {
                     _discoveredCrop = ProjectCrop(activeCrop, localBounds);
+                    _discoveredMisses = 0;
+                }
                 _priorBannerText = parsed.RawText;
                 _priorBannerAt = frame.CaptureTicks;
                 return new(receipt.Id, receipt.RunId, parsed.ShotType, parsed.Timing, parsed.Tempo,
@@ -156,8 +165,23 @@ internal sealed class LiveFeedbackOcr : IDisposable
             }
             await Task.Delay(175, ct).ConfigureAwait(false);
         }
+        if (_discoveredCrop is not null && ++_discoveredMisses >= 2)
+        {
+            _discoveredCrop = null;
+            _discoveredMisses = 0;
+        }
         return null;
     }
+
+    internal static VisionCrop SelectSearchCrop(int attempt, VisionCrop configuredOrDiscovered) =>
+        attempt <= 1 ? configuredOrDiscovered
+        : (attempt % 4) switch
+        {
+            2 => new VisionCrop(0, 0, 1, .42),
+            3 => new VisionCrop(0, .24, 1, .48),
+            1 => new VisionCrop(.10, .54, .80, .46),
+            _ => configuredOrDiscovered
+        };
 
     internal static VisionCrop BuildBannerSearchCrop(VisionCrop? savedFeedback)
     {
@@ -261,13 +285,12 @@ internal sealed class LiveFeedbackOcr : IDisposable
             ? consecutiveDirection + dir
             : dir;
 
-        // First miss gently nudges by 3 / 5 ms (filtering single-shot WebRTC variance);
-        // repeating misses in the same direction (e.g., entering Theater/Rec/Park) lock on faster.
+        // Damped nudges avoid chasing single-shot WebRTC/Remote Play jitter while still tracking real drift.
         bool repeated = Math.Abs(consecutiveDirection) >= 2;
         double magnitude = timing switch
         {
-            "slightlyEarly" or "slightlyLate" => repeated ? 4 : 3,
-            "early" or "late" => repeated ? 8 : 5,
+            "slightlyEarly" or "slightlyLate" => repeated ? 2.5 : 1.5,
+            "early" or "late" => repeated ? 4 : 2.5,
             _ => 0
         };
         double delta = dir * magnitude;

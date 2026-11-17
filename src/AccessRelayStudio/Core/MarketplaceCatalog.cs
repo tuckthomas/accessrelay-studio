@@ -5,7 +5,8 @@ using System.Text.Json;
 namespace EliteScriptStudio.Core;
 
 internal sealed record MarketplaceEntry(string Id, string Name, string Description, string Author, string Version,
-    string Kind, string License, string ManifestPath, string ManifestSha256, string[] Tags, string GameId = "", bool NativeCode = false);
+    string Kind, string License, string ManifestPath, string ManifestSha256, string[] Tags, string GameId = "", bool NativeCode = false,
+    string? CoverPath = null, string? CoverSha256 = null);
 internal sealed record MarketplaceCatalog(int SchemaVersion, MarketplaceEntry[] Entries)
 {
     internal void Validate()
@@ -14,6 +15,7 @@ internal sealed record MarketplaceCatalog(int SchemaVersion, MarketplaceEntry[] 
             || Entries.Select(entry => entry.Id + "@" + entry.Version).Distinct().Count() != Entries.Length)
             throw new InvalidDataException("Unsupported or invalid marketplace catalog.");
         foreach (var entry in Entries)
+        {
             if (!GamePackManifest.Identifier(entry.Id, 60) || !GamePackManifest.Identifier(entry.Version, 40)
                 || entry.Kind is not ("script" or "plugin" or "controller-profile" or "training-plugin")
                 || entry.GameId is null || (entry.GameId.Length != 0 && !GamePackManifest.Identifier(entry.GameId, 60))
@@ -22,6 +24,15 @@ internal sealed record MarketplaceCatalog(int SchemaVersion, MarketplaceEntry[] 
                 || entry.ManifestPath != $"packages/{entry.Id}/{entry.Version}/pack.json"
                 || entry.Tags is null || entry.Tags.Length > 10 || entry.Tags.Any(tag => !Text(tag, 40)))
                 throw new InvalidDataException("A marketplace listing has invalid metadata or a package path.");
+            if (!string.IsNullOrEmpty(entry.CoverPath))
+            {
+                string expectedPrefix = $"packages/{entry.Id}/{entry.Version}/data/";
+                if (!entry.CoverPath.StartsWith(expectedPrefix, StringComparison.Ordinal) || entry.CoverPath.Contains("..", StringComparison.Ordinal)
+                    || Path.GetExtension(entry.CoverPath).ToLowerInvariant() is not (".jpg" or ".jpeg" or ".png" or ".webp")
+                    || !GamePackManifest.Hash(entry.CoverSha256))
+                    throw new InvalidDataException("A marketplace listing has invalid cover art metadata.");
+            }
+        }
     }
     private static bool Text(string? value, int limit) => !string.IsNullOrWhiteSpace(value) && value.Length <= limit && !value.Any(char.IsControl);
 }
@@ -67,6 +78,16 @@ internal sealed class MarketplaceClient(HttpClient http)
         await File.WriteAllBytesAsync(path, bytes, cancellation).ConfigureAwait(false);
         _ = GamePackDefinition.Read(path); // Includes sandbox compilation and declared-resource checks.
         return path;
+    }
+    internal async Task<byte[]> DownloadCoverAsync(MarketplaceEntry entry, CancellationToken cancellation)
+    {
+        new MarketplaceCatalog(1, [entry]).Validate();
+        if (string.IsNullOrEmpty(entry.CoverPath) || string.IsNullOrEmpty(entry.CoverSha256))
+            throw new InvalidDataException("No cover art is declared for this package.");
+        byte[] bytes = await DownloadAsync(entry.CoverPath, 8 * 1024 * 1024, cancellation).ConfigureAwait(false);
+        if (!Convert.ToHexStringLower(SHA256.HashData(bytes)).Equals(entry.CoverSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Downloaded cover art does not match its declared SHA-256.");
+        return bytes;
     }
     private async Task<byte[]> DownloadAsync(string path, int limit, CancellationToken cancellation)
     {

@@ -9,19 +9,20 @@ import { VoicePage } from './pages/VoicePage';
 import { VisionPage } from './pages/VisionPage';
 import { TrainingJobsPanel } from './pages/TrainingJobsPanel';
 import { MarketplacePage } from './pages/MarketplacePage';
+import { GameAddonPage, type GameAddonDescriptor } from './pages/GameAddonPage';
 import { AnnouncementContext, LiveAnnouncements, useStatusAnnouncements } from './announcements';
 import { currentTheme, saveTheme, type Theme } from './theme';
 import { SwitchNavigation } from './SwitchNavigation';
 import { GamePluginProvider } from './game-plugins/registry';
 
-type Page = 'workspace' | 'controller' | 'vision' | 'training' | 'voice' | 'marketplace' | 'settings';
+type Page = 'workspace' | 'controller' | 'vision' | 'training' | 'voice' | 'marketplace' | 'gameAddon' | 'settings';
 const navigation: { id: Page; label: string; icon: string }[] = [
   { id: 'workspace', label: 'Workspace', icon: 'dashboard' },
   { id: 'controller', label: 'Controller', icon: 'gamepad' },
   { id: 'vision', label: 'Live Gameplay', icon: 'camera' },
   { id: 'training', label: 'Model Training', icon: 'book' },
   { id: 'voice', label: 'Voice', icon: 'audio' },
-  { id: 'marketplace', label: 'Marketplace', icon: 'store' }
+  { id: 'marketplace', label: 'Add-Ons', icon: 'store' }
 ];
 export function App() {
   const [navigationRequest, setNavigationRequest] = useState(0);
@@ -29,6 +30,7 @@ export function App() {
   useEffect(() => { void desktop.command('app.themeSet', { theme }).catch(() => {}); }, [theme]);
   const [page, setPage] = useState<Page>('workspace');
   const [pendingPage, setPendingPage] = useState<Page | null>(null);
+  const [activeGameAddon, setActiveGameAddon] = useState<GameAddonDescriptor | null>(null);
   const [state, setState] = useState<StudioState | null>(null);
   const [status, setStatus] = useState<StudioStatus>({});
   const [error, setError] = useState('');
@@ -75,7 +77,11 @@ export function App() {
   const captureWindow = { detached: (status.gameplayWindow || state?.gameplayWindow)?.detached ?? false,
     detach: () => appCommand('gameplayDetach'), attach: () => appCommand('gameplayAttach') };
   const announcement = useStatusAnnouncements(!!state, controllerStatus, voiceStatus, visionStatus, error);
-  const currentLabel = page === 'settings' ? 'Settings' : navigation.find(item => item.id === page)?.label || 'Workspace';
+  const currentLabel = page === 'settings'
+    ? 'Settings'
+    : page === 'gameAddon'
+      ? (activeGameAddon?.title || 'Game Add-On')
+      : navigation.find(item => item.id === page)?.label || 'Workspace';
   if (!state) return <main className="loading-shell"><div className="loading-content">
     <img src="./brand.png" alt="" /><h1>AccessRelay Studio</h1>
     <p>{bootError || 'Opening your workspace…'}</p>
@@ -85,11 +91,14 @@ export function App() {
     <LiveAnnouncements />
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand"><img src="./brand.png" alt="" /><div className="brand-name">AccessRelay<span>Studio</span></div></div>
-      <nav className="primary-nav">{navigation.map(item => <Button variant="unstyled" type="button" key={item.id}
-        className={'nav-item' + (page === item.id ? ' active' : '')} onClick={() => navigate(item.id)}
-        aria-label={item.label} aria-current={page === item.id ? 'page' : undefined} title={item.label}>
-        <Icon name={item.icon} size={21} /><span>{item.label}</span>{page === item.id && <span className="nav-active-mark" />}
-      </Button>)}</nav>
+      <nav className="primary-nav">{navigation.map(item => {
+        const isActive = page === item.id || (item.id === 'marketplace' && page === 'gameAddon');
+        return <Button variant="unstyled" type="button" key={item.id}
+          className={'nav-item' + (isActive ? ' active' : '')} onClick={() => navigate(item.id)}
+          aria-label={item.label} aria-current={isActive ? 'page' : undefined} title={item.label}>
+          <Icon name={item.icon} size={21} /><span>{item.label}</span>{isActive && <span className="nav-active-mark" />}
+        </Button>;
+      })}</nav>
       <div className="sidebar-bottom">
         <Button variant="unstyled" type="button" className={'nav-item' + (page === 'settings' ? ' active' : '')} onClick={() => navigate('settings')}
           aria-current={page === 'settings' ? 'page' : undefined} aria-label="Settings" title="Settings"><Icon name="settings" size={21} /><span>Settings</span></Button>
@@ -98,7 +107,9 @@ export function App() {
     <div className="app-content">
       {isDesignPreview && <div className="preview-banner">Design preview — no hardware, capture or audio sessions are connected.</div>}
       <header className="app-topbar">
-        <div className="topbar-breadcrumb"><span>Studio</span><Icon name="chevronRight" size={15} /><strong>{currentLabel}</strong></div>
+        <div className="topbar-breadcrumb"><span>Studio</span>
+          {page === 'gameAddon' && <><Icon name="chevronRight" size={15} /><span>Add-Ons</span></>}
+          <Icon name="chevronRight" size={15} /><strong>{currentLabel}</strong></div>
         <div className="topbar-actions">
           <Badge>Beta</Badge>
           <Button className="theme-toggle" onClick={() => { const next = theme === 'light' ? 'dark' : 'light'; saveTheme(next); setTheme(next); }}
@@ -115,10 +126,23 @@ export function App() {
         {page === 'training' && <div className="page-stack"><VisionPage state={state.vision || {}} status={visionStatus} command={visionCommand} mode="training" captureWindow={captureWindow} openMarketplace={() => navigate('marketplace')} />
           <details><summary>Assistant offline workflows</summary><TrainingJobsPanel initial={state.settings?.assistant} command={appCommand} /></details></div>}
         {page === 'voice' && <VoicePage state={state.voice || {}} status={voiceStatus} command={voiceCommand} />}
-        {page === 'marketplace' && <MarketplacePage state={state.marketplace || {}} command={marketplaceCommand} openTraining={async pluginId => {
-          if (state.vision?.selectedPluginId !== pluginId) await visionCommand('pluginSelect', { id: pluginId });
-          navigate('training');
-        }} />}
+        {page === 'marketplace' && <MarketplacePage state={state.marketplace || {}} installedPlugins={state.vision?.plugins || []} gameDescriptors={state.gamePlugins || []} command={marketplaceCommand}
+          openGameAddon={async addon => {
+            if (state.vision?.selectedPluginId !== addon.pluginId) await visionCommand('pluginSelect', { id: addon.pluginId });
+            setActiveGameAddon(addon);
+            navigate('gameAddon');
+          }}
+          openTraining={async pluginId => {
+            if (state.vision?.selectedPluginId !== pluginId) await visionCommand('pluginSelect', { id: pluginId });
+            navigate('training');
+          }} />}
+        {page === 'gameAddon' && activeGameAddon && <GameAddonPage state={state.vision || {}} status={visionStatus} command={visionCommand}
+          controller={{ state: state.controller || {}, status: controllerStatus, command: controllerCommand }}
+          addon={activeGameAddon} gameDescriptors={state.gamePlugins || []} captureWindow={captureWindow} onBack={() => navigate('marketplace')}
+          openTraining={async pluginId => {
+            if (state.vision?.selectedPluginId !== pluginId) await visionCommand('pluginSelect', { id: pluginId });
+            navigate('training');
+          }} />}
         {page === 'settings' && <SettingsPage state={{ ...state.settings, version: state.version, controller: state.controller }}
           status={controllerStatus} command={appCommand} openSwitchNavigation={() => setNavigationRequest(value => value + 1)} />}
       </div></main>

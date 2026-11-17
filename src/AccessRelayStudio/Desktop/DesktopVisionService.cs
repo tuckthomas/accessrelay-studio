@@ -225,7 +225,13 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     }
                     return null;
                 case "profileSelect":
-                    RequireStopped(); SelectProfile(args.Id()); await RefreshModelsAsync(); return null;
+                {
+                    var (resume, resumeModel) = await PrepareRestartIfRunningAsync(
+                        version, args.Flag("restart"), "Finish the recording before switching shot profiles.", cancellation);
+                    RequireStopped(); SelectProfile(args.Id()); await RefreshModelsAsync();
+                    if (resume) Start(loadModel: CanResumeWithModel(resumeModel));
+                    return null;
+                }
                 case "profileSave":
                 {
                     RequireStopped();
@@ -235,8 +241,16 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 }
                 case "profileDuplicate":
                 {
-                    RequireStopped(); var copy = RequirePlugin().DuplicateProfile(args.Id(), args.Text("name"));
-                    SelectProfile(copy.Id); await RefreshModelsAsync(); _notice = "Game plugin profile duplicated."; return copy.ExportProfile();
+                    var (resume, resumeModel) = await PrepareRestartIfRunningAsync(
+                        version, args.Flag("restart"), "Finish the recording before duplicating a shot profile.", cancellation);
+                    RequireStopped();
+                    var duplicateSourceId = args.Id();
+                    var copy = RequirePlugin().DuplicateProfile(duplicateSourceId, args.Text("name"));
+                    var sourceSettings = duplicateSourceId == _settingsProfile ? _settings : _settingsStore.Load(duplicateSourceId);
+                    _settingsStore.Save(copy.Id, sourceSettings);
+                    SelectProfile(copy.Id); await RefreshModelsAsync();
+                    if (resume) Start(loadModel: CanResumeWithModel(resumeModel));
+                    _notice = "Shot profile duplicated with its calibrated timing."; return copy.ExportProfile();
                 }
                 case "profileDelete":
                     RequireStopped();
@@ -258,8 +272,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 case "settingsExport": return await ExportSettingsAsync();
                 case "signalConfigure":
                 {
-                    bool resume = args.Flag("restart") && _session?.Status.Running == true;
-                    if (!resume) RequireStopped();
+                    bool restart = args.Flag("restart") && _session?.Status.Running == true;
+                    if (!restart) RequireStopped();
                     var candidate = _settings with { PluginAssistance = (_profile ?? throw new InvalidOperationException("Choose a saved game profile first."))
                             .ConfigureLiveAssistance(_settings, args.GetProperty("configuration")),
                         PreprocessingBackend = VisionPreprocessingBackend.Cpu,
@@ -271,13 +285,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                         ShootButton = args.GetProperty("shootButton").Read<ControlId>() };
                     candidate.Validate();
                     (_profile ?? throw new InvalidOperationException("Choose a saved game profile first.")).ValidateLiveAssistance(candidate);
-                    if (resume)
-                    {
-                        if (_session?.IsRecordingTraining == true) throw new InvalidOperationException("Finish the recording before changing assistance settings.");
-                        _session?.Stop(); await WaitStoppedAsync(cancellation); CheckOperation(version, cancellation);
-                        if (_session is { } stoppedSession) await stoppedSession.FinishDiagnosticRecordingAsync(cancellation);
-                        CheckOperation(version, cancellation);
-                    }
+                    var (resume, _) = await PrepareRestartIfRunningAsync(
+                        version, restart, "Finish the recording before changing assistance settings.", cancellation);
                     RequireStopped();
                     _settings = candidate; SaveSettings(); _version++;
                     if (resume) Start(loadModel: true);
@@ -388,10 +397,36 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private IVisionGamePlugin RequirePlugin() => _plugin ?? throw new InvalidOperationException("Choose a game plugin for this action.");
     internal string OfflineWorkflow(string role) => _installedPlugins?.WorkflowPath(RequirePlugin().Id, role)
         ?? throw new InvalidOperationException("Choose an installed training plugin.");
+    private bool CanResumeWithModel(bool resumeModel) =>
+        resumeModel && (_profile?.CreateLivePredictor(_settings) is not null || _settings.ModelManifestPath.Length != 0);
+
+    private async Task<(bool Resume, bool ResumeModel)> PrepareRestartIfRunningAsync(int version, bool restartRequested,
+        string activeRecordingError, CancellationToken cancellation)
+    {
+        if (!restartRequested || _session?.Status.Running != true)
+            return (false, false);
+        if (_session.IsRecordingTraining)
+            throw new InvalidOperationException(activeRecordingError);
+        if (_session.DiagnosticSnapshot is { IsFinalized: false })
+            throw new InvalidOperationException("Finish saving the diagnostic recording before changing its setup.");
+        bool resumeModel = _session.Status.ModelReady;
+        if (_runtime()?.VisionStatus.Armed == true)
+            _runtime()?.SetVisionArmed(false);
+        _session.Stop();
+        await WaitStoppedAsync(cancellation);
+        CheckOperation(version, cancellation);
+        if (_session is { } stoppedSession)
+            await stoppedSession.FinishDiagnosticRecordingAsync(cancellation);
+        CheckOperation(version, cancellation);
+        return (true, resumeModel);
+    }
+
     private void SelectProfile(Guid id)
     {
         string? previous = _profile?.ConfigurationFingerprint;
         RequirePlugin().SelectProfile(id); LoadSettings();
+        Volatile.Write(ref _lastOcrFeedback, null);
+        lock (_ocrGate) _consecutiveOcrDir = 0;
         if (previous != _profile?.ConfigurationFingerprint) { ClearPreview(); _calibration = null; }
         _version++;
     }
@@ -932,6 +967,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         lock (_ocrGate)
         {
             if (_disposed || _session?.Status.Running != true) return;
+            var latestReceipt = _runtime()?.LastVisionAction;
+            if (latestReceipt is null || latestReceipt.RunId != read.RunId || latestReceipt.Id != read.ReceiptId) return;
             bool calibrationTrial = _settings.PluginAssistance is { } json
                 && (!json.TryGetProperty("confirmed", out var conf) || !conf.GetBoolean())
                 && (!json.TryGetProperty("calibrationTrial", out var trial) || trial.GetBoolean());
