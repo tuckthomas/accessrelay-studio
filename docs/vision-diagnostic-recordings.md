@@ -42,6 +42,11 @@ so alternating distances/coverage cannot adjust the shared correction. Use separ
 saved profiles for those contexts. A tempo adjustment disarms assistance and requires
 fresh practice evidence for the changed effective stroke duration.
 
+Further investigation identified an internal SDK statistics callback and historical
+native-client ETW providers. See [native telemetry findings and discovery probe](xbox-native-stream-telemetry.md).
+These routes take priority for investigation before promoting OCR to the permanent
+source. The probe does not yet supply measurements to the timing loop.
+
 Microsoft documents `XGameStreamingGetStreamAddedLatency` for the streaming game's
 own connected client IDs. It does not document a supported external API for Studio
 to query another process's Xbox PC Remote Play overlay. See the
