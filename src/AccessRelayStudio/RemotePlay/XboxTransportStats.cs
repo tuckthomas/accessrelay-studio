@@ -10,9 +10,11 @@ namespace EliteScriptStudio.RemotePlay;
 internal sealed record XboxTransportStats(long Timestamp, double? RttMs, double? JitterMs, double? DecodeMs,
     double? DecodedFps, int Width, int Height, double? JitterBufferMs, long? PacketsLost, long? FramesDropped, double? PacketLossPercent, string? RttSource)
 {
+    public ulong? DecodedAudioBuffers { get; init; }
+    public string? VideoDecoder { get; init; }
     public ControllerHandoffStats? ControllerWrites { get; init; }
     internal DirectStreamMetrics Reading => new(Timestamp, RttMs, RttSource, JitterMs, DecodeMs, DecodedFps,
-        PacketLossPercent, JitterBufferMs, PacketsLost, FramesDropped, Width, Height) { ControllerWrites = ControllerWrites };
+        PacketLossPercent, JitterBufferMs, PacketsLost, FramesDropped, Width, Height) { ControllerWrites = ControllerWrites, VideoDecoder = VideoDecoder };
 }
 
 internal sealed class XboxStatsCollector

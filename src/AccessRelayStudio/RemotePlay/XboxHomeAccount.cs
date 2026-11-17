@@ -38,7 +38,7 @@ internal sealed class XboxHomeAccount(HttpClient http, IXboxRefreshStore store)
         var device = await FormAsync(Login + "devicecode", new() { ["client_id"] = ClientId, ["scope"] = Scope }, ct);
         int expires = Math.Clamp(device.GetProperty("expires_in").GetInt32(), 1, 1800);
         var url = new Uri(device.GetProperty("verification_uri").GetString()!);
-        if (url.Scheme != Uri.UriSchemeHttps || !(url.Host == "microsoft.com" || url.Host.EndsWith(".microsoft.com", StringComparison.Ordinal)
+        if (url.Scheme != Uri.UriSchemeHttps || !url.IsDefaultPort || url.UserInfo.Length != 0 || !(url.Host == "microsoft.com" || url.Host.EndsWith(".microsoft.com", StringComparison.Ordinal)
             || url.Host == "login.microsoftonline.com")) throw new InvalidDataException("Microsoft returned an unexpected sign-in page.");
         string code = device.GetProperty("device_code").GetString()!;
         int interval = Math.Clamp(device.GetProperty("interval").GetInt32(), 1, 60);

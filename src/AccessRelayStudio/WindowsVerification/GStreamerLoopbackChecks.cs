@@ -68,8 +68,8 @@ internal static class GStreamerLoopbackChecks
             long start = Stopwatch.GetTimestamp();
             while (Stopwatch.GetElapsedTime(start).TotalSeconds < 1) { ct.ThrowIfCancellationRequested(); client.PullFrame(); }
             var telemetry = client.ReadStats(ct);
-            if (telemetry.DecodedFps is not > 0 || telemetry.DecodeMs is null || telemetry.JitterMs is null || telemetry.PacketLossPercent is null)
-                throw new Exception("Missing measured FPS, decoder timing, video RTP jitter or packet counters: " + telemetry);
+            if (telemetry.DecodedFps is not > 0 || telemetry.DecodeMs is null || telemetry.JitterMs is null || telemetry.PacketLossPercent is null || telemetry.DecodedAudioBuffers is not > 0 || string.IsNullOrEmpty(telemetry.VideoDecoder))
+                throw new Exception("Missing measured FPS, decoder timing, video RTP jitter, packet counters or decoded Opus audio: " + telemetry);
             using var device = new FakeControllerInput();
             using var runtime = new StudioRuntime(device, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
             runtime.Attach(client.AttachController());
@@ -79,7 +79,9 @@ internal static class GStreamerLoopbackChecks
             runtime.BeginVisionSession();
             if (!runtime.SetVisionArmed(true)) throw new Exception("Could not arm paddle output.");
             device.SetState(default, PaddleButtons.LargeRight);
-            while (runtime.VisionStatus.ShotToken == 0) await Task.Delay(5, ct);
+            while (runtime.VisionStatus.ShotToken == 0 || !received.Contains((short)-32767)) await Task.Delay(5, ct);
+            if (runtime.Latest?.Input is not { State.RightX: 0, State.RightY: 0, HeldPaddles: PaddleButtons.LargeRight })
+                throw new Exception("The downstroke did not originate from P4 alone.");
             var shot = runtime.VisionStatus;
             long now = Stopwatch.GetTimestamp();
             if (!runtime.SubmitVisionPrediction(new(shot.SessionGeneration, shot.ShotToken, 1, now, now, 100, 1, 0, true)))
@@ -88,10 +90,11 @@ internal static class GStreamerLoopbackChecks
             short[] reports = received.ToArray();
             int down = Array.IndexOf(reports, (short)-32767), up = Array.IndexOf(reports, short.MaxValue);
             if (down < 0 || up <= down || Array.IndexOf(reports, (short)0, up) <= up
-                || runtime.ReadVisionSignalContext().Physical?.RightY != 0) throw new Exception("Peer missed the P4 down/up/neutral sequence.");
-            if (client.ReadStats(ct).ControllerWrites is not { Accepted: > 3, Rejected: 0, Samples: > 3 })
+                || runtime.Latest?.Input is not { State.RightX: 0, State.RightY: 0, HeldPaddles: PaddleButtons.LargeRight }) throw new Exception("Peer missed the P4 down/up/neutral sequence.");
+            var afterShot = client.ReadStats(ct);
+            if (afterShot.ControllerWrites is not { Accepted: > 3, Rejected: 0, Samples: > 3 })
                 throw new Exception("Native controller handoff counters missed the shot.");
-            Console.WriteLine($"PASS native WebRTC peers exchanged ICE, DTLS, Xbox channels, H.264 {first.Width}x{first.Height}, timed decode and P4 reports. Stats: {telemetry}");
+            Console.WriteLine($"PASS native WebRTC peers exchanged ICE, DTLS, Xbox channels, H.264 {first.Width}x{first.Height}, decoded Opus and P4 down/up/neutral. Stats: {afterShot}");
         }
         finally
         {

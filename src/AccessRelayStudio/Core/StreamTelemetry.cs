@@ -17,6 +17,7 @@ public sealed record DirectStreamMetrics(long CaptureTimestamp, double? RttMs, s
     double? DecodeMs, double? Fps, double? PacketLossPercent, double? JitterBufferMs, long? PacketsLost,
     long? FramesDropped, int Width, int Height)
 {
+    public string? VideoDecoder { get; init; }
     public ControllerHandoffStats? ControllerWrites { get; init; }
 }
 

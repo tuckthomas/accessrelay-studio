@@ -62,6 +62,9 @@ internal static class GStreamerNative
     [DllImport(Gst)] private static extern int gst_init_check(nint argc, nint argv, out nint error);
     [DllImport(Gst)] private static extern void gst_version(out uint major, out uint minor, out uint micro, out uint nano);
     [DllImport(Gst)] internal static extern nint gst_parse_launch(string pipeline, out nint error);
+    [DllImport(Gst)] internal static extern nint gst_element_get_factory(nint element);
+    [DllImport(Gst)] internal static extern nint gst_element_factory_get_metadata(nint factory, string key);
+    [DllImport(Gst)] internal static extern nint gst_object_get_name(nint obj);
     [DllImport(Gst)] internal static extern nint gst_bin_get_by_name(nint bin, string name);
     [DllImport(Gst)] internal static extern int gst_element_set_state(nint element, int state);
     [DllImport(Gst)] internal static extern int gst_pad_get_direction(nint pad);
@@ -119,6 +122,8 @@ internal static class GStreamerNative
     [DllImport(Obj, EntryPoint = "g_signal_emit_by_name")] internal static extern void Channel(nint obj, string name, string label, nint config, out nint result);
     [DllImport(Obj, EntryPoint = "g_signal_emit_by_name")] internal static extern void Candidate(nint obj, string name, uint index, string candidate);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate void MessageHandler(nint channel, nint message, nint state);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate void ElementHandler(nint bin, nint subBin, nint element, nint data);
+    [DllImport(Obj, EntryPoint = "g_signal_connect_data")] internal static extern nuint ConnectElement(nint obj, string signal, ElementHandler callback, nint data, nint destroy, int flags);
     [DllImport(Obj)] internal static extern nuint g_signal_connect_data(nint obj, string signal, MessageHandler callback, nint data, nint destroy, int flags);
     [DllImport(Obj)] internal static extern void g_signal_handler_disconnect(nint obj, nuint id);
 }
