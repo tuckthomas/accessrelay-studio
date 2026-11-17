@@ -21,6 +21,8 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     private readonly XboxStatsCollector _stats = new();
     private readonly MessageHandler _beforeDecode, _afterDecode;
     private int _ack;
+    private long _acceptedWrites, _rejectedWrites;
+    private readonly double[] _writeMs = new double[256];
     private bool _disposed;
     private Action<DecodedBgraFrame>? _frame;
     private Action? _ended;
@@ -79,7 +81,7 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
             _afterHandler = g_signal_connect_data(_after, "handoff", _afterDecode, 0, 0, 0);
             if (gst_element_set_state(_pipeline, 2) == 0) throw new InvalidOperationException("GStreamer could not initialize its media devices.");
             AddTrack("application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,payload=111");
-            AddTrack("application/x-rtp,media=video,encoding-name=H264,clock-rate=90000,payload=96,packetization-mode=(string)1,profile-level-id=(string)42e01f,level-asymmetry-allowed=(string)1");
+            AddTrack("application/x-rtp,media=video,encoding-name=H264,clock-rate=90000,payload=96,packetization-mode=(string)1,profile-level-id=(string)42e02a,level-asymmetry-allowed=(string)1");
             _control = AddChannel("control", "controlV1");
             _input = AddChannel("input", "1.0");
             _message = AddChannel("message", "messageV1");
@@ -284,12 +286,25 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     bool IXboxInputChannel.IsOpen => !_disposed && Open(_input);
     bool IXboxInputChannel.TrySend(ReadOnlySpan<byte> report)
     {
-        if (_disposed || !Open(_input) || report.IsEmpty) return false;
-        GetSize(_input, "buffered-amount", out ulong pending, 0);
-        if (pending > 4096) return false;
-        var bytes = g_bytes_new(in MemoryMarshal.GetReference(report), (nuint)report.Length);
-        try { return gst_webrtc_data_channel_send_data_full(_input, bytes, 0) != 0; }
-        finally { g_bytes_unref(bytes); }
+        long start = Stopwatch.GetTimestamp();
+        bool accepted = false;
+        try
+        {
+            if (_disposed || !Open(_input) || report.IsEmpty) return false;
+            GetSize(_input, "buffered-amount", out ulong pending, 0);
+            if (pending > 4096) return false;
+            var bytes = g_bytes_new(in MemoryMarshal.GetReference(report), (nuint)report.Length);
+            try { return accepted = gst_webrtc_data_channel_send_data_full(_input, bytes, 0) != 0; }
+            finally { g_bytes_unref(bytes); }
+        }
+        finally
+        {
+            lock (_writeMs)
+            {
+                if (accepted) _writeMs[_acceptedWrites++ % _writeMs.Length] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                else _rejectedWrites++;
+            }
+        }
     }
 
     private DirectStreamMetrics? _latest;
@@ -297,6 +312,19 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     internal XboxTransportStats ReadStats(CancellationToken ct)
     {
         var stats = WithPromise("get-stats", 0, _stats.Sample, ct);
+        long accepted, rejected;
+        double[] timings;
+        lock (_writeMs)
+        {
+            accepted = _acceptedWrites; rejected = _rejectedWrites;
+            timings = _writeMs[..(int)Math.Min(_writeMs.Length, accepted)];
+        }
+        if (timings.Length != 0)
+        {
+            Array.Sort(timings);
+            stats = stats with { ControllerWrites = new(accepted, rejected, timings.Length,
+                timings[(timings.Length - 1) / 2], timings[(int)Math.Ceiling(timings.Length * .95) - 1]) };
+        }
         Volatile.Write(ref _latest, stats.Reading);
         return stats;
     }
@@ -312,16 +340,35 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
                 w is <= 0 or > 3840 || h is <= 0 or > 2160) throw new IOException("The Xbox decoder returned unsupported video dimensions.");
             _stats.Dimensions(w, h);
             var buffer = gst_sample_get_buffer(sample);
-            if (gst_buffer_map(buffer, out var map, 1) == 0) return;
+            Action<DecodedBgraFrame>? callback;
+            lock (_gate) callback = _frame;
+            if (callback is null) return;
+            long? receipt = _stats.DecoderTimestamp(buffer);
+            nint meta = gst_buffer_get_video_meta(buffer), pixels;
+            Map map;
+            int stride;
+            if (meta != 0)
+            {
+                if (gst_video_meta_map(meta, 0, out map, out pixels, out stride, 1) == 0) return;
+            }
+            else
+            {
+                if (gst_buffer_map(buffer, out map, 1) == 0) return;
+                pixels = map.Data; stride = checked(w * 4);
+            }
             try
             {
-                // The system-memory BGRA branch negotiates tightly packed four-byte pixels.
-                if (map.Size != (nuint)(w * h * 4)) throw new IOException("The decoder returned an unsupported BGRA row layout.");
-                Action<DecodedBgraFrame>? callback;
-                lock (_gate) callback = _frame;
-                callback?.Invoke(new(map.Data, (int)map.Size, w * 4, w, h));
+                long offset = pixels - map.Data;
+                long length = checked((long)map.Size - offset);
+                if (offset < 0 || stride < w * 4 || length < (long)(h - 1) * stride + w * 4 || length > int.MaxValue
+                    || meta == 0 && length != (long)stride * h) throw new IOException("The decoder returned an unsupported BGRA row layout.");
+                callback(new(pixels, (int)length, stride, w, h, receipt));
             }
-            finally { gst_buffer_unmap(buffer, ref map); }
+            finally
+            {
+                if (meta != 0) gst_video_meta_unmap(meta, 0, ref map);
+                else gst_buffer_unmap(buffer, ref map);
+            }
         }
         finally { gst_mini_object_unref(sample); }
     }

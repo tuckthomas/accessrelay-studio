@@ -1150,7 +1150,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     {
         if (_disposed) return; _disposed = true; CancelOperation();
         if (_luaController is not null) _luaController.DirectOutput = null;
-        if (_xbox is { } connection) { _xbox = null; _ = connection.CloseAsync(); }
+        if (_xbox is { } connection) { _xbox = null; XboxShutdown = connection.CloseAsync(); }
         _feedbackOcr?.Dispose();
         _trainingJob.Dispose();
         _session?.Dispose(); _review?.Dispose(); _operation.Dispose(); ClearPreview();

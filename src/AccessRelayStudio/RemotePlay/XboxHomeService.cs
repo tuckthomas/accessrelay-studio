@@ -47,6 +47,7 @@ internal sealed class XboxHomeService(HttpClient http, Uri region, string bearer
         var session = new XboxHomeSession(this, "/v5/sessions/home/" + id);
         try
         {
+            ct.ThrowIfCancellationRequested();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(90));
             bool connected = false;

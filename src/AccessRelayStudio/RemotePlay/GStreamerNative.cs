@@ -7,7 +7,7 @@ namespace EliteScriptStudio.RemotePlay;
 // signatures of the corresponding GObject varargs calls (pointer/integer arguments).
 internal static class GStreamerNative
 {
-    private const string Gst = "relay:gst", Sdp = "relay:sdp", Web = "relay:webrtc", App = "relay:app", GLib = "relay:glib", Obj = "relay:object";
+    private const string Gst = "relay:gst", Sdp = "relay:sdp", Web = "relay:webrtc", App = "relay:app", Video = "relay:video", GLib = "relay:glib", Obj = "relay:object";
     private static string? _windowsBin;
     private static readonly Lazy<bool> Initialized = new(() =>
     {
@@ -36,7 +36,7 @@ internal static class GStreamerNative
     private static nint Resolve(string library, Assembly assembly, DllImportSearchPath? search)
     {
         string? stem = library switch { Gst => "gstreamer-1.0", Web => "gstwebrtc-1.0", Sdp => "gstsdp-1.0",
-            App => "gstapp-1.0", GLib => "glib-2.0", Obj => "gobject-2.0", _ => null };
+            App => "gstapp-1.0", Video => "gstvideo-1.0", GLib => "glib-2.0", Obj => "gobject-2.0", _ => null };
         if (stem is null) return 0;
         if (!OperatingSystem.IsWindows()) return NativeLibrary.Load("lib" + stem + ".so.0");
         return NativeLibrary.Load(Path.Combine(_windowsBin!, stem + "-0.dll"), assembly,
@@ -94,6 +94,9 @@ internal static class GStreamerNative
     [DllImport(Gst)] internal static extern nint gst_sample_get_caps(nint sample);
     [DllImport(Gst)] internal static extern int gst_buffer_map(nint buffer, out Map map, int flags);
     [DllImport(Gst)] internal static extern void gst_buffer_unmap(nint buffer, ref Map map);
+    [DllImport(Video)] internal static extern nint gst_buffer_get_video_meta(nint buffer);
+    [DllImport(Video)] internal static extern int gst_video_meta_map(nint meta, uint plane, out Map map, out nint data, out int stride, int flags);
+    [DllImport(Video)] internal static extern int gst_video_meta_unmap(nint meta, uint plane, ref Map map);
     [DllImport(App)] internal static extern nint gst_app_sink_try_pull_sample(nint sink, ulong timeoutNs);
     [DllImport(Sdp)] internal static extern nint gst_sdp_message_as_text(nint message);
     [DllImport(Sdp)] internal static extern int gst_sdp_message_new_from_text([MarshalAs(UnmanagedType.LPUTF8Str)] string text, out nint sdp);

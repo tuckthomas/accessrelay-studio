@@ -438,6 +438,7 @@ public sealed partial class DesktopWindow : Window
             _marketplace?.Dispose();
             Cleanup(() => _controller?.StopOutput()); Cleanup(() => _controller?.Dispose());
             Cleanup(() => _vision?.Dispose()); Cleanup(() => _voice?.Dispose());
+            if (_vision is not null) await _vision.XboxShutdown;
             if (_assistant is not null) await _assistant.DisposeAsync();
             try { if (_controller is not null) await _controller.WaitForOutputAsync(); } catch (Exception) { }
         }

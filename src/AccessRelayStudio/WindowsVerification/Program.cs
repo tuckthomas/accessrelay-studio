@@ -4,7 +4,7 @@ using EliteScriptStudio.Vision;
 
 if (args is ["--xbox-webrtc-loopback"]) { GStreamerLoopbackChecks.Run().GetAwaiter().GetResult(); return; }
 
-if (args is ["--direct-stream"]) { DirectStreamChecks.Run(); return; }
+if (args is ["--direct-stream"]) { DirectStreamChecks.Run(); XboxHomeServiceChecks.Run().GetAwaiter().GetResult(); return; }
 
 if (args is ["--shot-trainer"]) { RuntimeShotTrainerChecks.Run(); return; }
 

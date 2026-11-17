@@ -13,8 +13,6 @@ internal static class GStreamerLoopbackChecks
     // Two independent ICE/DTLS/SRTP peers. The sender generates H.264 video and Opus audio.
     internal static async Task Run()
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var ct = timeout.Token;
         using var client = new GStreamerPeer(present: false);
         // A repeated, independently encoded IDR frame keeps the test independent of optional H.264 encoders.
         var bars = Path.Combine(AppContext.BaseDirectory, "Fixtures", "bars-320x180.h264").Replace('\\', '/');
@@ -44,6 +42,9 @@ internal static class GStreamerLoopbackChecks
         g_signal_connect_data(remote, "on-data-channel", onChannel, 0, 0, 0);
         try
         {
+            // A clean Windows installation scans all codec DLLs on first use, before negotiation.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            var ct = timeout.Token;
             gst_element_set_state(server, 4);
             string offer = client.CreateOffer(ct);
             GStreamerPeer.SetDescription(remote, "set-remote-description", 1, offer, ct);
@@ -63,9 +64,12 @@ internal static class GStreamerLoopbackChecks
                 if (first.Width != 320 || first.Height != 180 || !first.Pixels.Span.Slice(0, 320*4).ContainsAnyExcept((byte)0))
                     throw new Exception("Decoded H.264 geometry or pixels are invalid.");
             }
+            _ = client.ReadStats(ct);
+            long start = Stopwatch.GetTimestamp();
+            while (Stopwatch.GetElapsedTime(start).TotalSeconds < 1) { ct.ThrowIfCancellationRequested(); client.PullFrame(); }
             var telemetry = client.ReadStats(ct);
-            if (telemetry.DecodedFps is not > 0 || telemetry.DecodeMs is null || telemetry.JitterMs is null)
-                throw new Exception("Missing measured FPS, decoder timing or video RTP jitter: " + telemetry);
+            if (telemetry.DecodedFps is not > 0 || telemetry.DecodeMs is null || telemetry.JitterMs is null || telemetry.PacketLossPercent is null)
+                throw new Exception("Missing measured FPS, decoder timing, video RTP jitter or packet counters: " + telemetry);
             using var device = new FakeControllerInput();
             using var runtime = new StudioRuntime(device, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
             runtime.Attach(client.AttachController());
@@ -85,6 +89,8 @@ internal static class GStreamerLoopbackChecks
             int down = Array.IndexOf(reports, (short)-32767), up = Array.IndexOf(reports, short.MaxValue);
             if (down < 0 || up <= down || Array.IndexOf(reports, (short)0, up) <= up
                 || runtime.ReadVisionSignalContext().Physical?.RightY != 0) throw new Exception("Peer missed the P4 down/up/neutral sequence.");
+            if (client.ReadStats(ct).ControllerWrites is not { Accepted: > 3, Rejected: 0, Samples: > 3 })
+                throw new Exception("Native controller handoff counters missed the shot.");
             Console.WriteLine($"PASS native WebRTC peers exchanged ICE, DTLS, Xbox channels, H.264 {first.Width}x{first.Height}, timed decode and P4 reports. Stats: {telemetry}");
         }
         finally

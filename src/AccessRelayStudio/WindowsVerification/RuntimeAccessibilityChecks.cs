@@ -111,7 +111,7 @@ internal static class RuntimeAccessibilityChecks
     private static void VoiceCommands()
     {
         using var input = new FakeControllerInput();
-        using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault(), new StickDeadzone(0, 0));
+        using var runtime = new StudioRuntime(input, ProfileWithPaddleSequence(), new StickDeadzone(0, 0));
         runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest?.OutputActive == true && runtime.Latest?.Input.IsConnected == true, "Voice input/output did not connect.");
         var binding = new VoiceCommandBinding { Control = ControlId.A, DurationMs = 100, RefractoryMs = 200 };
@@ -179,10 +179,20 @@ internal static class RuntimeAccessibilityChecks
         Console.WriteLine("SUCCESS: co-pilot arbitration, neutral configuration, disconnect, recording, Stop and primary navigation with simulated devices.");
     }
 
+    private static StudioProfile ProfileWithPaddleSequence()
+    {
+        var down = default(ControllerState) with { RightY = -32767 };
+        var stroke = new MacroRecording(Guid.NewGuid(), "Test paddle sequence", RecordingChannels.RightStick,
+            [new(0, down), new(150, default(ControllerState) with { RightY = short.MaxValue }), new(225, default)], 250);
+        var script = RecordedLua.Convert(stroke);
+        return StudioProfile.CreateDefault().WithLuaScript(script).WithBinding(ControlId.LargeRight,
+            new(ScriptKind.Lua, Consume: true, LuaScriptId: script.Id));
+    }
+
     private static void Smoothing()
     {
         using var input = new FakeControllerInput();
-        var profile = StudioProfile.CreateDefault() with { Smoothing = new(100, 100) };
+        var profile = ProfileWithPaddleSequence() with { Smoothing = new(100, 100) };
         using var runtime = new StudioRuntime(input, profile, new StickDeadzone(5, 5));
         runtime.Attach(new FakeControllerOutput());
         Wait(() => runtime.Latest is { OutputActive: true } sample && sample.Input.IsConnected, "Smoothing input/output did not connect.");

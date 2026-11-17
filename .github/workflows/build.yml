@@ -39,6 +39,7 @@ jobs:
         run: |
           $required = @('AccessRelayStudio.exe', 'AccessRelayStudio.Engine.dll', 'AccessRelayStudio.Runtime.dll',
             'Microsoft.ML.OnnxRuntime.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_providers_cuda.dll',
+            'RemotePlay/Install-XboxRemotePlay.ps1', 'Notices/XalNode-LICENSE.txt', 'Notices/XboxPlayer-LICENSE.txt',
             'NAudio.Wasapi.dll', 'System.Speech.dll', 'DesktopUi/index.html', 'Scene/Viewer/index.html',
             'Scene/Viewer/viewer.bundle.js', 'Scene/Model/XboxOne.glb',
             'AccessRelayStudio.Application.dll', 'Mcp/AccessRelayStudio.Mcp.exe', 'Mcp/AccessRelayStudio.Mcp.dll',

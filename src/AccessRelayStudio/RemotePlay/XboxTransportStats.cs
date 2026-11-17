@@ -10,14 +10,20 @@ namespace EliteScriptStudio.RemotePlay;
 internal sealed record XboxTransportStats(long Timestamp, double? RttMs, double? JitterMs, double? DecodeMs,
     double? DecodedFps, int Width, int Height, double? JitterBufferMs, long? PacketsLost, long? FramesDropped, double? PacketLossPercent, string? RttSource)
 {
+    public ControllerHandoffStats? ControllerWrites { get; init; }
     internal DirectStreamMetrics Reading => new(Timestamp, RttMs, RttSource, JitterMs, DecodeMs, DecodedFps,
-        PacketLossPercent, JitterBufferMs, PacketsLost, FramesDropped, Width, Height);
+        PacketLossPercent, JitterBufferMs, PacketsLost, FramesDropped, Width, Height) { ControllerWrites = ControllerWrites };
 }
 
 internal sealed class XboxStatsCollector
 {
     private readonly object _gate = new();
-    private readonly Dictionary<long,long> _decoderInput = [];
+    private readonly Dictionary<long,long> _decoderInput = [], _decoderOutput = [];
+    internal long? DecoderTimestamp(nint buffer)
+    {
+        long pts = Marshal.ReadInt64(buffer, PtsOffset);
+        lock (_gate) return _decoderOutput.Remove(pts, out long timestamp) ? timestamp : null;
+    }
     private long _last = Stopwatch.GetTimestamp(), _decoded, _paired;
     private double _decodeMs;
     private int _width, _height;
@@ -92,6 +98,8 @@ internal sealed class XboxStatsCollector
             if (pts == -1) return;
             if (decoded)
             {
+                if (_decoderOutput.Count >= 128) _decoderOutput.Clear();
+                _decoderOutput[pts] = now;
                 if (_decoderInput.Remove(pts, out long start))
                 { _paired++; _decodeMs += Stopwatch.GetElapsedTime(start, now).TotalMilliseconds; }
             }

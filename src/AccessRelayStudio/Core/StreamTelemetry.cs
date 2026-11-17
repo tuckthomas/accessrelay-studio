@@ -15,7 +15,12 @@ public sealed record StreamTelemetryReading(long CaptureTimestamp, double PingMs
 
 public sealed record DirectStreamMetrics(long CaptureTimestamp, double? RttMs, string? RttSource, double? JitterMs,
     double? DecodeMs, double? Fps, double? PacketLossPercent, double? JitterBufferMs, long? PacketsLost,
-    long? FramesDropped, int Width, int Height);
+    long? FramesDropped, int Width, int Height)
+{
+    public ControllerHandoffStats? ControllerWrites { get; init; }
+}
+
+public sealed record ControllerHandoffStats(long Accepted, long Rejected, int Samples, double MedianMs, double P95Ms);
 
 public sealed record StreamTelemetryAssessment(string State, string Message, bool CanAdapt,
     double AdditionalUncertaintyMs, StreamTelemetryReading? Latest, int Samples)

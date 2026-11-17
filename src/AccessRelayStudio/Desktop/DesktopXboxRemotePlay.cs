@@ -14,6 +14,7 @@ internal sealed partial class DesktopVisionService
     private XboxDevicePrompt? _signInPrompt;
     private XboxConsole? _console;
     private XboxRemoteConnection? _xbox;
+    internal Task XboxShutdown { get; private set; } = Task.CompletedTask;
     private bool _direct, _signedIn;
     private string _windowSelection = "", _consoleMessage = "";
 
@@ -57,7 +58,8 @@ internal sealed partial class DesktopVisionService
         if (_xbox is not { } connection) return;
         _luaController?.StopOutput();
         _xbox = null;
-        await connection.CloseAsync();
+        XboxShutdown = connection.CloseAsync();
+        await XboxShutdown;
         if (_direct) InvalidateSource("");
     }
 
@@ -112,6 +114,7 @@ internal sealed partial class DesktopVisionService
                 if (_xbox is { Ended: false }) return;
                 await DisconnectXboxAsync();
                 var client = await _xboxAccount.ServiceAsync(ct);
+                ct.ThrowIfCancellationRequested();
                 var connection = _xbox = new XboxRemoteConnection(client, _console.Id);
                 using (ct.Register(connection.Cancel))
                 {

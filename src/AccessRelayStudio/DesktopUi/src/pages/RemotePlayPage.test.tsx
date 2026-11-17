@@ -43,3 +43,26 @@ it('detaches through the host and renders the preview in only one window', async
   await waitFor(() => expect(attach).toHaveBeenCalledOnce());
   expect(command).not.toHaveBeenCalled();
 });
+
+it('opens direct Xbox sign-in and allows cancelling a pending code', async () => {
+  const command = vi.fn().mockResolvedValue(null);
+  const view = render(<VisionPage state={state} status={{ xbox: { direct: true } }} command={command} />);
+  expect(screen.queryByRole('combobox', { name: 'Gameplay window' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in to Xbox' }));
+  await waitFor(() => expect(command).toHaveBeenCalledWith('xboxSignIn', undefined));
+  view.rerender(<VisionPage state={state} status={{ busy: true, xbox: { direct: true, signInCode: 'ABCD', verificationPage: 'https://microsoft.com/link' } }} command={command} />);
+  expect(screen.getByText('ABCD')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(command).toHaveBeenCalledWith('xboxCancel', undefined));
+});
+
+it('shows the connected console and measured stats while capture is independent of output', async () => {
+  const command = vi.fn().mockResolvedValue(null);
+  render(<VisionPage state={state} status={{ selectedSourceId: 'xhome', xbox: { direct: true, signedIn: true, consoleId: 'a',
+    consoles: [{ id: 'a', name: 'Living room', powerState: 'On' }], connected: true,
+    statistics: { width: 1920, height: 1080, decodedFps: 59.7, jitterMs: 1.1, decodeMs: 3.4, rttMs: null } } }} command={command} />);
+  expect(screen.getByText(/59.7 FPS/).textContent).toContain('ICE RTT —');
+  fireEvent.click(screen.getByRole('button', { name: 'Start capture' }));
+  await waitFor(() => expect(command).toHaveBeenCalledWith('start', { loadModel: false }));
+  expect(command).toHaveBeenCalledTimes(1);
+});

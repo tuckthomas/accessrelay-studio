@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace EliteScriptStudio.Vision;
 
 /// <summary>The decoder owns the mapped BGRA memory until the synchronous callback returns.</summary>
-internal readonly record struct DecodedBgraFrame(nint Pixels, int ByteLength, int RowPitch, int Width, int Height);
+internal readonly record struct DecodedBgraFrame(nint Pixels, int ByteLength, int RowPitch, int Width, int Height, long? DecoderReceiptTicks = null);
 
 internal interface IDecodedVideoTrack
 {
@@ -59,7 +59,8 @@ internal sealed class DecodedStreamCapture : IVisionFrameSource
 
     private void Publish(DecodedBgraFrame frame)
     {
-        long receipt = Stopwatch.GetTimestamp();
+        long copyStarted = Stopwatch.GetTimestamp();
+        long receipt = frame.DecoderReceiptTicks is > 0 && frame.DecoderReceiptTicks <= copyStarted ? frame.DecoderReceiptTicks.Value : copyStarted;
         lock (_gate)
         {
             if (!_running) return;
@@ -81,7 +82,7 @@ internal sealed class DecodedStreamCapture : IVisionFrameSource
                 _latestTicks = _changedTicks = 0;
             }
             if (!_frames.PublishMapped(frame.Pixels, (uint)frame.RowPitch, _width, _height, receipt,
-                _published + 1, _generation, readbackStartedTicks: receipt)) return;
+                _published + 1, _generation, readbackStartedTicks: copyStarted)) return;
 
             _latestTicks = receipt;
             _published++;

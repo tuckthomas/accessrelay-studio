@@ -12,6 +12,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="GStreamerLoopbackChecks.cs" />
     <Compile Include="DirectStreamChecks.cs" />
+    <Compile Include="XboxHomeServiceChecks.cs" />
     <Compile Include="CaptureCadenceChecks.cs" />
     <Compile Include="DiagnosticRecordingChecks.cs" />
     <Compile Include="RuntimeSignalContextChecks.cs" />
