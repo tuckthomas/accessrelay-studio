@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--direct-stream"]) { DirectStreamChecks.Run(); return; }
+
 if (args is ["--shot-trainer"]) { RuntimeShotTrainerChecks.Run(); return; }
 
 if (args is ["--signal-context"])
@@ -171,10 +173,7 @@ static void CaptureCheck(bool gpu = false)
     {
         Native.UpdateWindow(window);
         Native.SetTimer(window, 1, 16, 0);
-        using var capture = new RemotePlayCapture();
-        nint adapter = gpu ? CudaD3D11Interop.FindAdapter() : 0;
-        try { capture.Start(window, gpu, adapter); }
-        finally { if (adapter != 0) Marshal.Release(adapter); }
+        using var capture = RemotePlayCapture.Open(window, gpu);
         using var first = WaitFrame(capture);
         long age = Stopwatch.GetTimestamp() - first.CaptureTicks;
         Check(age >= 0 && age < 5 * Stopwatch.Frequency, "Capture timestamp is not on the QPC timeline.");

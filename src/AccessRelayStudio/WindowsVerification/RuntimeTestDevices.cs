@@ -37,7 +37,8 @@ namespace EliteScriptStudio.Input
             }
         }
         public void SelectDevice(string? id) { }
-        public void SetVirtualOutputActive(bool active) { }
+        internal bool VirtualOutputActive { get; private set; }
+        public void SetVirtualOutputActive(bool active) => VirtualOutputActive = active;
         public void Dispose() { }
     }
 }

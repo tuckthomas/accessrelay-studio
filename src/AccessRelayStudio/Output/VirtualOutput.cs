@@ -8,6 +8,7 @@ public interface IControllerOutput : IDisposable
 {
     string Status { get; }
     bool IsAvailable { get; }
+    bool UsesVirtualDevice => true;
     bool TryWrite(ControllerState state);
     void Neutralize();
 }

@@ -10,6 +10,7 @@ The root [0BSD license](LICENSE) covers original AccessRelay Studio code. The co
 | Three.js and addons | MIT. [Viewer notice and build information](src/AccessRelayStudio/Viewer/THIRD-PARTY-NOTICES.md) |
 | Standard and Elite controller meshes | CC0 1.0 source mesh with AccessRelay adaptations. [Model provenance](src/AccessRelayStudio/Model/README.md) |
 | DualShock 4 and Switch Pro meshes | MIT. [Model provenance](src/AccessRelayStudio/Model/3DcoPlus.PROVENANCE.md) |
+| Xbox Remote Play gamepad report layout and test vectors | Adapted from Jim Kroon’s MIT-licensed [xbox-xcloud-player packet writer](https://github.com/unknownskl/xbox-xcloud-player/blob/a6511a645736f4988f77323284c6f0f36bf93aef/src/channel/input/packet.ts). [Bundled license](src/AccessRelayStudio/Assets/XboxPlayer-LICENSE.txt) |
 | NAudio | MIT. [NAudio notice](src/AccessRelayStudio/Assets/NAudio-LICENSE.md) |
 | MoonSharp 2.0.0 | BSD-3-Clause. [Bundled license](src/AccessRelayStudio/Assets/MoonSharp-LICENSE.md). Embedded Lua controller scripting with restricted host APIs. |
 | Official Model Context Protocol C# SDK 2.4.0 | Apache-2.0. Copyright © Model Context Protocol a Series of LF Projects, LLC. [Bundled license](src/AccessRelayStudio.Mcp/Notices/ModelContextProtocol-LICENSE.txt); package source revision `4cbf42ef107763f0bc75c358af8cb2dfe47a769a`. The console MCP bridge also uses MIT .NET/Microsoft.Extensions libraries; [license](src/AccessRelayStudio.Mcp/Notices/Dotnet-LICENSE.txt). Notices are copied into the published `Mcp/Notices` directory. |

@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Buffers;
 using System.Text.Json;
-using System.Runtime.InteropServices;
 using EliteScriptStudio.Core;
 
 namespace EliteScriptStudio.Vision;
@@ -153,6 +152,18 @@ internal sealed class VisionSession : IDisposable
 
     internal void Start(nint hwnd, VisionSettings settings, bool loadModel = true, IVisionRegionTracker? regionTracker = null, IVisionLivePredictor? predictor = null)
     {
+        bool gpuFrames = predictor is null && loadModel && !string.IsNullOrWhiteSpace(settings.ModelManifestPath)
+            && settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda;
+        Start(() => RemotePlayCapture.Open(hwnd, gpuFrames), "Starting window capture…", settings, loadModel, regionTracker, predictor);
+    }
+
+    internal void StartDirect(IDecodedVideoTrack track, VisionSettings settings, bool loadModel = true,
+        IVisionRegionTracker? regionTracker = null, IVisionLivePredictor? predictor = null) =>
+        Start(() => new DecodedStreamCapture(track), "Waiting for Xbox video…", settings, loadModel, regionTracker, predictor);
+
+    private void Start(Func<IVisionFrameSource> openSource, string startingMessage, VisionSettings settings, bool loadModel,
+        IVisionRegionTracker? regionTracker, IVisionLivePredictor? predictor)
+    {
         settings.Validate();
         lock (_gate)
         {
@@ -169,7 +180,8 @@ internal sealed class VisionSession : IDisposable
             _activeSettings = settings;
             Volatile.Write(ref _tracking, null);
             _runtime.InvalidateVisionSession("Preparing capture and model.");
-            _status = new(true, false, false, "Starting window capture…", 0, 0, 0, 0, 0);
+            _telemetryReader = null;
+            _status = new(true, false, false, startingMessage, 0, 0, 0, 0, 0);
             _metricCount = _metricIndex = 0;
             _attemptBeganAt = 0; _attemptNeedsNeutral = false;
             _lockMeasurementToken = _runtime.BeginLockMeasurements();
@@ -181,7 +193,7 @@ internal sealed class VisionSession : IDisposable
             _modelHash = null; _lastModelEvents = [];
             _preview?.Dispose(); _preview = null;
             _regionTracker = regionTracker;
-            _worker = new Thread(() => Run(hwnd, settings, cancellation, loadModel, regionTracker, predictor))
+            _worker = new Thread(() => Run(openSource, settings, cancellation, loadModel, regionTracker, predictor))
                 { IsBackground = true, Name = "AccessRelay vision" };
             try { _worker.Start(); }
             catch
@@ -193,7 +205,7 @@ internal sealed class VisionSession : IDisposable
         }
     }
 
-    private void Run(nint hwnd, VisionSettings settings, CancellationToken cancellation, bool loadModel, IVisionRegionTracker? regionTracker, IVisionLivePredictor? predictor)
+    private void Run(Func<IVisionFrameSource> openSource, VisionSettings settings, CancellationToken cancellation, bool loadModel, IVisionRegionTracker? regionTracker, IVisionLivePredictor? predictor)
     {
         VisionModel? model = null;
         // Capture-only automatic sessions retain the full scene. Analysis samples independently;
@@ -201,24 +213,24 @@ internal sealed class VisionSession : IDisposable
         VisionAcquisitionWorker? acquisition = predictor is null && !loadModel && regionTracker is not null
             && settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? new(regionTracker, cancellation) : null;
         bool modelLoadFailed = false;
+        Task telemetryWorker = Task.CompletedTask;
         using var telemetryStop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         try
         {
-            using var capture = new RemotePlayCapture();
-            bool gpuFrames = predictor is null && loadModel && !string.IsNullOrWhiteSpace(settings.ModelManifestPath)
-                && settings.PreprocessingBackend == VisionPreprocessingBackend.D3D11Cuda;
-            nint adapter = gpuFrames ? CudaD3D11Interop.FindAdapter() : 0;
-            try { capture.Start(hwnd, gpuFrames, adapter); }
-            finally { if (adapter != 0) Marshal.Release(adapter); }
-            _telemetryReader = new();
-            _ = _telemetryReader.RunAsync(this, _runtime, settings.StreamTelemetry, telemetryStop.Token);
+            using var capture = openSource();
+            var window = capture as RemotePlayCapture;
+            if (window is not null)
+            {
+                _telemetryReader = new();
+                telemetryWorker = _telemetryReader.RunAsync(this, _runtime, settings.StreamTelemetry, telemetryStop.Token);
+            }
             string modelMessage = predictor?.Status ?? "Capture only. Select a validated animation model to enable assistance.";
             if (predictor is null && loadModel && !string.IsNullOrWhiteSpace(settings.ModelManifestPath))
             {
                 try
                 {
                     model = VisionModel.Load(settings.ModelManifestPath, settings, cancellation,
-                        (manifest, configuration) => new CudaTemporalFrameInput(manifest, configuration, capture.GraphicsDevice,
+                        window is null ? null : (manifest, configuration) => new CudaTemporalFrameInput(manifest, configuration, window.GraphicsDevice,
                             capture.Status.Width, capture.Status.Height));
                     lock (_gate) { _model = model; _modelHash = model.ManifestHash; }
                     modelMessage = model.ValidationSummary;
@@ -467,6 +479,7 @@ internal sealed class VisionSession : IDisposable
         finally
         {
             telemetryStop.Cancel();
+            telemetryWorker.GetAwaiter().GetResult();
             QueueAttemptDiagnostics(Stopwatch.GetTimestamp(), "Observation ended.");
             StopDiagnosticRecording();
             lock (_gate) _stopping = true;
@@ -580,7 +593,8 @@ internal sealed class VisionSession : IDisposable
                 assembly = predictor.GetType().Assembly.GetName().Name,
                 version = predictor.GetType().Assembly.GetName().Version?.ToString(), predictor.CanArm, predictor.Status, predictor.Action } : null,
             settings = _activeSettings, lastAction = _runtime.LastVisionAction, lastAttempt = _runtime.LastVisionAttempt, streamTelemetry = _runtime.VisionStreamTelemetry, outputStatus = _runtime.Latest?.OutputStatus,
-            timingScope = "CaptureTicks marks local WGC frame receipt before image copies. CompositorTicks retains unmodified WGC metadata and may lead receipt. Processing and local controller handoff are measured; Xbox render and applied input times are not.",
+            captureTimeBasis = status.CapturePipeline?.CaptureTimeBasis,
+            timingScope = "CaptureTicks marks local source receipt before image copies. Window frames may also have a WGC compositor timestamp. Output handoff is measured locally.",
             gcScope = "Collection counts during a frame correlate with GC activity; they are not measured pause durations. Allocation bytes cover the vision worker thread only.",
             sampleCount = samples.Length, p50Ms = Percentile(.5), p95Ms = Percentile(.95), p99Ms = Percentile(.99),
             maximumMs = samples.LastOrDefault(), status, output = _runtime.VisionStatus, frames = metrics,
@@ -655,7 +669,7 @@ internal sealed class VisionSession : IDisposable
             _diagnosticRecorder?.Dispose();
             _diagnosticRecorder = new(parent, new
             {
-                selection = context, settings = _activeSettings,
+                selection = context, settings = _activeSettings, captureTimeBasis = _status.CapturePipeline?.CaptureTimeBasis,
                 appVersion = System.Reflection.Assembly.GetEntryAssembly()?.GetCustomAttributes(false)
                     .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion,
                 predictor = _livePredictor is { } predictor ? new { predictor.Name,

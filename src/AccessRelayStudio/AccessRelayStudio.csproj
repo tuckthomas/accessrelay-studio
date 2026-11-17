@@ -39,6 +39,8 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.9457" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu.Windows" Version="1.31.1" GeneratePathProperty="true" />
+    <None Update="Assets\XboxPlayer-LICENSE.txt" TargetPath="Notices\XboxPlayer-LICENSE.txt"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Audio\DialogueSeparation\*.md;Audio\DialogueSeparation\*.txt">
       <TargetPath>DialogueSeparation\%(Filename)%(Extension)</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

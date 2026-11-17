@@ -10,7 +10,7 @@ internal interface ICapturedFrameSurface
 }
 
 /// <summary>An exclusive lease over CPU or GPU BGRA8 pixels. GPU CPU-access is lazy and measured.
-/// CaptureTicks marks local WGC frame receipt before image copies, on the PC QPC clock.
+/// CaptureTicks marks local source callback receipt before image copies, on the PC QPC clock.
 /// CompositorTicks preserves WGC's separate presentation metadata; neither is Xbox render time.</summary>
 internal sealed class CapturedVisionFrame : IDisposable
 {

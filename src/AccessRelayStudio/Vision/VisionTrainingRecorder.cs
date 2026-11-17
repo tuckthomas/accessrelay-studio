@@ -259,11 +259,11 @@ internal sealed class VisionTrainingRecorder : IDisposable
             frames = _index, droppedFrames = Interlocked.Read(ref _dropped), complete, completionReason = _message,
             capturePipeline = new { atStart = _capturePipelineAtStart, atLastRecordedFrame = _capturePipelineAtLastFrame,
                 writerQueueDrops = Interlocked.Read(ref _dropped),
-                scope = "WGC deliveries, superseded frames, publication failures and pending-buffer losses are separate from writer-queue drops. Unreported OS/stream frames are not inferred.",
+                scope = "Source deliveries, superseded frames, publication failures and pending-buffer losses are separate from writer-queue drops. Unreported OS/stream frames are not inferred.",
                 stageTimingScope = "Per-frame readback, preparation, writer wait and OS write completion. Physical disk durability and Xbox render time are not measured." },
             labelsRequired = "Target release labels require reviewed practice experiments; physical release and ball departure are not automatically ground truth.",
-            captureTimeBasis = "wgc-local-receipt-qpc-v1",
-            timingScope = "captureTicks marks local WGC frame receipt before image copies. compositorTicks preserves WGC metadata separately and can lead receipt. Original Xbox render time is not measured.",
+            captureTimeBasis = _capturePipelineAtStart?.CaptureTimeBasis ?? CapturePipelineSnapshot.WindowReceipt,
+            timingScope = "captureTicks marks local source receipt before image copies. Window frames may also have a WGC compositor timestamp that leads receipt.",
             captureEvidence = _settings.TrainingCapture.Configured ? new
             {
                 version = _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? 4 : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Anchored ? 3 : _settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.SceneFirst ? 2 : 1,

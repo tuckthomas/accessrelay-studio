@@ -579,7 +579,7 @@ internal sealed class StudioRuntime : IDisposable
             _outputStatus = output.Status;
             if (output.IsAvailable)
             {
-                _input.SetVirtualOutputActive(true);
+                _input.SetVirtualOutputActive(output.UsesVirtualDevice);
                 _output = output;
             }
             else

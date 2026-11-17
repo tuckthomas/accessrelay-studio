@@ -13,13 +13,9 @@ internal sealed record CaptureSource(nint Hwnd, string Title, uint ProcessId)
     public override string ToString() => Title;
 }
 
-internal readonly record struct CaptureStatus(bool IsRunning, string Message, long SourceGeneration,
-    long LatestFrameTicks, long LatestSequence, long ContentChangedTicks, int Width, int Height, long DroppedFrames,
-    CapturePipelineSnapshot? Pipeline = null);
-
 /// <summary>HWND capture with a free-threaded WGC pool and explicitly measured CPU readback.
 /// Consumers must dispose frame leases. This does not measure original console frame age.</summary>
-internal sealed class RemotePlayCapture : IDisposable
+internal sealed class RemotePlayCapture : IVisionFrameSource
 {
     private readonly object _gate = new();
     private readonly LatestFrameBuffer _frames = new();
@@ -77,6 +73,19 @@ internal sealed class RemotePlayCapture : IDisposable
             return true;
         }, 0);
         return sources.OrderBy(source => source.Title, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    internal static RemotePlayCapture Open(nint hwnd, bool gpuFrames)
+    {
+        var capture = new RemotePlayCapture();
+        try
+        {
+            nint adapter = gpuFrames ? CudaD3D11Interop.FindAdapter() : 0;
+            try { capture.Start(hwnd, gpuFrames, adapter); }
+            finally { if (adapter != 0) Marshal.Release(adapter); }
+            return capture;
+        }
+        catch { capture.Dispose(); throw; }
     }
 
     public void Start(nint hwnd, bool gpuFrames = false, nint adapter = 0, bool useSystemUpdateInterval = false)
