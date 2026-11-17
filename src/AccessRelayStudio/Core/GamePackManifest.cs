@@ -117,7 +117,7 @@ public sealed record GamePackManifest
             || Assets.Count(asset => asset.Kind == GamePackAssetKind.CaptureModel) > 8
             || (VisionAdapter == "none" && Assets.Any(asset => asset.Kind is GamePackAssetKind.Model or GamePackAssetKind.VisionManifest or GamePackAssetKind.CaptureModel)))
             throw new InvalidDataException("Game pack exceeds resource limits or supplies models without a vision adapter.");
-        if (Runtime is { } runtime && (runtime.ContractVersion is < 1 or > 3 || !Text(runtime.Factory, 240)
+        if (Runtime is { } runtime && (runtime.ContractVersion is < 1 or > 4 || !Text(runtime.Factory, 240)
             || runtime.Factory.Split('.').Any(part => part.Length == 0 || !part.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
             || !Assets.Any(a => a.Kind == GamePackAssetKind.Runtime && a.Path == runtime.Assembly)
             || !Assets.Any(a => a.Kind == GamePackAssetKind.Ui && a.Path == runtime.UiEntry)

@@ -42,9 +42,23 @@ public sealed record VisionControllerAction
     }
 }
 
+public enum VisionActionOutcome { Completed, Cancelled }
+
 public sealed record VisionActionReceipt(long Id, long SessionGeneration, long ShotToken,
     long StartedTimestamp, long AnchorTimestamp, long CompletedTimestamp,
-    double StrokeDurationMs, double AnchorFraction, string ConfigurationKey, string RunId = "");
+    double StrokeDurationMs, double AnchorFraction, string ConfigurationKey, string RunId = "")
+{
+    public VisionActionOutcome Outcome { get; init; }
+    public string? CancellationReason { get; init; }
+    // Successful local device handoffs, not Xbox input receipt. Zero means unobserved.
+    public long ActualStartedTimestamp { get; init; }
+    public long ActualAnchorTimestamp { get; init; }
+    public double? AnchorLatenessMs { get; init; }
+    public bool EligibleForFeedback { get; init; }
+    public StreamTelemetryAssessment? StreamTelemetry { get; init; }
+    public double CorrectionMs { get; init; }
+    public double TempoCorrectionMs { get; init; }
+}
 
 public readonly record struct VisionSignalContext(ControllerState? Physical, long InputTimestamp,
     long SessionGeneration, long ShotToken, long ShotStartedTimestamp, bool Armed)

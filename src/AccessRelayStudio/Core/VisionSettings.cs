@@ -22,6 +22,7 @@ public sealed record VisionSettings
     public static VisionSettings Default { get; } = new();
     public VisionCrop Crop { get; init; } = new(0, 0, 1, 1);
     public VisionTrainingCaptureSettings TrainingCapture { get; init; } = new();
+    public StreamTelemetrySettings StreamTelemetry { get; init; } = new();
     public string ModelManifestPath { get; init; } = "";
     public string AnimationProfile { get; init; } = "Default";
     public string CameraView { get; init; } = "";
@@ -59,6 +60,8 @@ public sealed record VisionSettings
         Crop.Validate();
         if (TrainingCapture is null) throw new InvalidDataException("Training capture settings are missing.");
         TrainingCapture.Validate();
+        if (StreamTelemetry is null) throw new InvalidDataException("Stream statistics settings are missing.");
+        StreamTelemetry.Validate();
         if (CaptureSourceKey is null || CaptureSourceKey.Length > 128 || CaptureSourceKey.Any(char.IsControl))
             throw new InvalidDataException("The capture source identity is invalid.");
         if (PluginAssistance is { } configuration && (configuration.ValueKind != JsonValueKind.Object || configuration.GetRawText().Length > 65536))

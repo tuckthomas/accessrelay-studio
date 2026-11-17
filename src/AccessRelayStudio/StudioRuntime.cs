@@ -332,6 +332,9 @@ internal sealed class StudioRuntime : IDisposable
     }
 
     public VisionActionReceipt? LastVisionAction { get { lock (_sync) return _vision.LastAction; } }
+    public StreamTelemetryAssessment VisionStreamTelemetry { get { lock (_sync) return _vision.StreamTelemetry(Stopwatch.GetTimestamp()); } }
+    public void ObserveVisionStreamTelemetry(StreamTelemetryReading reading) { lock (_sync) _vision.ObserveStreamTelemetry(reading); }
+    public VisionActionReceipt? LastVisionAttempt { get { lock (_sync) return _vision.LastAttempt; } }
     public VisionControllerAction VisionAction { get { lock (_sync) return _vision.Action; } }
     public long LatestInputTimestamp => Volatile.Read(ref _latestInputSampleTicks);
     public VisionSignalContext ReadVisionSignalContext()
@@ -886,7 +889,7 @@ internal sealed class StudioRuntime : IDisposable
     {
         // This is the sole report-writing path for polling and deadline wakes alike.
         if (_output is null) return false;
-        if (_output.TryWrite(state)) return true;
+        if (_output.TryWrite(state)) { _vision.RecordOutputSubmitted(state, Stopwatch.GetTimestamp()); return true; }
         DisconnectOutput(_output.Status);
         return false;
     }

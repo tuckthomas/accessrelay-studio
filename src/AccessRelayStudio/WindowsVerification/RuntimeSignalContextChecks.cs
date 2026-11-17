@@ -33,31 +33,31 @@ internal static class RuntimeSignalContextChecks
             "A new physical press reused the previous transition timestamp.");
 
         // Verify live auto-OCR feedback parsing & damped adaptive timing step.
-        var rhythmSlightlyEarly = LiveFeedbackOcr.ParseFeedback([
+        var rhythmSlightlyEarly = ShotFeedbackAnalysis.ParseFeedback([
             new("RHYTHM", .95, new(.42, .02, .10, .03)),
             new("SLIGHTLY EARLY", .92, new(.42, .06, .16, .03)),
             new("OPEN", .90, new(.42, .10, .06, .03))
         ]);
         Check(rhythmSlightlyEarly is { ShotType: "rhythm", Timing: "slightlyEarly", Tempo: "none" }, "RHYTHM slightlyEarly banner parse failed.");
-        var rhythmTempo = LiveFeedbackOcr.ParseFeedback([
+        var rhythmTempo = ShotFeedbackAnalysis.ParseFeedback([
             new("RHYTHM", .95, new(.42, .02, .09, .03)),
             new("EXCELLENT", .95, new(.42, .06, .10, .03)),
             new("FAST", .91, new(.53, .06, .06, .03))
         ]);
         Check(rhythmTempo is { ShotType: "rhythm", Timing: "excellent", Tempo: "fast" }, "RHYTHM excellent + fast banner parse failed.");
-        var timingOnly = LiveFeedbackOcr.ParseFeedback([
+        var timingOnly = ShotFeedbackAnalysis.ParseFeedback([
             new("T1M1NG", .88, new(.42, .02, .09, .03)),
             new("SLIGHTLY LATE", .93, new(.42, .06, .15, .03))
         ]);
         Check(timingOnly is { ShotType: "timing", Timing: "slightlyLate", Tempo: "none" }, "Normalized TIMING slightlyLate parse failed.");
         int streak = 0;
-        var s1 = LiveFeedbackOcr.ComputeAdaptiveStep(3.5, "slightlyEarly", ref streak);
+        var s1 = ShotFeedbackAnalysis.ComputeAdaptiveStep(3.5, "slightlyEarly", ref streak);
         Check(s1.NextCorrectionMs == 5.0 && streak == 1, $"First slightlyEarly step unexpected: {s1}");
-        var s2 = LiveFeedbackOcr.ComputeAdaptiveStep(s1.NextCorrectionMs, "slightlyEarly", ref streak);
+        var s2 = ShotFeedbackAnalysis.ComputeAdaptiveStep(s1.NextCorrectionMs, "slightlyEarly", ref streak);
         Check(s2.NextCorrectionMs == 7.5 && streak == 2, $"Repeated slightlyEarly step unexpected: {s2}");
-        var s3 = LiveFeedbackOcr.ComputeAdaptiveStep(s2.NextCorrectionMs, "excellent", ref streak);
+        var s3 = ShotFeedbackAnalysis.ComputeAdaptiveStep(s2.NextCorrectionMs, "excellent", ref streak);
         Check(s3.NextCorrectionMs == 7.5 && streak == 0, $"Excellent changed correction: {s3}");
-        var distanceBanner = LiveFeedbackOcr.ParseFeedback([
+        var distanceBanner = ShotFeedbackAnalysis.ParseFeedback([
             new("RHYTHM", .95, new(.42, .02, .09, .03)),
             new("DISTANCE", .93, new(.42, .05, .10, .03)),
             new("25'6", .91, new(.53, .05, .06, .03)),
@@ -68,30 +68,30 @@ internal static class RuntimeSignalContextChecks
         Check(distanceBanner is { ShotType: "rhythm", Timing: "late", Tempo: "fast", Distance: "25'6", Coverage: "Open" }
             && distanceBanner.RawText.Contains("25'6", StringComparison.Ordinal), "Distance/coverage OCR extraction altered feet-inches or failed.");
         int tStreak = 0, tempoStreak = 0, excStreak = 0;
-        var fastLate = LiveFeedbackOcr.ComputeAdaptiveFeedback(-10, 0,
+        var fastLate = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(-10, 0,
             new(1, "run", "rhythm", "late", "fast", "RHYTHM | FAST | LATE", 1, 1, "25'6", "Open"),
             strokeClamped: false, ref tStreak, ref tempoStreak, ref excStreak);
         Check(fastLate.Timing.NextCorrectionMs == -12.5 && fastLate.Tempo.NextCorrectionMs == 4.0,
             $"Combined FAST + LATE step unexpected: {fastLate}");
         int clampedT = 0, clampedTempo = 0, clampedExc = 0;
-        var clampedEarly = LiveFeedbackOcr.ComputeAdaptiveFeedback(-3.5, 0,
+        var clampedEarly = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(-3.5, 0,
             new(2, "run", "rhythm", "early", "fast", "RHYTHM | FAST | EARLY", 1, 1, "25'6", "Open"),
             strokeClamped: true, ref clampedT, ref clampedTempo, ref clampedExc);
         Check(clampedEarly.TimingClampedSkipped && clampedEarly.Timing.NextCorrectionMs == -3.5 && clampedEarly.Tempo.NextCorrectionMs == 4.0,
             $"Clamped EARLY did not guard timing correction: {clampedEarly}");
         int hTiming = 0, hTempo = 0, hExc = 2;
-        var heldMiss = LiveFeedbackOcr.ComputeAdaptiveFeedback(-3.5, 4,
+        var heldMiss = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(-3.5, 4,
             new(3, "run", "rhythm", "early", "none", "RHYTHM | EARLY", 1, 1, "25'6"),
             strokeClamped: false, ref hTiming, ref hTempo, ref hExc);
         Check(heldMiss.Timing.NextCorrectionMs == -3.5 && hExc == 2 && hTiming == 1,
             $"Single miss after 2 Excellents did not hold correction: {heldMiss}");
-        var confirmedMiss = LiveFeedbackOcr.ComputeAdaptiveFeedback(-3.5, 4,
+        var confirmedMiss = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(-3.5, 4,
             new(4, "run", "rhythm", "early", "none", "RHYTHM | EARLY", 1, 1, "25'6"),
             strokeClamped: false, ref hTiming, ref hTempo, ref hExc);
         Check(confirmedMiss.Timing.NextCorrectionMs == 0.5 && hExc == 0 && hTiming == 2,
             $"Confirmed consecutive miss after Excellent streak failed to adjust: {confirmedMiss}");
-        Check(LiveFeedbackOcr.BuildBannerSearchCrop(new(.41, .004, .197, .111)).Height >= .36, "Banner search crop too short for OCR detector threshold.");
-        Check(LiveFeedbackOcr.SelectSearchCrop(3, new(.3, 0, .4, .36)).Top == .24, "Above-player middle band missing from OCR search rotation.");
+        Check(ShotFeedbackAnalysis.BuildBannerSearchCrop(new(.41, .004, .197, .111)).Height >= .36, "Banner search crop too short for OCR detector threshold.");
+        Check(ShotFeedbackAnalysis.SelectSearchCrop(3, new(.3, 0, .4, .36)).Top == .24, "Above-player middle band missing from OCR search rotation.");
 
         Console.WriteLine("SUCCESS Runtime signal context: coherent polling snapshots, live auto-OCR feedback parsing/adaptation, and neutral/repress transitions.");
     }

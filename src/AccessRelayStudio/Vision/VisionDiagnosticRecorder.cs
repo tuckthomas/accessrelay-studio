@@ -25,6 +25,8 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
         VisionStatusSnapshot Output, VisionActionReceipt? LastAction, bool SourceFresh,
         bool PredictionSubmitted, bool PredictionAccepted, CapturePipelineSnapshot? CapturePipeline)
     {
+        public VisionActionReceipt? LastAttempt { get; init; }
+        public StreamTelemetryAssessment? StreamTelemetry { get; init; }
         public string? File { get; set; }
         public string ImageStatus { get; set; } = "pending";
         public double CopyMs { get; set; }
@@ -102,7 +104,7 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
     internal void Capture(CapturedVisionFrame frame, long completedTicks, double processingMs,
         VisionSignalObservation? signal, VisionSignalContext? physical, ControllerState? requested,
         VisionStatusSnapshot output, VisionActionReceipt? receipt, bool fresh, bool submitted, bool accepted,
-        CapturePipelineSnapshot? pipeline)
+        CapturePipelineSnapshot? pipeline, VisionActionReceipt? attempt = null, StreamTelemetryAssessment? streamTelemetry = null)
     {
         lock (_gate)
         {
@@ -110,7 +112,7 @@ internal sealed class VisionDiagnosticRecorder : IDisposable
             if (_duration is not null && _frames.Count >= MaximumFrames) { Stop("The diagnostic frame limit was reached."); return; }
             var entry = new FrameEntry(frame.Sequence, frame.CaptureTicks, frame.CompositorTicks, frame.SourceGeneration,
                 frame.Width, frame.Height, frame.Stride, completedTicks, processingMs, signal, physical,
-                requested, output, receipt, fresh, submitted, accepted, pipeline);
+                requested, output, receipt, fresh, submitted, accepted, pipeline) { LastAttempt = attempt, StreamTelemetry = streamTelemetry };
             _frames.Add(entry);
             if (!_slots.Wait(0)) { entry.ImageStatus = "writerQueueFull"; _dropped++; return; }
             byte[]? pixels = null;

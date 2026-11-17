@@ -1,5 +1,56 @@
 # Gameplay diagnostic recordings
 
+## Auto-green reliability branch (runtime contract 4)
+
+Shot receipts now distinguish `completed` from `cancelled`. `lastAction` retains the
+last completed action for compatibility; `lastAttempt` is authoritative for feedback.
+Receipts include successful local output submission timestamps, anchor lateness,
+feedback eligibility, applied timing/tempo corrections, and stream-health evidence.
+These timestamps measure Studio's device handoff, not receipt by the console.
+A forecast must leave time for the full calibrated stroke. Its start is never moved
+to now while retaining an already missed anchor.
+
+A pre-stroke paddle cancellation keeps down held until physical release or the
+configured maximum-shot watchdog. Stop, disarm, disconnect and conflicting automation
+still neutralize output. Mid-stroke cancellation never reverses the stick back down.
+Cancelled attempts remain visible in diagnostics and post-release OCR, but cannot
+calibrate or tune timing. Older completed actions cannot supply their feedback.
+
+Xbox statistics monitoring uses the selected window's existing capture, a configurable
+normalized overlay region, and Windows' built-in OCR on a background task. It requests
+at most one crop every 750 ms and requires all four labelled readings: ping/latency,
+jitter, decode time and FPS. Packet loss is optional. Incomplete, conflicting or stale
+readings are unavailable, never zero. No additional hardware or game OCR weights are
+required; Windows must have an OCR language installed. Enable the Xbox overlay and
+adjust **Advanced settings → Statistics region** to include its labels and values.
+Monitoring can be disabled explicitly for sources without an overlay.
+
+Per-frame diagnostics and each attempt retain the latest assessment. Readings older
+than three seconds pause automatic learning. Jitter plus deviations of displayed
+latency/decode time from a rolling median add forecast uncertainty. Reported loss,
+excessive decode delay, frame-rate drops or variation beyond the configured timing
+budget mark the stream unstable. Already anchored completion can finish; instability
+cannot initiate a new stroke. Sampling cannot detect every short spike between reads.
+Displayed ping/latency is never subtracted from the release deadline or assumed to be
+controller-to-screen delay. The existing calibrated compensation is retained.
+
+Automatic learning needs locally validated completion, consistent OCR over two distinct
+frames, fresh stable stream evidence, and two reliable shots in the same profile,
+five-foot distance band and coverage class. Unreadable context pauses learning.
+Each run retains its first qualifying context; other contexts are diagnostic only,
+so alternating distances/coverage cannot adjust the shared correction. Use separate
+saved profiles for those contexts. A tempo adjustment disarms assistance and requires
+fresh practice evidence for the changed effective stroke duration.
+
+Microsoft documents `XGameStreamingGetStreamAddedLatency` for the streaming game's
+own connected client IDs. It does not document a supported external API for Studio
+to query another process's Xbox PC Remote Play overlay. See the
+[API reference](https://learn.microsoft.com/en-us/gaming/gdk/docs/reference/system/xgamestreaming/functions/xgamestreaminggetstreamaddedlatency).
+This branch therefore reads the displayed measurements instead of depending on private
+Xbox app endpoints. The parser and health window accept source-labelled readings so
+a documented provider can be added later.
+
+
 Studio beta.37 / NBA plugin 1.2.6 repair the failures reproduced from the retained
 November 14 recordings: green feedback-box false acquisition, cap-fragment scale
 collapse, and a fill scan whose measurable maximum did not match its timing target.

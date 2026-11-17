@@ -75,12 +75,18 @@ internal sealed class VisionSession : IDisposable
     private bool _attemptNeedsNeutral;
     private static int _attemptWritePending;
     private static long _attemptReportNumber;
-    private (VisionCrop Crop, TaskCompletionSource<CapturedCropFrame?> Completion)? _cropRequest;
+    private readonly List<(VisionCrop Crop, TaskCompletionSource<CapturedCropFrame?> Completion)> _cropRequests = [];
+    private XboxStreamTelemetryReader? _telemetryReader;
+    internal string StreamTelemetryReaderStatus => _telemetryReader?.Status ?? "Stream statistics reader has not started.";
     private bool _disposed;
     private readonly record struct FrameMetric(long Sequence, long CaptureTicks, long CompletedTicks,
         double ProcessingMs, bool PredictionSubmitted, bool PredictionAccepted, VisionStatusSnapshot Output,
         long AllocatedBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections, long? CompositorTicks,
-        VisionSignalObservation? Signal, VisionSignalContext? PhysicalContext, ControllerState? RequestedOutput, bool SourceFresh);
+        VisionSignalObservation? Signal, VisionSignalContext? PhysicalContext, ControllerState? RequestedOutput, bool SourceFresh)
+    {
+        public VisionActionReceipt? LastAttempt { get; init; }
+        public StreamTelemetryAssessment? StreamTelemetry { get; init; }
+    }
 
     internal VisionSession(StudioRuntime runtime) => _runtime = runtime;
     internal VisionSessionStatus Status { get { lock (_gate) return _status; } }
@@ -137,8 +143,9 @@ internal sealed class VisionSession : IDisposable
         lock (_gate)
         {
             if (_disposed || _stopping || _worker?.IsAlive != true) return null;
-            _cropRequest?.Completion.TrySetResult(null);
-            _cropRequest = (crop, tcs);
+            _cropRequests.RemoveAll(r => r.Completion.Task.IsCompleted);
+            if (_cropRequests.Count >= 8) return null;
+            _cropRequests.Add((crop, tcs));
         }
         using var registration = cancellation.Register(() => tcs.TrySetCanceled(cancellation));
         return await tcs.Task.ConfigureAwait(false);
@@ -194,6 +201,7 @@ internal sealed class VisionSession : IDisposable
         VisionAcquisitionWorker? acquisition = predictor is null && !loadModel && regionTracker is not null
             && settings.TrainingCapture.EvidenceMode == VisionEvidenceMode.Automatic ? new(regionTracker, cancellation) : null;
         bool modelLoadFailed = false;
+        using var telemetryStop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         try
         {
             using var capture = new RemotePlayCapture();
@@ -202,6 +210,8 @@ internal sealed class VisionSession : IDisposable
             nint adapter = gpuFrames ? CudaD3D11Interop.FindAdapter() : 0;
             try { capture.Start(hwnd, gpuFrames, adapter); }
             finally { if (adapter != 0) Marshal.Release(adapter); }
+            _telemetryReader = new();
+            _ = _telemetryReader.RunAsync(this, _runtime, settings.StreamTelemetry, telemetryStop.Token);
             string modelMessage = predictor?.Status ?? "Capture only. Select a validated animation model to enable assistance.";
             if (predictor is null && loadModel && !string.IsNullOrWhiteSpace(settings.ModelManifestPath))
             {
@@ -372,22 +382,23 @@ internal sealed class VisionSession : IDisposable
                         lock (_gate) diagnostic = _diagnosticRecorder;
                         diagnostic?.Capture(frame, completed, processingMs, predictor is null ? null : _signal,
                             signalContext, _runtime.Latest?.Output, _runtime.VisionStatus, _runtime.LastVisionAction,
-                            fresh, submitted, accepted, source.Pipeline);
+                            fresh, submitted, accepted, source.Pipeline, _runtime.LastVisionAttempt, _runtime.VisionStreamTelemetry);
                         double? preprocessingMs = null, inferenceMs = null;
                         model?.Diagnostics.FrameTimings(frame.Sequence, out preprocessingMs, out inferenceMs);
                         if (predictor is not null) { preprocessingMs = _signal?.ProcessingMs; inferenceMs = 0; }
                         frames++;
                         bool buildPreview;
-                        (VisionCrop Crop, TaskCompletionSource<CapturedCropFrame?> Completion)? cropRequest;
+                        (VisionCrop Crop, TaskCompletionSource<CapturedCropFrame?> Completion)[] cropRequests;
                         lock (_gate)
                         {
                             buildPreview = acquisition is null && _previewEnabled && !cancellation.IsCancellationRequested &&
                                 Stopwatch.GetElapsedTime(previewAt, completed).TotalMilliseconds >= 200;
-                            cropRequest = _cropRequest;
-                            _cropRequest = null;
+                            cropRequests = _cropRequests.ToArray();
+                            _cropRequests.Clear();
                         }
-                        if (cropRequest is { } pendingCrop)
-                            pendingCrop.Completion.TrySetResult(SliceCrop(frame, pendingCrop.Crop));
+                        foreach (var pendingCrop in cropRequests)
+                            if (!pendingCrop.Completion.Task.IsCompleted)
+                                pendingCrop.Completion.TrySetResult(SliceCrop(frame, pendingCrop.Crop));
                         if (buildPreview)
                         {
                             // GPU readback can wait on the driver. Never hold the
@@ -409,7 +420,8 @@ internal sealed class VisionSession : IDisposable
                             _metrics[_metricIndex] = new(frame.Sequence, frame.CaptureTicks, completed, processingMs,
                                 submitted, accepted, _runtime.VisionStatus, GC.GetAllocatedBytesForCurrentThread() - allocatedAtStart,
                                 GC.CollectionCount(0) - gen0, GC.CollectionCount(1) - gen1, GC.CollectionCount(2) - gen2, frame.CompositorTicks,
-                                predictor is null ? null : _signal, signalContext, _runtime.Latest?.Output, fresh);
+                                predictor is null ? null : _signal, signalContext, _runtime.Latest?.Output, fresh)
+                                { LastAttempt = _runtime.LastVisionAttempt, StreamTelemetry = _runtime.VisionStreamTelemetry };
                             _metricIndex = (_metricIndex + 1) % _metrics.Length;
                             _metricCount = Math.Min(_metricCount + 1, _metrics.Length);
                             _performanceReplacedFrames = Math.Max(0, source.DroppedFrames - _performanceDropBaseline);
@@ -454,6 +466,7 @@ internal sealed class VisionSession : IDisposable
         }
         finally
         {
+            telemetryStop.Cancel();
             QueueAttemptDiagnostics(Stopwatch.GetTimestamp(), "Observation ended.");
             StopDiagnosticRecording();
             lock (_gate) _stopping = true;
@@ -468,8 +481,8 @@ internal sealed class VisionSession : IDisposable
             }
             lock (_gate)
             {
-                _cropRequest?.Completion.TrySetResult(null);
-                _cropRequest = null;
+                foreach (var pendingCrop in _cropRequests) pendingCrop.Completion.TrySetResult(null);
+                _cropRequests.Clear();
                 if (model is not null) _lastModelEvents = model.Diagnostics.ExportEvents();
                 _model = null;
                 _status = _status with { Running = false, CanArm = false, CaptureFailed = !cancellation.IsCancellationRequested && _status.CaptureFailed,
@@ -566,7 +579,7 @@ internal sealed class VisionSession : IDisposable
             predictor = _livePredictor is { } predictor ? new { predictor.Name,
                 assembly = predictor.GetType().Assembly.GetName().Name,
                 version = predictor.GetType().Assembly.GetName().Version?.ToString(), predictor.CanArm, predictor.Status, predictor.Action } : null,
-            settings = _activeSettings, lastAction = _runtime.LastVisionAction, outputStatus = _runtime.Latest?.OutputStatus,
+            settings = _activeSettings, lastAction = _runtime.LastVisionAction, lastAttempt = _runtime.LastVisionAttempt, streamTelemetry = _runtime.VisionStreamTelemetry, outputStatus = _runtime.Latest?.OutputStatus,
             timingScope = "CaptureTicks marks local WGC frame receipt before image copies. CompositorTicks retains unmodified WGC metadata and may lead receipt. Processing and local controller handoff are measured; Xbox render and applied input times are not.",
             gcScope = "Collection counts during a frame correlate with GC activity; they are not measured pause durations. Allocation bytes cover the vision worker thread only.",
             sampleCount = samples.Length, p50Ms = Percentile(.5), p95Ms = Percentile(.95), p99Ms = Percentile(.99),

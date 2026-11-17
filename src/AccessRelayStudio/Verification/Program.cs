@@ -12,7 +12,9 @@ if (args is ["--controller-trainer"]) { ControllerTrainerVerification.Run(); ret
 if (args is ["--controller-trainer-profile", var trainerProfile]) { ControllerTrainerVerification.VerifySavedProfile(trainerProfile); return; }
 if (args is ["--controller-trainer-fixture", var trainerRoot, var trainerManifest]) { ControllerTrainerVerification.WriteFixture(trainerRoot, trainerManifest); return; }
 
-if (args is ["--vision-only"]) { VisionVerification.Run(); Console.WriteLine("SUCCESS Vision output verification."); return; }
+if (args is ["--auto-green"]) { AutoGreenReliabilityVerification.Run(); return; }
+
+if (args is ["--vision-only"]) { VisionVerification.Run(); AutoGreenReliabilityVerification.Run(); Console.WriteLine("SUCCESS Vision output verification."); return; }
 if (args is ["--committed-stroke-replay", var attempts, var replayOutput]) { CommittedStrokeReplayVerification.Run(attempts, replayOutput); return; }
 
 if (args.Length is 1 or 2 && args[0] == "--lua-conversion")
@@ -52,6 +54,7 @@ var tests = new (string Name, Action Run)[]
     ("Elapsed-time stick smoothing, independent axes, neutralization and persistence", StickSmoothingVerification.Run),
     ("Sticky button edges, resets, manual composition and legacy profile compatibility", StickyButtonVerification.Run),
     ("Vision deadlines, manual cancellation, release latch, generations, freshness and ownership", VisionVerification.Run),
+    ("Auto-green timing, OCR banner association, cancellation and stream-health evidence", AutoGreenReliabilityVerification.Run),
     ("Lua timing, live input, state, cancellation, budgets and profile compatibility", LuaVerification.Run),
     ("Legacy bindings and manual passthrough", Defaults),
     ("Preview and runtime agree for all five variants", AllTrajectories),

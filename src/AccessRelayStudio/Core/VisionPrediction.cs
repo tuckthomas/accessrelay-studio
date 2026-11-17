@@ -14,4 +14,8 @@ internal enum VisionRunState { Disabled, Observing, Ready, TrackingShot, Release
 internal readonly record struct VisionStatusSnapshot(VisionRunState State, bool Armed, bool SourceReady,
     string Message, long SessionGeneration, long ShotToken, long ShotStartedTimestamp, bool ShootHeld,
     long? ReleaseDeadlineTimestamp, double LastConfidence, double LastUncertaintyMs,
-    long AcceptedPredictions, long RejectedPredictions, long AutomatedReleases, long MissedDeadlines);
+    long AcceptedPredictions, long RejectedPredictions, long AutomatedReleases, long MissedDeadlines)
+{
+    public long CancelledAttempts { get; init; }
+    public bool HoldingCancelledPaddleShot { get; init; }
+}

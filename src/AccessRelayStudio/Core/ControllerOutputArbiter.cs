@@ -5,6 +5,7 @@ namespace EliteScriptStudio.Core;
 internal sealed class ControllerOutputArbiter
 {
     private readonly long _frequency;
+    private readonly StreamTelemetryWindow _telemetry;
     private VisionSettings _settings = VisionSettings.Default;
     private long _generation = 1, _shot, _nextShot, _shotStarted, _lastFrame = -1;
     private long? _deadline;
@@ -15,24 +16,31 @@ internal sealed class ControllerOutputArbiter
     private ControllerState _composed;
     private string _message = "Vision is off.";
     private double _confidence, _uncertainty;
-    private long _accepted, _rejected, _releases, _missed;
+    private long _accepted, _rejected, _releases, _missed, _cancelled;
+    private long _actualStrokeStart, _actualAnchor;
+    private bool _cancelledPaddleHold;
     private VisionControllerAction _action = new();
     private long _holdStarted, _strokeStart, _strokeAnchor, _upStarted, _receiptId;
     private bool _strokeStarted, _ownsRightStick, _axisLatched, _physicalNeutral;
     private short _rightY;
     private readonly string _runId = Guid.NewGuid().ToString("N");
     public VisionActionReceipt? LastAction { get; private set; }
+    public VisionActionReceipt? LastAttempt { get; private set; }
     public VisionControllerAction Action => _action;
     public long HoldStartedTimestamp => _held ? _holdStarted : 0;
     public long StrokeAnchorTimestamp => _strokeStarted ? _strokeAnchor : 0;
-    public void ClearActionReceipt() => LastAction = null;
+    public void ClearActionReceipt() { LastAction = LastAttempt = null; }
 
     public ControllerOutputArbiter(long timestampFrequency)
     {
         if (timestampFrequency <= 0) throw new ArgumentOutOfRangeException(nameof(timestampFrequency));
         _frequency = timestampFrequency;
+        _telemetry = new(timestampFrequency);
     }
 
+    public void ObserveStreamTelemetry(StreamTelemetryReading reading) => _telemetry.Add(reading);
+    public StreamTelemetryAssessment StreamTelemetry(long now) => _telemetry.Assess(_shotStarted > 0 ? _shotStarted : now, now,
+        _settings.MaximumUncertaintyMs, _settings.StreamTelemetry.Enabled);
     public VisionSettings Settings => _settings;
     private double EffectiveStrokeDurationMs => Math.Clamp(_action.StrokeDurationMs + _settings.TempoCorrectionMs, 8, 500);
     public long? DeadlineTimestamp => _deadline;
@@ -45,12 +53,13 @@ internal sealed class ControllerOutputArbiter
         }
     }
     public VisionStatusSnapshot Status => new(State, _armed, _sourceReady, _message, _generation,
-        _shot, _shotStarted, _held, _deadline, _confidence, _uncertainty, _accepted, _rejected, _releases, _missed);
+        _shot, _shotStarted, _held, _deadline, _confidence, _uncertainty, _accepted, _rejected, _releases, _missed)
+        { CancelledAttempts = _cancelled, HoldingCancelledPaddleShot = _cancelledPaddleHold };
 
     private VisionRunState State => _latched != 0 || _axisLatched ? VisionRunState.ReleasedLatched
         : !_sourceReady ? (_armed ? VisionRunState.Suspended : VisionRunState.Disabled)
         : !_armed ? VisionRunState.Observing
-        : !_eligible ? VisionRunState.Suspended
+        : !_eligible || _cancelledPaddleHold ? VisionRunState.Suspended
         : _deadline.HasValue ? VisionRunState.ReleaseScheduled
         : _shot != 0 ? VisionRunState.TrackingShot : VisionRunState.Ready;
 
@@ -58,14 +67,15 @@ internal sealed class ControllerOutputArbiter
     {
         settings.Validate();
         (action ?? new()).Validate();
+        Invalidate("Vision configuration changed. Validate the source and model again.", sourceLost: true, disarm: true);
         _action = action ?? new();
         _settings = settings;
-        Invalidate("Vision configuration changed. Validate the source and model again.", sourceLost: true, disarm: true);
+        _telemetry.Reset();
     }
 
     public bool TryAdjustTiming(Func<VisionSettings, VisionSettings> update, VisionControllerAction? action = null)
     {
-        if (_shot != 0 || _strokeStarted || _deadline.HasValue) return false;
+        if (_shot != 0 || _strokeStarted || _deadline.HasValue || _cancelledPaddleHold || _held) return false;
         var nextSettings = update(_settings);
         nextSettings.Validate();
         if (action is not null) action.Validate();
@@ -116,6 +126,8 @@ internal sealed class ControllerOutputArbiter
 
     public void Invalidate(string reason, bool sourceLost = false, bool disarm = false)
     {
+        if (_shot != 0) RecordCancelled(reason, _lastSampleAt);
+        _cancelledPaddleHold = false;
         _generation++;
         _shot = _shotStarted = 0;
         _deadline = null;
@@ -161,13 +173,22 @@ internal sealed class ControllerOutputArbiter
         {
             if (_shot != 0 || _deadline.HasValue) CancelAttempt(usingPaddle
                 ? "Paddle release cancelled the pending action."
-                : "Physical release cancelled the pending action.");
+                : "Physical release cancelled the pending action.", now);
+            _cancelledPaddleHold = false;
             _ownsRightStick = false;
             if (_action.Kind != VisionActionKind.RightStickStroke || _physicalNeutral) _needsPhysicalRelease = false;
             _holdStarted = 0;
             if (_armed && _sourceReady) _message = usingPaddle
                 ? "Armed. Hold the selected paddle while keeping the right stick centered."
                 : "Armed. Waiting for a fresh physical press.";
+            return Output;
+        }
+        if (_cancelledPaddleHold)
+        {
+            // Tracking failure must not manufacture a release while the user still holds the paddle.
+            // Explicit Stop/disconnect still neutralizes immediately; this watchdog is bounded.
+            if (Milliseconds((double)now - _holdStarted) > _settings.MaximumShotDurationMs)
+            { _cancelledPaddleHold = _ownsRightStick = false; _axisLatched = true; _message = "Cancelled paddle hold timed out. Release the paddle."; }
             return Output;
         }
         bool readyForTrigger = _armed && _sourceReady && !_needsPhysicalRelease && !_axisLatched && _latched == 0;
@@ -183,11 +204,12 @@ internal sealed class ControllerOutputArbiter
             _shot = ++_nextShot;
             _shotStarted = _action.HoldQualificationMs > 0 || _action.Kind == VisionActionKind.RightStickStroke ? _holdStarted : now;
             _deadline = null;
+            _actualStrokeStart = _actualAnchor = 0;
             _lastFrame = -1;
             _message = "Tracking the current physical shot.";
         }
         if (_shot != 0 && Milliseconds((double)now - _shotStarted) > _settings.MaximumShotDurationMs)
-            CancelAttempt("Shot expired. Release the shoot button before another attempt.");
+            CancelAttempt("Shot expired. Release the shoot button before another attempt.", now);
         TryAdvanceDeadline(now);
         return Output;
     }
@@ -209,6 +231,15 @@ internal sealed class ControllerOutputArbiter
         _confidence = prediction.Confidence;
         _uncertainty = prediction.UncertaintyMs;
         double age = Milliseconds((double)now - prediction.CaptureTimestamp);
+        var telemetry = StreamTelemetry(now);
+        // Observed stream variation adds uncertainty. Missing overlay data is explicit
+        // and pauses adaptation, but never masquerades as zero network delay.
+        if (double.IsFinite(prediction.UncertaintyMs) && prediction.UncertaintyMs >= 0)
+            prediction = prediction with { UncertaintyMs = Math.Sqrt(prediction.UncertaintyMs * prediction.UncertaintyMs
+            + telemetry.AdditionalUncertaintyMs * telemetry.AdditionalUncertaintyMs) };
+        if (telemetry.State == "unstable")
+            prediction = prediction with { UncertaintyMs = Math.Max(prediction.UncertaintyMs, _settings.MaximumUncertaintyMs + 1) };
+        _uncertainty = prediction.UncertaintyMs;
         // Explicit continuation cannot create or move a deadline, or excuse a tracking rejection.
         if (prediction.ContinueCommittedAction)
         {
@@ -220,7 +251,7 @@ internal sealed class ControllerOutputArbiter
                 _message = "Completing the anchored stick stroke; no new timing forecast.";
                 return true;
             }
-            _rejected++; CancelAttempt("Continuation rejected: no anchored stroke or fresh post-anchor frame.");
+            _rejected++; CancelAttempt("Continuation rejected: no anchored stroke or fresh post-anchor frame.", now);
             return false;
         }
         if (prediction.CaptureTimestamp < _shotStarted || prediction.CaptureTimestamp > prediction.CompletedTimestamp
@@ -233,7 +264,7 @@ internal sealed class ControllerOutputArbiter
             || prediction.UncertaintyMs > _settings.MaximumUncertaintyMs)
         {
             _rejected++;
-            CancelAttempt("Prediction rejected: stale frame, uncertain player/animation, or invalid timing.");
+            CancelAttempt("Prediction rejected: stale frame, uncertain player/animation, or invalid timing.", now);
             return false;
         }
         // A started ramp has fixed deadlines. Fresh, valid observations still
@@ -247,7 +278,7 @@ internal sealed class ControllerOutputArbiter
         {
             _missed++;
             _rejected++;
-            CancelAttempt("Prediction arrived after the allowed release deadline.");
+            CancelAttempt("Prediction arrived after the allowed release deadline.", now);
             return false;
         }
         // Settings bound the horizon; double arithmetic avoids long subtraction/addition overflow.
@@ -255,7 +286,7 @@ internal sealed class ControllerOutputArbiter
         if (deadline < 0 || deadline >= long.MaxValue)
         {
             _rejected++;
-            CancelAttempt("Release deadline is outside the monotonic clock range.");
+            CancelAttempt("Release deadline is outside the monotonic clock range.", now);
             return false;
         }
         _deadline = (long)Math.Round(deadline);
@@ -265,9 +296,8 @@ internal sealed class ControllerOutputArbiter
             _strokeAnchor = _deadline.Value;
             double strokeDurationMs = EffectiveStrokeDurationMs;
             _strokeStart = _strokeAnchor - (long)Math.Round(_action.AnchorTimeFraction * strokeDurationMs * _frequency / 1000);
-            if (_strokeStart < now && _strokeAnchor > now) _strokeStart = now;
             if (_strokeAnchor <= now || Milliseconds((double)now - _strokeStart) > _settings.MaximumLatenessMs)
-            { _missed++; _rejected++; CancelAttempt("The complete stick stroke cannot start before its calibrated anchor."); return false; }
+            { _missed++; _rejected++; CancelAttempt("The complete stick stroke cannot start before its calibrated anchor.", now); return false; }
             _deadline = _strokeStart;
             _ownsRightStick = true; _rightY = short.MinValue;
         }
@@ -290,26 +320,61 @@ internal sealed class ControllerOutputArbiter
             || Milliseconds((double)now - _shotStarted) > _settings.MaximumShotDurationMs)
         {
             _missed++;
-            CancelAttempt("Release skipped because scheduling or physical-input freshness exceeded its limit.");
+            CancelAttempt("Release skipped because scheduling or physical-input freshness exceeded its limit.", now);
             return false;
         }
         _latched |= (ushort)_settings.ShootButton;
         _needsPhysicalRelease = true;
         _releases++;
-        LastAction = new(++_receiptId, _generation, _shot, now, deadline, now, 0, 0, _action.ConfigurationKey, _runId);
+        LastAction = LastAttempt = new(++_receiptId, _generation, _shot, now, deadline, now, 0, 0, _action.ConfigurationKey, _runId);
+        LastAction = LastAttempt = LastAction with { CorrectionMs = _settings.CorrectionMs, TempoCorrectionMs = _settings.TempoCorrectionMs, StreamTelemetry = StreamTelemetry(now) };
+        _shot = _shotStarted = 0;
         _message = "Released. Waiting for physical button release before rearming.";
         return true;
     }
 
-    private void CancelAttempt(string message)
+    public void RecordOutputSubmitted(ControllerState submitted, long timestamp)
     {
+        if (_strokeStarted && _ownsRightStick && submitted.RightY == _rightY)
+        {
+            if (_actualStrokeStart == 0) _actualStrokeStart = timestamp;
+            double travel = ((double)submitted.RightY - short.MinValue) / 65535;
+            if (_actualAnchor == 0 && travel + 1d / 65535 >= _action.AnchorFraction) _actualAnchor = timestamp;
+        }
+        else if (_action.Kind == VisionActionKind.ButtonRelease && LastAction is { ActualAnchorTimestamp: 0 } receipt
+            && (submitted.Buttons & (ushort)_settings.ShootButton) == 0 && _latched != 0)
+        {
+            LastAction = LastAttempt = receipt with { ActualStartedTimestamp = timestamp, ActualAnchorTimestamp = timestamp,
+                AnchorLatenessMs = Milliseconds((double)timestamp - receipt.AnchorTimestamp),
+                EligibleForFeedback = Math.Abs(Milliseconds((double)timestamp - receipt.AnchorTimestamp)) <= _settings.MaximumLatenessMs };
+        }
+    }
+
+    private void RecordCancelled(string message, long now)
+    {
+        _cancelled++;
+        LastAttempt = new(++_receiptId, _generation, _shot, _strokeStart > 0 ? _strokeStart : _shotStarted, _strokeAnchor, now,
+            _action.Kind == VisionActionKind.RightStickStroke ? EffectiveStrokeDurationMs : 0,
+            _action.AnchorFraction, _action.ConfigurationKey, _runId)
+        { CorrectionMs = _settings.CorrectionMs, TempoCorrectionMs = _settings.TempoCorrectionMs, Outcome = VisionActionOutcome.Cancelled, CancellationReason = message,
+            ActualStartedTimestamp = _actualStrokeStart, ActualAnchorTimestamp = _actualAnchor, StreamTelemetry = StreamTelemetry(now) };
+    }
+
+    private void CancelAttempt(string message, long now)
+    {
+        if (_shot != 0) RecordCancelled(message, now);
+        bool preserveDown = !_strokeStarted && _armed && _eligible && _held
+            && _action.Kind == VisionActionKind.RightStickStroke && _action.TriggerPaddle != PaddleButtons.None
+            && Milliseconds((double)now - _holdStarted) <= _settings.MaximumShotDurationMs;
         _shot = _shotStarted = 0;
         _deadline = null;
         if (_strokeStarted) _axisLatched = true;
-        _ownsRightStick = _strokeStarted = false;
+        _strokeStarted = false;
+        _cancelledPaddleHold = _ownsRightStick = preserveDown;
+        if (preserveDown) _rightY = short.MinValue;
         _strokeStart = _strokeAnchor = _upStarted = 0;
         _needsPhysicalRelease = true;
-        _message = message;
+        _message = preserveDown ? message + " Holding down until paddle release or timeout." : message;
     }
 
     private double Milliseconds(double ticks) => ticks * 1000.0 / _frequency;
@@ -323,7 +388,7 @@ internal sealed class ControllerOutputArbiter
             // forecasts between 30 fps frames without any new negative observation.
             || (!_strokeStarted && Milliseconds((double)now - _lastCaptureAt) > _settings.MaximumFrameAgeMs)
             || Milliseconds((double)now - deadline) > _settings.MaximumLatenessMs)
-        { _missed++; CancelAttempt("Stick action cancelled: input, capture or scheduler freshness was lost."); return true; }
+        { _missed++; CancelAttempt("Stick action cancelled: input, capture or scheduler freshness was lost.", now); return true; }
         _strokeStarted = true;
         double strokeDurationMs = EffectiveStrokeDurationMs;
         double elapsed = Milliseconds((double)now - _strokeStart);
@@ -331,8 +396,11 @@ internal sealed class ControllerOutputArbiter
         {
             _deadline = null; _ownsRightStick = false; _axisLatched = true;
             _needsPhysicalRelease = true; _releases++;
-            LastAction = new(++_receiptId, _generation, _shot, _strokeStart, _strokeAnchor, now,
-                strokeDurationMs, _action.AnchorFraction, _action.ConfigurationKey, _runId);
+            LastAction = LastAttempt = new(++_receiptId, _generation, _shot, _strokeStart, _strokeAnchor, now,
+                strokeDurationMs, _action.AnchorFraction, _action.ConfigurationKey, _runId)
+            { CorrectionMs = _settings.CorrectionMs, TempoCorrectionMs = _settings.TempoCorrectionMs, StreamTelemetry = StreamTelemetry(now), ActualStartedTimestamp = _actualStrokeStart, ActualAnchorTimestamp = _actualAnchor,
+                AnchorLatenessMs = _actualAnchor > 0 ? Milliseconds((double)_actualAnchor - _strokeAnchor) : null,
+                EligibleForFeedback = _actualAnchor > 0 && Math.Abs(Milliseconds((double)_actualAnchor - _strokeAnchor)) <= _settings.MaximumLatenessMs };
             _strokeStarted = false; _shot = _shotStarted = _upStarted = 0;
             _message = _action.Kind == VisionActionKind.RightStickStroke && _action.TriggerPaddle != PaddleButtons.None
                 ? "Stick stroke completed. Release the paddle before another attempt."
