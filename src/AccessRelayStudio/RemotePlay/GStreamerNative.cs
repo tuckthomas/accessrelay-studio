@@ -8,8 +8,19 @@ namespace EliteScriptStudio.RemotePlay;
 internal static class GStreamerNative
 {
     private const string Gst = "relay:gst", Sdp = "relay:sdp", Web = "relay:webrtc", App = "relay:app", GLib = "relay:glib", Obj = "relay:object";
+    private static string? _windowsBin;
     private static readonly Lazy<bool> Initialized = new(() =>
     {
+        if (OperatingSystem.IsWindows())
+        {
+            string? configured = Environment.GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64");
+            string[] roots = [configured ?? "", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gstreamer", "1.0", "msvc_x86_64"),
+                Path.Combine(Path.GetPathRoot(Environment.SystemDirectory)!, "gstreamer", "1.0", "msvc_x86_64")];
+            _windowsBin = roots.Where(Path.IsPathFullyQualified).Select(root => Path.Combine(root, "bin"))
+                .FirstOrDefault(bin => File.Exists(Path.Combine(bin, "gstreamer-1.0-0.dll"))) ?? throw new DllNotFoundException();
+            // The out-of-process plugin scanner and dynamically loaded codecs also resolve transitive DLLs here.
+            Environment.SetEnvironmentVariable("PATH", _windowsBin + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"));
+        }
         NativeLibrary.SetDllImportResolver(typeof(GStreamerNative).Assembly, Resolve);
         if (gst_init_check(0, 0, out var error) == 0) throw Error(error, "GStreamer could not initialize.");
         gst_version(out uint major, out uint minor, out _, out _);
@@ -28,16 +39,8 @@ internal static class GStreamerNative
             App => "gstapp-1.0", GLib => "glib-2.0", Obj => "gobject-2.0", _ => null };
         if (stem is null) return 0;
         if (!OperatingSystem.IsWindows()) return NativeLibrary.Load("lib" + stem + ".so.0");
-        string name = stem + "-0.dll";
-        string? configured = Environment.GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64");
-        string[] roots = [configured ?? "", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gstreamer", "1.0", "msvc_x86_64"),
-            Path.Combine(Path.GetPathRoot(Environment.SystemDirectory)!, "gstreamer", "1.0", "msvc_x86_64")];
-        foreach (string root in roots.Where(Path.IsPathFullyQualified))
-        {
-            string file = Path.Combine(root, "bin", name);
-            if (File.Exists(file)) return NativeLibrary.Load(file, assembly, DllImportSearchPath.UseDllDirectoryForDependencies | DllImportSearchPath.SafeDirectories);
-        }
-        throw new DllNotFoundException(name);
+        return NativeLibrary.Load(Path.Combine(_windowsBin!, stem + "-0.dll"), assembly,
+            DllImportSearchPath.UseDllDirectoryForDependencies | DllImportSearchPath.SafeDirectories);
     }
 
     internal static Exception Error(nint error, string context)
@@ -74,6 +77,7 @@ internal static class GStreamerNative
     [DllImport(Gst)] internal static extern nint gst_caps_get_structure(nint caps, uint index);
     [DllImport(Gst)] internal static extern int gst_structure_get_int(nint s, string name, out int value);
     [DllImport(Gst)] internal static extern int gst_structure_get_uint(nint s, string name, out uint value);
+    [DllImport(Gst)] internal static extern int gst_structure_get_int64(nint s, string name, out long value);
     [DllImport(Gst)] internal static extern int gst_structure_get_uint64(nint s, string name, out ulong value);
     [DllImport(Gst)] internal static extern int gst_structure_get_double(nint s, string name, out double value);
     [DllImport(Gst)] internal static extern nint gst_structure_get_string(nint s, string name);
