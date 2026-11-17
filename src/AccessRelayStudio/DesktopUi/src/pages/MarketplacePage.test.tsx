@@ -74,3 +74,17 @@ it('requires explicit installation before opening a game add-on and filters ever
   selectValue(screen.getByRole('combobox', { name: 'Add-Ons game' }), 'nba2k27');
   expect(screen.queryByRole('heading', { name: 'Controller config' })).toBeNull();
 });
+
+it('keeps Open NBA 2K27 available and offers Update instead of Install when a newer repo version exists', async () => {
+  const command = vi.fn().mockResolvedValue(null), openGameAddon = vi.fn();
+  render(<MarketplacePage state={{
+    loaded: true,
+    entries: [{ ...entries[1], id: 'nba2k27', name: 'NBA 2K27', kind: 'training-plugin', gameId: 'nba2k27',
+      version: '2.1.1', installed: true, installedVersion: '2.1.0', updateAvailable: true, trainingPluginId: 'nba2k27' }]
+  }} command={command} openGameAddon={openGameAddon} />);
+
+  expect(screen.queryByRole('button', { name: 'Install' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Open NBA 2K27', exact: true })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Update to 2.1.1', exact: true }));
+  await waitFor(() => expect(command).toHaveBeenCalledWith('install', { id: 'nba2k27', version: '2.1.1' }));
+});

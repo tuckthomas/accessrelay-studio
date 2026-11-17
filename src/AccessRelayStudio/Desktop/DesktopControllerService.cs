@@ -55,6 +55,10 @@ internal sealed class DesktopControllerService : IDesktopModule
     internal FeedbackSettings FeedbackSettings => _feedbackSettings;
     internal string ProfileDirectory => _store.DirectoryPath;
     internal bool HasMarketplacePack(string id, string version, string hash) => _packs.Any(pack => pack.Manifest.Id == id && pack.Manifest.Version == version && pack.ManifestSha256.Equals(hash, StringComparison.OrdinalIgnoreCase));
+    internal GamePackDefinition? InstalledMarketplacePack(string id) => _packs
+        .Where(pack => pack.Manifest.Id == id)
+        .OrderByDescending(pack => Version.TryParse(pack.Manifest.Version, out var parsed) ? parsed : new Version())
+        .FirstOrDefault();
     internal async Task ImportMarketplacePackAsync(string path, CancellationToken cancellation)
     {
         RequireEditable();

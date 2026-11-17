@@ -236,7 +236,9 @@ public sealed partial class DesktopWindow : Window
         switch (method)
         {
             case "app.bootstrap":
-                _ready = true; DesktopLoading.Visibility = Visibility.Collapsed; UpdatePresentation(); return Snapshot();
+                _ready = true; DesktopLoading.Visibility = Visibility.Collapsed; UpdatePresentation();
+                if (!DesktopEnvironment.IsVerification) _ = RefreshMarketplaceOnLaunchAsync();
+                return Snapshot();
             case "app.page":
                 string page = args.Text("page", "workspace");
                 if (page is not ("workspace" or "controller" or "vision" or "training" or "voice" or "marketplace" or "gameAddon" or "settings")) throw new InvalidDataException("Choose an available workspace.");
@@ -307,6 +309,17 @@ public sealed partial class DesktopWindow : Window
         if (!_ready || _closing) return;
         try { Post(new { type = "snapshot", state = Snapshot() }); _snapshotAt = Stopwatch.GetTimestamp(); }
         catch (Exception error) { Trace.TraceError("Desktop snapshot: {0}", error.Message); }
+    }
+
+    private async Task RefreshMarketplaceOnLaunchAsync()
+    {
+        if (_closing || _marketplace is null || DesktopEnvironment.IsVerification) return;
+        try
+        {
+            if (await _marketplace.RefreshAndUpdateInstalledAsync() && !_closing && _ready)
+                PublishSnapshot();
+        }
+        catch (Exception error) { Trace.TraceInformation("Marketplace background check: {0}", error.Message); }
     }
 
     private void PublishStatus()

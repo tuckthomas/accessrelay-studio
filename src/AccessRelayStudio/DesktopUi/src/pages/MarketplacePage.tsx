@@ -13,6 +13,8 @@ type Entry = {
   license: string;
   tags: string[];
   installed: boolean;
+  installedVersion?: string | null;
+  updateAvailable?: boolean;
   coverUrl?: string | null;
   trainingPluginId?: string;
   nativeCode?: boolean;
@@ -185,7 +187,7 @@ export function MarketplacePage({
     </div>
 
     {error && <Notice tone="danger">{error}</Notice>}
-    {message && <Notice tone="success">{message}</Notice>}
+    {(message || catalog?.statusMessage) && <Notice tone="success">{message || catalog?.statusMessage}</Notice>}
 
     {busy === 'refresh' && !catalog?.loaded ? (
       <Card><p>Loading add-ons…</p></Card>
@@ -201,6 +203,7 @@ export function MarketplacePage({
                 const descriptor = gameDescriptors.find(d => d.id === group.gameId || d.packageId === primaryEntry?.id);
                 const coverUrl = group.entries.find(e => e.coverUrl)?.coverUrl || descriptor?.coverUrl || null;
                 const installedCount = group.entries.filter(e => e.installed).length;
+                const updateEntry = group.entries.find(e => e.installed && e.updateAvailable);
                 const interactivePluginId = resolvePluginId(group.entries, group.gameId);
                 const trainingEntry = group.entries.find(e => e.installed && e.trainingPluginId);
                 const canOpen = Boolean(interactivePluginId && openGameAddon);
@@ -216,10 +219,12 @@ export function MarketplacePage({
                         : <div className="game-cover-fallback" style={{ ['--game-accent' as any]: meta.accent }}><span>{meta.title}</span></div>}
                       <div className="game-addon-card-overlay">
                         <div className="game-addon-card-badges">
-                          <Badge tone={installedCount > 0 ? 'mint' : 'neutral'}>
-                            {single
-                              ? (installedCount > 0 ? 'Installed' : 'Available')
-                              : (installedCount > 0 ? `${installedCount} of ${group.entries.length} installed` : `${group.entries.length} available`)}
+                          <Badge tone={updateEntry ? 'warning' : installedCount > 0 ? 'mint' : 'neutral'}>
+                            {updateEntry
+                              ? `Update available · ${updateEntry.version}`
+                              : single
+                                ? (installedCount > 0 ? `Installed · ${primaryEntry.installedVersion || primaryEntry.version}` : 'Available')
+                                : (installedCount > 0 ? `${installedCount} of ${group.entries.length} installed` : `${group.entries.length} available`)}
                           </Badge>
                         </div>
                         <h2>{meta.title}</h2>
@@ -236,16 +241,16 @@ export function MarketplacePage({
                               {(!single || entry.name !== meta.title) && <h3 title={entry.name}>{entry.name}</h3>}
                             </div>
                             <div className="game-addon-package-actions">
-                              {entry.installed ? (
+                              {entry.installed && !entry.updateAvailable ? (
                                 !single && <Badge tone="mint"><Icon name="check" size={14} />Installed</Badge>
                               ) : (
                                 <Button
-                                  variant="primary"
+                                  variant={entry.updateAvailable ? 'secondary' : 'primary'}
                                   disabled={!!busy}
                                   busy={busy === entry.id}
                                   onClick={() => void run('install', { id: entry.id, version: entry.version })}
                                 >
-                                  <Icon name="download" size={16} />Install
+                                  <Icon name="download" size={16} />{entry.updateAvailable ? `Update to ${entry.version}` : 'Install'}
                                 </Button>
                               )}
                               <Button variant="ghost" onClick={() => openSource(entry)}>
@@ -324,12 +329,13 @@ export function MarketplacePage({
                       </Button>
                     ) : (
                       <Button
-                        variant="primary"
-                        disabled={!!busy || entry.installed}
+                        variant={entry.updateAvailable ? 'secondary' : 'primary'}
+                        disabled={!!busy || (entry.installed && !entry.updateAvailable)}
                         busy={busy === entry.id}
                         onClick={() => void run('install', { id: entry.id, version: entry.version })}
                       >
-                        <Icon name={entry.installed ? 'check' : 'download'} size={17} />{entry.installed ? 'Installed' : 'Install'}
+                        <Icon name={entry.installed && !entry.updateAvailable ? 'check' : 'download'} size={17} />
+                        {entry.updateAvailable ? `Update to ${entry.version}` : entry.installed ? 'Installed' : 'Install'}
                       </Button>
                     )}
                     <Button variant="ghost" onClick={() => openSource(entry)}>

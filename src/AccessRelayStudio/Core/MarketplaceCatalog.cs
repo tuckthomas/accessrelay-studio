@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -43,7 +44,7 @@ internal sealed class MarketplaceClient(HttpClient http)
     internal const string ContentUrl = "https://raw.githubusercontent.com/tuckthomas/accessrelay-marketplace/main/";
     internal async Task<MarketplaceCatalog> ReadAsync(CancellationToken cancellation)
     {
-        byte[] bytes = await DownloadAsync("catalog.json", 1024 * 1024, cancellation).ConfigureAwait(false);
+        byte[] bytes = await DownloadAsync("catalog.json", 1024 * 1024, cancellation, bypassCache: true).ConfigureAwait(false);
         var catalog = JsonSerializer.Deserialize<MarketplaceCatalog>(bytes, GamePackDefinition.Json)
             ?? throw new InvalidDataException("The marketplace catalog is empty.");
         catalog.Validate(); return catalog;
@@ -89,9 +90,11 @@ internal sealed class MarketplaceClient(HttpClient http)
             throw new InvalidDataException("Downloaded cover art does not match its declared SHA-256.");
         return bytes;
     }
-    private async Task<byte[]> DownloadAsync(string path, int limit, CancellationToken cancellation)
+    private async Task<byte[]> DownloadAsync(string path, int limit, CancellationToken cancellation, bool bypassCache = false)
     {
-        using var response = await http.GetAsync(new Uri(ContentUrl + path), HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(ContentUrl + path));
+        if (bypassCache) request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true, NoStore = true, MaxAge = TimeSpan.Zero };
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > limit) throw new InvalidDataException("The marketplace download exceeds its size limit.");
         await using var input = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false);
