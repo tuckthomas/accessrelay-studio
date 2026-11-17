@@ -93,25 +93,24 @@ internal sealed class StreamTelemetryWindow(long frequency)
         if (samples.Length == 0) samples = recent;
         StreamTelemetryAssessment Result(string state, string message, bool adapt, double uncertainty) =>
             new(state, message, adapt, Math.Min(1000, uncertainty), latest.Overlay, samples.Length) { Direct = latest.Direct };
-        if (samples.Any(r => !r.Jitter.HasValue || !r.Decode.HasValue || !r.Fps.HasValue))
-            return Result("unavailable", "Waiting for jitter, decoder time and frame rate. Automatic tuning is paused.", false, 0);
-
-        static double Median(IEnumerable<double?> values)
+        static double? Median(IEnumerable<double?> values)
         {
             var a = values.OfType<double>().Order().ToArray();
-            return a[a.Length / 2];
+            return a.Length == 0 ? null : a[a.Length / 2];
         }
-        var baseline = history.Where(r => r.Decode.HasValue && r.Fps.HasValue).TakeLast(20).ToArray();
-        double decode = Median(baseline.Select(r => r.Decode)), nominalFps = Median(baseline.Select(r => r.Fps));
+        var baseline = history.TakeLast(20).ToArray();
+        double? decode = Median(baseline.Select(r => r.Decode)), nominalFps = Median(baseline.Select(r => r.Fps));
         var rttBaseline = history.Where(r => r.Rtt.HasValue && r.RttSource is not null).TakeLast(20)
-            .GroupBy(r => r.RttSource!).ToDictionary(g => g.Key, g => Median(g.Select(r => r.Rtt)));
-        double uncertainty = samples.Max(r => r.Jitter!.Value + Math.Abs(r.Decode!.Value - decode) +
+            .GroupBy(r => r.RttSource!).ToDictionary(g => g.Key, g => Median(g.Select(r => r.Rtt))!.Value);
+        double uncertainty = samples.Max(r => r.Jitter.GetValueOrDefault() + (r.Decode.HasValue && decode.HasValue ? Math.Abs(r.Decode.Value - decode.Value) : 0) +
             (r.Rtt is double rtt && r.RttSource is string source && rttBaseline.TryGetValue(source, out double median) ? Math.Abs(rtt - median) : 0));
         bool gap = false;
         for (int i = 1; i < samples.Length; i++) gap |= samples[i].Timestamp - samples[i - 1].Timestamp > frequency * 3;
         bool unstable = gap || uncertainty > budgetMs || samples.Any(r => r.Loss > 0 || r.Decode > Math.Max(12, budgetMs)
-            || r.Fps < Math.Max(25, nominalFps * .8));
+            || r.Fps < Math.Max(25, nominalFps.GetValueOrDefault() * .8));
         if (unstable) return Result("unstable", "Stream statistics exceeded the timing budget. Automatic tuning is paused.", false, uncertainty);
+        if (samples.Any(r => !r.Jitter.HasValue || !r.Decode.HasValue || !r.Fps.HasValue))
+            return Result("unavailable", "Waiting for jitter, decoder time and frame rate. Automatic tuning is paused.", false, uncertainty);
         return recent.Length < 2 ? Result("warmingUp", "Confirming stream statistics before automatic tuning.", false, uncertainty)
             : Result("stable", "Stream statistics are stable.", true, uncertainty);
     }

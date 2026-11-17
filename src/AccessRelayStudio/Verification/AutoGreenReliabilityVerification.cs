@@ -109,6 +109,8 @@ internal static class AutoGreenReliabilityVerification
         direct.Add(sample with { CaptureTimestamp = 2100, PacketLossPercent = 2 });
         Check(!direct.Assess(2100, 2200, 12, true).CanAdapt, "Native packet loss permitted adaptation.");
         direct.Add(sample with { CaptureTimestamp = 3000, DecodeMs = null });
+        Check(direct.Assess(3000, 3200, 12, true).State == "unstable", "An incomplete native sample hid observed packet loss.");
+        direct.Reset(); direct.Add(sample with { CaptureTimestamp = 3000, DecodeMs = null });
         Check(direct.Assess(3000, 3200, 12, true).State == "unavailable", "Missing decoder statistics permitted adaptation.");
         var combined = Paddle();
         combined.ObserveStreamTelemetry(parsed! with { CaptureTimestamp = 20, JitterMs = 8 });

@@ -87,7 +87,7 @@ internal sealed class ControllerOutputArbiter
 
     public long BeginSession()
     {
-        Invalidate("Observation ready. Release the shoot button before arming a new attempt.", disarm: true);
+        Invalidate("Observation ready. Release the shot trigger before arming a new attempt.", disarm: true);
         _sourceReady = true;
         return _generation;
     }
@@ -122,7 +122,7 @@ internal sealed class ControllerOutputArbiter
     {
         _trainingRecording = recording;
         Invalidate(recording ? "Training recording is active. Automatic release is inhibited."
-            : "Training recording ended. Release the shoot button and explicitly arm again.", disarm: true);
+            : "Training recording ended. Release the shot trigger and arm again.", disarm: true);
     }
 
     public void Invalidate(string reason, bool sourceLost = false, bool disarm = false)
@@ -210,7 +210,7 @@ internal sealed class ControllerOutputArbiter
             _message = "Tracking the current physical shot.";
         }
         if (_shot != 0 && Milliseconds((double)now - _shotStarted) > _settings.MaximumShotDurationMs)
-            CancelAttempt("Shot expired. Release the shoot button before another attempt.", now);
+            CancelAttempt("Shot expired. Release the shot trigger before another attempt.", now);
         TryAdvanceDeadline(now);
         return Output;
     }
