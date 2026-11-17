@@ -328,7 +328,29 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     _settings = _settings with { ModelManifestPath = model?.ManifestPath ?? "", CorrectionMs = 0 };
                     SaveSettings(); _calibration = null; return null;
                 }
-                case "start": Start(args.Flag("loadModel", true)); return null;
+                case "start":
+                {
+                    bool loadModel = args.Flag("loadModel", true);
+                    bool arm = args.Flag("armed", false);
+                    Start(loadModel);
+                    if (arm)
+                    {
+                        if (_runtime()?.HasOutput != true)
+                            throw new InvalidOperationException("Connect controller output before enabling assistance.");
+                        long deadline = Stopwatch.GetTimestamp() + 3 * Stopwatch.Frequency;
+                        while (_session?.Status is { Running: true, CanArm: false } && Stopwatch.GetTimestamp() < deadline)
+                        {
+                            cancellation.ThrowIfCancellationRequested();
+                            await Task.Delay(25, cancellation);
+                        }
+                        if (_session?.Status.CanArm != true)
+                            throw new InvalidOperationException(_session?.Status.Message ?? "Start gameplay capture and wait for live frames before enabling assistance.");
+                        if (_runtime()?.SetVisionArmed(true) != true)
+                            throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
+                        _notice = "Live assistance is on.";
+                    }
+                    return null;
+                }
                 case "connectOutput":
                     await _connectOutput();
                     if (_runtime()?.HasOutput != true) throw new InvalidOperationException("Controller output did not connect. Check the controller page for the device error.");
@@ -360,7 +382,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     session.StartDiagnosticRecording(DesktopEnvironment.DataDirectory("VisionDiagnostics")
                         ?? Path.Combine(AppContext.BaseDirectory, "Diagnostics", "VisionRecordings"),
                         new { pluginId = _plugin?.Id, profile = _profile?.ExportProfile(), source = SelectedSource().Title });
-                    _notice = "Recording diagnostics for up to 15 seconds. Take a practice shot with your current assistance settings.";
+                    _notice = "Recording diagnostics until you stop it.";
                     return null;
                 }
                 case "openDiagnosticFolder":

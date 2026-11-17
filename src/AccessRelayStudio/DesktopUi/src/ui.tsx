@@ -105,7 +105,22 @@ export function Card({ title, description, actions, children, className = '' }:
       {description && <p className="subtle">{description}</p>}</div>{actions}</div>}{children}
   </section>;
 }
-export function Field({ label, hint, children, className = '' }: { label: ReactNode; hint?: ReactNode; children: ReactNode; className?: string }) {
+function InfoTip({ info, title }: { info: ReactNode; title?: string }) {
+  const [open, setOpen] = useState(false);
+  const tipId = useId();
+  return <span className="info-tip" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <button type="button" className="info-tip-trigger" aria-label={title ? `About ${title}` : 'More information'}
+      aria-describedby={open ? tipId : undefined} aria-expanded={open}
+      onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
+      onClick={() => setOpen(value => !value)}
+      onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}>
+      <Icon name="info" size={14} />
+    </button>
+    {open && <span id={tipId} role="tooltip" className="info-tip-popover">{info}</span>}
+  </span>;
+}
+
+export function Field({ label, hint, info, children, className = '' }: { label: ReactNode; hint?: ReactNode; info?: ReactNode; children: ReactNode; className?: string }) {
   const id = useId(), wrapper = useRef<HTMLDivElement>(null);
   const direct = isValidElement(children) && ((typeof children.type === 'string' && ['input', 'select', 'textarea'].includes(children.type))
     || [Input, Slider, Checkbox, Textarea, Select].includes(children.type as any));
@@ -119,7 +134,9 @@ export function Field({ label, hint, children, className = '' }: { label: ReactN
     fieldLabel.htmlFor = input.id;
     if (hint && !input.hasAttribute('aria-describedby')) input.setAttribute('aria-describedby', id + '-hint');
   }, [children, direct, hint, id]);
-  return <div className={'field ' + className} ref={wrapper}><label id={id + '-label'} htmlFor={inputId}>{label}</label>
+  return <div className={'field ' + className} ref={wrapper}>
+    {info ? <div className="field-label-row"><label id={id + '-label'} htmlFor={inputId}>{label}</label><InfoTip info={info} title={typeof label === 'string' ? label : undefined} /></div>
+      : <label id={id + '-label'} htmlFor={inputId}>{label}</label>}
     {direct ? cloneElement(children as any, { id: inputId, 'aria-describedby': hint ? id + '-hint' : undefined })
       : <div aria-labelledby={id + '-label'}>{children}</div>}
     {hint && <p id={id + '-hint'} className="field-hint">{hint}</p>}</div>;

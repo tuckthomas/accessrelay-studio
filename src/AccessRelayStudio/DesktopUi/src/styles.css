@@ -379,6 +379,12 @@ details[open] > summary { margin-bottom: 12px; }
 .game-addon-hero-body { position:relative; z-index:1; padding:24px 28px; display:grid; gap:6px; color:#f8fafc; max-width:680px; }
 .game-addon-hero-body h1 { margin:0; font-size:28px; line-height:1.15; color:#fff; }
 .game-addon-hero-body .subtle { margin:0; color:rgba(248,250,252,.84); }
+.field-label-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.info-tip { position:relative; display:inline-flex; align-items:center; }
+.info-tip-trigger { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; padding:0; border:1px solid var(--line-strong); border-radius:999px; background:var(--surface-raised); color:var(--muted); cursor:help; transition:border-color 140ms ease, color 140ms ease, background 140ms ease; }
+.info-tip-trigger:hover, .info-tip-trigger:focus-visible { border-color:var(--accent); color:var(--ink); background:var(--surface); outline:none; }
+.info-tip-trigger:focus-visible { box-shadow:0 0 0 2px var(--focus); }
+.info-tip-popover { position:absolute; bottom:calc(100% + 8px); left:-12px; width:min(290px, 72vw); padding:10px 12px; border:1px solid var(--line-strong); border-radius:10px; background:var(--surface); color:var(--ink); font-size:13px; font-weight:400; line-height:1.45; box-shadow:0 12px 28px var(--backdrop); z-index:40; pointer-events:none; }
 @media(max-width:680px) { .addons-games-grid { grid-template-columns:1fr; } .game-addon-package-head { flex-direction:column; } }
 .button:not(.button-small) { min-height:var(--control-height); }
 .icon-button { min-width:var(--control-height); width:var(--control-height); }
