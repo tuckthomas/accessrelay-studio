@@ -1042,6 +1042,9 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         actionCorrectionMs = receipt.CorrectionMs, actionTempoCorrectionMs = receipt.TempoCorrectionMs,
         feedbackEligible = receipt.EligibleForFeedback && receipt.Outcome == VisionActionOutcome.Completed && receipt.StreamTelemetry?.State != "unstable",
         feedbackContext = ShotFeedbackLearningGate.Context(read),
+        receipt.TriggerSample,
+        triggerToStrokeStartMs = receipt.TriggerSample is { } press && receipt.ActualStartedTimestamp >= press.Timestamp
+            ? Stopwatch.GetElapsedTime(press.Timestamp, receipt.ActualStartedTimestamp).TotalMilliseconds : (double?)null,
         read.ProcessingMs, strokeDurationMs = receipt.StrokeDurationMs,
         expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,
         adjusted = nextCorr != prevCorr || nextTempo != prevTempo,
@@ -1079,7 +1082,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 && (!cfg.TryGetProperty("autoOcrTiming", out var enabled) || enabled.ValueKind != JsonValueKind.False);
             bool rhythmMode = _settings.PluginAssistance is { } modeJson
                 && (!modeJson.TryGetProperty("inputMode", out var modeProp) || modeProp.GetString() == "rhythm");
-            bool paddleBound = _runtime()?.VisionAction.TriggerPaddle != PaddleButtons.None;
+            bool assignedTrigger = _runtime()?.VisionAction.HasAssignedTrigger == true;
             double expectedPreAnchorMs = latestReceipt.AnchorTimestamp > latestReceipt.StartedTimestamp
                 ? Stopwatch.GetElapsedTime(latestReceipt.StartedTimestamp, latestReceipt.AnchorTimestamp).TotalMilliseconds
                 : latestReceipt.AnchorFraction * latestReceipt.StrokeDurationMs;
@@ -1092,7 +1095,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 : _feedbackLearning.Check(latestReceipt, read, _settingsProfile.ToString());
             if (learningBlocked is not null)
                 _consecutiveOcrDir = _consecutiveOcrTempoDir = _excellentOcrStreak = 0;
-            if (autoAdjust && learningBlocked is null && paddleBound && read.ShotType != "unrecognized" && !(rhythmMode && read.ShotType == "timing"))
+            if (autoAdjust && learningBlocked is null && assignedTrigger && read.ShotType != "unrecognized" && !(rhythmMode && read.ShotType == "timing"))
             {
                 var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(_settings.CorrectionMs, _settings.TempoCorrectionMs,
                     read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir, ref _excellentOcrStreak);

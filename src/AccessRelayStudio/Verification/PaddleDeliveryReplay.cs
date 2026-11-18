@@ -26,7 +26,7 @@ internal static class PaddleDeliveryReplay
             long frequency = root.GetProperty("stopwatchFrequency").GetInt64();
             var starts = input.Where(e => e.PhysicalContext.HeldPaddles.HasFlag(PaddleButtons.LargeRight))
                 .Select(e => e.PhysicalContext.HoldStartedTimestamp).Where(t => t > 0).Distinct().ToArray();
-            if (action.TriggerPaddle != PaddleButtons.LargeRight || starts.Length != 1)
+            if (!action.HasAssignedTrigger || !action.IsTriggerHeld(default, PaddleButtons.LargeRight) || starts.Length != 1)
                 throw new InvalidDataException("Use one recorded P4 hold per attempt.");
             long down = starts[0];
             var release = input.FirstOrDefault(e => e.PhysicalContext.InputTimestamp > down &&

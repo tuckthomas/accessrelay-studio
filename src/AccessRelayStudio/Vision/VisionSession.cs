@@ -461,8 +461,8 @@ internal sealed class VisionSession : IDisposable
                             // Trace ordinary attempts, including unarmed or wrongly directed holds.
                             // Neither this trace nor its disk writer changes controller output.
                             bool active = physical.Physical is { } state && (predictor.Action.Kind == VisionActionKind.RightStickStroke
-                                ? (predictor.Action.TriggerPaddle != PaddleButtons.None
-                                    ? (physical.HeldPaddles & predictor.Action.TriggerPaddle) == predictor.Action.TriggerPaddle
+                                ? (predictor.Action.HasAssignedTrigger
+                                    ? predictor.Action.IsTriggerHeld(state, physical.HeldPaddles)
                                     : Math.Abs((int)state.RightY) >= predictor.Action.AxisThreshold || Math.Abs((int)state.RightX) >= predictor.Action.AxisThreshold)
                                 : (state.Buttons & (ushort)settings.ShootButton) != 0);
                             if (!active) { QueueAttemptDiagnostics(completed, "Physical input returned below the hold threshold."); _attemptNeedsNeutral = false; }

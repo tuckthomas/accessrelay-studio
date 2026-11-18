@@ -18,5 +18,6 @@ internal readonly record struct VisionStatusSnapshot(VisionRunState State, bool 
     long AcceptedPredictions, long RejectedPredictions, long AutomatedReleases, long MissedDeadlines)
 {
     public long CancelledAttempts { get; init; }
-    public bool HoldingCancelledPaddleShot { get; init; }
+    public bool HoldingCancelledTriggerShot { get; init; }
+    public bool HoldingCancelledPaddleShot { get => HoldingCancelledTriggerShot; init => HoldingCancelledTriggerShot = value; }
 }

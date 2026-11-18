@@ -346,7 +346,7 @@ internal sealed class StudioRuntime : IDisposable
             return new(_latest?.Input is { IsConnected: true } input ? input.State : null,
                 _latestInputSampleTicks, status.SessionGeneration, status.ShotToken, status.ShotStartedTimestamp, status.Armed)
             {
-                HoldStartedTimestamp = _vision.HoldStartedTimestamp,
+                HoldStartedTimestamp = _vision.HoldStartedTimestamp, TriggerSample = _vision.TriggerSample,
                 StrokeAnchorTimestamp = _vision.StrokeAnchorTimestamp,
                 HeldPaddles = _latest?.Input is { IsConnected: true } connectedInput ? connectedInput.HeldPaddles : PaddleButtons.None
             };
@@ -699,8 +699,7 @@ internal sealed class StudioRuntime : IDisposable
                         && ControlMap.PressedMask(input.State, input.HeldPaddles | input.PressedPaddles) == 0
                         && _stickDeadzone.Apply(input.State) is { LeftX: 0, LeftY: 0, RightX: 0, RightY: 0 })
                         _navigationNeedsNeutral = false;
-                    PaddleButtons visionTrigger = _vision.Status.Armed && _vision.Action.Kind == VisionActionKind.RightStickStroke
-                        ? _vision.Action.TriggerPaddle : PaddleButtons.None;
+                    var assigned = _vision.Status.Armed && _vision.Action.HasAssignedTrigger ? _vision.Action : null;
                     if (_navigation.Enabled || _navigationNeedsNeutral || _configuringInput || _inputNeedsNeutral)
                         state = default;
                     else if (_recorder is not null)
@@ -722,12 +721,15 @@ internal sealed class StudioRuntime : IDisposable
                     {
                         var calibrationTrigger = SampleLuaCalibrationLocked(input, now);
                         bool manualActive = input.IsConnected && _output?.IsAvailable == true;
-                        var manual = _smoother.Sample(_stickDeadzone.Apply(input.State), now, manualActive);
+                        var bindingInput = assigned?.WithoutAssignedTrigger(input.State) ?? input.State;
+                        var manual = _smoother.Sample(_stickDeadzone.Apply(bindingInput), now, manualActive);
                         manual = _sticky.Sample(manual, manualActive);
+                        if (assigned is not null) manual = assigned.WithoutAssignedTrigger(manual);
                         var voice = _voiceCommands.Sample(Stopwatch.GetTimestamp());
-                        var engineHeld = (PaddleButtons)(input.HeldPaddles & ~visionTrigger);
-                        var enginePressed = (PaddleButtons)(input.PressedPaddles & ~visionTrigger);
-                        state = VoiceCommandArbiter.Compose(_engine.Tick(input.State, engineHeld, input.IsConnected, now, enginePressed,
+                        var reserved = assigned?.ReservedPaddles ?? PaddleButtons.None;
+                        var engineHeld = input.HeldPaddles & ~reserved;
+                        var enginePressed = input.PressedPaddles & ~reserved;
+                        state = VoiceCommandArbiter.Compose(_engine.Tick(bindingInput, engineHeld, input.IsConnected, now, enginePressed,
                             manual, calibrationTrigger ?? voice.Sequence), voice.Pulse);
                     }
                     if (pickingUp) state = pickupState;
