@@ -16,6 +16,7 @@ if (args is ["--auto-green"]) { AutoGreenReliabilityVerification.Run(); return; 
 
 if (args is ["--vision-only"]) { VisionVerification.Run(); AutoGreenReliabilityVerification.Run(); Console.WriteLine("SUCCESS Vision output verification."); return; }
 if (args is ["--committed-stroke-replay", var attempts, var replayOutput]) { CommittedStrokeReplayVerification.Run(attempts, replayOutput); return; }
+if (args is ["--p4-delivery-replay", var gain, var deliveryReport, _, ..]) { PaddleDeliveryReplay.Run(gain, deliveryReport, args[3..]); return; }
 
 if (args.Length is 1 or 2 && args[0] == "--lua-conversion")
 {

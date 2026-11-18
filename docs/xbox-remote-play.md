@@ -15,6 +15,17 @@ In **Live Gameplay → Capture source**, select an open window by title or choos
 
 Direct playback requests 1920 × 1080. Studio displays the actual decoded dimensions and updates statistics about once per second. The shot diagnostics record the decoder’s factory name. On compatible Windows GPUs, video stays in Direct3D memory for display. Starting an observation opens a separate branch. With the D3D12 H.264 decoder, that branch downloads the decoded frame and converts it to full-resolution BGRA on the CPU for vision, preview, and recording. Windows audio uses the default output device with low-latency WASAPI settings. The internal preview has its own refresh cadence.
 
+The [NBA gameplay replay](https://github.com/tuckthomas/accessrelay-marketplace/blob/main/docs/nba2k27-meter-color-replay.md) measures CPU and D3D12 conversion
+on the same recorded shots. It checks full-size OCR, preview and diagnostic images
+and reports when the controller scheduler reaches the timing anchor and full-up.
+With only physical attempt logs available, the portable verifier can also replay
+the recorded predictions with an earlier arrival time. Pass the measured gain in
+milliseconds and one attempt file per shot.
+
+~~~powershell
+dotnet run --project src/AccessRelayStudio/Verification -c Release -- --p4-delivery-replay $gainMs $report @attemptFiles
+~~~
+
 | Measurement | Source |
 | --- | --- |
 | ICE RTT / LAN ping | The selected WebRTC pair’s RTT where available. Otherwise Studio can time an ICMP echo to the selected private host candidate. The UI labels a successful echo **LAN ping**. A missing or blocked response produces a dash. |

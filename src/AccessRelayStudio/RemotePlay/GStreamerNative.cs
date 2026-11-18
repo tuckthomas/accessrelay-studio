@@ -135,6 +135,7 @@ internal static class GStreamerNative
     [DllImport(Video)] internal static extern int gst_video_meta_map(nint meta, uint plane, out Map map, out nint data, out int stride, int flags);
     [DllImport(Video)] internal static extern int gst_video_meta_unmap(nint meta, uint plane, ref Map map);
     [DllImport(App)] internal static extern nint gst_app_sink_try_pull_sample(nint sink, ulong timeoutNs);
+    [DllImport(App)] internal static extern int gst_app_sink_is_eos(nint sink);
     [DllImport(Sdp)] internal static extern nint gst_sdp_message_as_text(nint message);
     [DllImport(Sdp)] internal static extern int gst_sdp_message_new_from_text([MarshalAs(UnmanagedType.LPUTF8Str)] string text, out nint sdp);
     [DllImport(Web)] internal static extern nint gst_webrtc_session_description_new(int type, nint sdp);

@@ -27,7 +27,7 @@ internal sealed class XboxStatsCollector
     private readonly Dictionary<long,long> _decoderInput = [], _decoderOutput = [];
     internal long? DecoderTimestamp(nint buffer)
     {
-        long pts = Marshal.ReadInt64(buffer, PtsOffset);
+        long pts = PresentationTimestamp(buffer);
         lock (_gate) return _decoderOutput.Remove(pts, out long timestamp) ? timestamp : null;
     }
     private long _last = Stopwatch.GetTimestamp(), _decoded, _paired;
@@ -90,10 +90,11 @@ internal sealed class XboxStatsCollector
         public ulong Pts;
     }
     private static readonly int PtsOffset = checked((int)Marshal.OffsetOf<BufferPrefix>(nameof(BufferPrefix.Pts)));
+    internal static long PresentationTimestamp(nint buffer) => Marshal.ReadInt64(buffer, PtsOffset);
 
     internal void Frame(nint buffer, bool decoded)
     {
-        long pts = Marshal.ReadInt64(buffer, PtsOffset), now = Stopwatch.GetTimestamp();
+        long pts = PresentationTimestamp(buffer), now = Stopwatch.GetTimestamp();
         lock (_gate)
         {
             if (decoded) _decoded++;
