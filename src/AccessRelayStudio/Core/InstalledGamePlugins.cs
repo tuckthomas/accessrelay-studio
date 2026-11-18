@@ -55,7 +55,7 @@ internal sealed class InstalledGamePlugins(string directory, Func<string, string
         foreach (var group in packs.Where(pack => Supports(pack.Manifest)).GroupBy(pack => pack.Manifest.GameId))
         {
             // New implementations supersede older enabling manifests without deleting user data.
-            var pack = group.OrderByDescending(p => Version.TryParse(p.Manifest.Version, out var v) ? v : new Version()).First();
+            var pack = group.OrderByDescending(p => p.Manifest.Version, GamePackVersions.Order).First();
             try
             {
                 if (!_loaded.TryGetValue(pack.ManifestSha256, out var loaded))

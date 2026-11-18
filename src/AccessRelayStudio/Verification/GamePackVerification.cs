@@ -7,6 +7,8 @@ internal static class GamePackVerification
 {
     internal static void Run()
     {
+        string[] versions = ["legacy", "2.1.5", "2.2.0-beta.1", "2.2.0-beta.10", "2.2.0", "2.10.0"];
+        Equal(true, versions.Reverse().Order(GamePackVersions.Order).SequenceEqual(versions));
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "src/AccessRelayStudio/Verification/Fixtures/switch-pack/pack.json"))) root = root.Parent;
         if (root is null) throw new Exception("Cannot locate test pack fixtures.");

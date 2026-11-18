@@ -26,9 +26,10 @@ internal static class XboxHomeServiceChecks
 
     internal static async Task Run()
     {
+        CheckIceRoutes();
         var store = new Store();
         int polls = 0, lists = 0, states = 0, tickets = 0, offers = 0, icePosts = 0, releases = 0, keepalives = 0;
-        bool failProvision = false, conflict = false, revoke = false, unauthorizedPage = false, empty = false;
+        bool failProvision = false, conflict = false, revoke = false, unauthorizedPage = false, empty = false, missingConfiguration = false;
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         using var cancelledDuringCreation = new CancellationTokenSource();
         bool cancelCreation = false;
@@ -82,8 +83,10 @@ internal static class XboxHomeServiceChecks
             if (path.EndsWith("/ice"))
             {
                 if (method == "POST") { icePosts++; Check(body.Contains("\"sdpMLineIndex\":0"), "Missing ICE media index."); return Reply(); }
-                return Reply(new { exchangeResponse = """[{"candidate":"candidate:remote","sdpMLineIndex":"0","sdpMid":"audio0"}]""" });
+                return Reply(new { exchangeResponse = """[{"candidate":"a=candidate:1 1 UDP 100 2001:db8::1 9002 typ host","sdpMLineIndex":"0","sdpMid":0},{"candidate":"a=end-of-candidates","sdpMLineIndex":0}]""" });
             }
+            if (path.EndsWith("/configuration")) return missingConfiguration ? Reply(null, HttpStatusCode.NotFound)
+                : Reply(new { serverDetails = new { ipV4Address = "192.0.2.5", ipV4Port = 9002 } });
             if (path.EndsWith("/keepalive")) { keepalives++; return Reply(); }
             if (method == "DELETE") { releases++; return Reply(); }
             throw new InvalidOperationException("Unexpected fixture request.");
@@ -102,11 +105,16 @@ internal static class XboxHomeServiceChecks
         await using (session)
         {
             Check(await session.ExchangeSdpAsync("offer-sdp", stop.Token) == "answer-sdp", "SDP exchange failed.");
-            Check((await session.ExchangeIceAsync([new("candidate:local", 0, "audio0")], stop.Token)).Single().SdpMid == "audio0", "ICE exchange failed.");
+            var routes = await session.ExchangeIceAsync([new("candidate:local", 0, "audio0")], stop.Token);
+            Check(routes.Length == 3 && routes[0].SdpMid == "0" && routes[1].Candidate.Contains("192.0.2.5 9002")
+                && routes[2].Candidate == "", "Configured console address or end-of-candidates was lost.");
+            missingConfiguration = true;
+            var nativeRoutes = await session.ExchangeIceAsync([new("candidate:local", 0, "audio0")], stop.Token);
+            Check(nativeRoutes.Length == 2 && nativeRoutes[0] == routes[0], "Missing optional configuration blocked the native ICE path.");
             await session.KeepAliveAsync(stop.Token);
         }
         await session.DisposeAsync();
-        Check((tickets, offers, icePosts, keepalives, releases) == (1, 1, 1, 1, 1), "Session messages or idempotent close failed.");
+        Check((tickets, offers, icePosts, keepalives, releases) == (1, 1, 2, 1, 1), "Session messages or idempotent close failed.");
         failProvision = true;
         try { await service.OpenAsync("home", stop.Token); throw new Exception("Failed provisioning was accepted."); }
         catch (InvalidOperationException) { }
@@ -126,5 +134,22 @@ internal static class XboxHomeServiceChecks
         try { await account.SignInAsync(_ => throw new Exception("Foreign browser page opened."), stop.Token); throw new Exception("Foreign sign-in URL accepted."); }
         catch (InvalidDataException) { }
         Console.WriteLine("PASS home sign-in, refresh, console discovery, session exchange, keepalive, failure and cancellation fixtures.");
+    }
+
+    private static void CheckIceRoutes()
+    {
+        XboxIce[] remote = [new("a=end-of-candidates", 0, "audio0"),
+            new("a=candidate:1 1 UDP 100 2001:0:c000:201::3caf:3fff:fdf5 9002 typ host", 0, "audio0"),
+            new("candidate:2 1 UDP 100 192.0.2.10 9002 typ host", 0, "audio0"),
+            new("candidate:3 1 UDP 100 2001:db8::11 9002 typ host", 0, "audio0")];
+        var routes = XboxIceCandidates.ForPeer(remote, []);
+        Check(routes.Length == 5 && routes.Count(r => r.Candidate.Contains(" 192.0.2.10 9002 ")) == 1
+            && routes[3].Candidate.Contains(" 192.0.2.10 50000 ") && routes[^1].Candidate == "",
+            "Teredo fallback, native IPv6, deduplication or completion ordering failed.");
+        var configuration = JsonSerializer.SerializeToElement(new { serverDetails = new { ipAddress = "192.0.2.5", port = 53000,
+            ipV4Address = "192.0.2.5", ipV4Port = 9002, ipV6Address = "::", ipV6Port = 1 } });
+        var endpoints = XboxIceCandidates.ConsoleEndpoints(configuration);
+        Check(endpoints.Count == 2 && endpoints.Any(e => e.Port == 53000) && endpoints.Any(e => e.Port == 9002)
+            && XboxIceCandidates.ConsoleEndpoints(default).Count == 0, "Console endpoint selection failed.");
     }
 }

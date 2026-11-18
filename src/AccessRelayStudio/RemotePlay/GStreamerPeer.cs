@@ -17,10 +17,10 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     private nint _videoPad, _audioPad;
     private readonly MessageHandler _padAdded;
     private int _linkFailed;
-    private readonly ElementHandler _decoderAdded;
-    private nuint _decoderHandler;
+    private readonly ElementHandler _elementAdded;
+    private nuint _elementHandler;
     private string? _decoderName;
-    private nint _before, _after, _decodedAudio;
+    private nint _before, _after, _decodedPad, _observationValve, _decodedAudio;
     private readonly XboxStatsCollector _stats = new();
     private readonly MessageHandler _beforeDecode, _afterDecode;
     private int _ack;
@@ -32,17 +32,41 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     private XboxStreamControllerOutput? _writer;
     private OutputLease? _output;
     private bool _handshakeSent, _authorized;
+    private readonly Action<string>? _trace;
+    private readonly BusSyncHandler? _windowHandler;
+    private nint _renderer;
+    private int _lastPeerState = -1;
 
     // decodebin chooses the installed decoder. These bounded queues keep presentation
     // and CPU analysis independent; local console audio uses the default audio sink.
-    private const string Pipeline = "webrtcbin name=peer bundle-policy=max-bundle latency=25 " +
-        "rtph264depay name=videoInput ! h264parse ! video/x-h264,alignment=au ! identity name=beforedecode ! decodebin ! identity name=afterdecode ! tee name=video " +
-        "video. ! queue leaky=downstream max-size-buffers=1 ! videoconvert ! video/x-raw,format=BGRA ! appsink name=frames max-buffers=1 drop=true sync=false async=false " +
-        "video. ! queue leaky=downstream max-size-buffers=2 ! videoconvert ! autovideosink sync=false " +
-        "rtpopusdepay name=audioInput ! opusdec ! identity name=decodedAudio signal-handoffs=false ! audioconvert ! audioresample ! autoaudiosink sync=false";
-
-    internal GStreamerPeer(bool present = true)
+    private static string PlaybackPipeline(bool present)
     {
+        string download = "";
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (string name in new[] { "d3d12download", "d3d11download" })
+            {
+                nint factory = gst_element_factory_find(name);
+                if (factory == 0) continue;
+                gst_object_unref(factory);
+                download = name + " ! ";
+                break;
+            }
+        }
+        string screen = present ? "autovideosink" : "fakesink", audio = present ? "autoaudiosink" : "fakesink";
+        return "webrtcbin name=peer bundle-policy=max-bundle latency=25 " +
+            "rtph264depay name=videoInput ! h264parse ! video/x-h264,alignment=au ! identity name=beforedecode ! decodebin ! identity name=afterdecode ! tee name=video " +
+            "video. ! queue leaky=downstream max-size-buffers=1 ! valve name=observation drop=true drop-mode=forward-sticky-events ! " +
+            download + "videoconvert ! video/x-raw,format=BGRA ! appsink name=frames max-buffers=1 drop=true sync=false async=false " +
+            $"video. ! queue leaky=downstream max-size-buffers=1 ! videoconvert ! {screen} sync=false " +
+            $"rtpopusdepay name=audioInput ! opusdec ! identity name=decodedAudio signal-handoffs=false ! audioconvert ! audioresample ! {audio} name=speakers sync=false";
+    }
+
+    internal GStreamerPeer(bool present = true, Action<string>? trace = null) : this(present, trace, 0) { }
+
+    internal GStreamerPeer(bool present, Action<string>? trace, nint playbackWindow)
+    {
+        _trace = trace;
         Initialize();
         _padAdded = (_, pad, _) =>
         {
@@ -57,14 +81,26 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
             }
             finally { gst_object_unref(transceiver); }
         };
-        _decoderAdded = (_, _, element, _) =>
+        _elementAdded = (_, _, element, _) =>
         {
             var factory = gst_element_get_factory(element);
             if (factory == 0) return;
             string kind = Text(gst_element_factory_get_metadata(factory, "klass"));
-            if (!kind.Contains("Decoder/Video", StringComparison.Ordinal) && !kind.Contains("Decoder/Image", StringComparison.Ordinal)) return;
+            bool decoder = kind.Contains("Decoder/Video", StringComparison.Ordinal) || kind.Contains("Decoder/Image", StringComparison.Ordinal);
+            if (!decoder && !kind.Contains("Sink/Audio", StringComparison.Ordinal)) return;
             var name = gst_object_get_name(factory);
-            try { Volatile.Write(ref _decoderName, Text(name)); } finally { g_free(name); }
+            try
+            {
+                string plugin = Text(name);
+                if (decoder) Volatile.Write(ref _decoderName, plugin);
+                else if (plugin is "wasapi2sink" or "wasapisink")
+                {
+                    gst_util_set_object_arg(element, "low-latency", "true");
+                    gst_util_set_object_arg(element, "buffer-time", "20000");
+                    gst_util_set_object_arg(element, "latency-time", "5000");
+                }
+            }
+            finally { g_free(name); }
         };
         _beforeDecode = (_, buffer, _) => _stats.Frame(buffer, false);
         _afterDecode = (_, buffer, _) => _stats.Frame(buffer, true);
@@ -82,19 +118,33 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
         };
         try
         {
-            var pipeline = present ? Pipeline : Pipeline.Replace("autovideosink", "fakesink").Replace("autoaudiosink", "fakesink");
-            _pipeline = gst_parse_launch(pipeline, out var error);
+            _pipeline = gst_parse_launch(PlaybackPipeline(present), out var error);
             if (error != 0 || _pipeline == 0) throw Error(error, "GStreamer requires WebRTC, NICE, H.264, Opus, playback and app plugins. Install its complete x64 runtime.");
-            _decoderHandler = ConnectElement(_pipeline, "deep-element-added", _decoderAdded, 0, 0, 0);
+            _elementHandler = ConnectElement(_pipeline, "deep-element-added", _elementAdded, 0, 0, 0);
             _peer = gst_bin_get_by_name(_pipeline, "peer"); _sink = gst_bin_get_by_name(_pipeline, "frames"); _bus = gst_element_get_bus(_pipeline);
+            if (playbackWindow != 0)
+            {
+                _windowHandler = (_, message, _) =>
+                {
+                    if (gst_is_video_overlay_prepare_window_handle_message(message) == 0) return 1; // GST_BUS_PASS
+                    nint renderer = MessageSource(message);
+                    gst_video_overlay_set_window_handle(renderer, (nuint)playbackWindow);
+                    if (Interlocked.CompareExchange(ref _renderer, gst_object_ref(renderer), 0) != 0) gst_object_unref(renderer);
+                    gst_mini_object_unref(message);
+                    return 0; // GST_BUS_DROP
+                };
+                gst_bus_set_sync_handler(_bus, _windowHandler, 0, 0);
+            }
             _videoPad = SinkPad("videoInput"); _audioPad = SinkPad("audioInput");
             _padHandler = g_signal_connect_data(_peer, "pad-added", _padAdded, 0, 0, 0);
             _before = gst_bin_get_by_name(_pipeline, "beforedecode"); _after = gst_bin_get_by_name(_pipeline, "afterdecode");
+            _decodedPad = gst_element_get_static_pad(_after, "src"); _observationValve = gst_bin_get_by_name(_pipeline, "observation");
             _decodedAudio = gst_bin_get_by_name(_pipeline, "decodedAudio");
             _beforeHandler = g_signal_connect_data(_before, "handoff", _beforeDecode, 0, 0, 0);
             _afterHandler = g_signal_connect_data(_after, "handoff", _afterDecode, 0, 0, 0);
             if (gst_element_set_state(_pipeline, 2) == 0) throw new InvalidOperationException("GStreamer could not initialize its media devices.");
-            AddTrack("application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,payload=111");
+            // WebRTC Opus uses a two-channel RTP mapping even when the source plays mono (RFC 7587).
+            AddTrack("application/x-rtp,media=audio,encoding-name=OPUS,clock-rate=48000,encoding-params=(string)2,payload=111");
             AddTrack("application/x-rtp,media=video,encoding-name=H264,clock-rate=90000,payload=96,packetization-mode=(string)1,profile-level-id=(string)42e02a,level-asymmetry-allowed=(string)1");
             _control = AddChannel("control", "controlV1");
             _input = AddChannel("input", "1.0");
@@ -215,7 +265,7 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
         {
             string line = candidate.Candidate.Trim();
             if (line.StartsWith("a=", StringComparison.Ordinal)) line = line[2..];
-            if (line.StartsWith("candidate:", StringComparison.Ordinal) && candidate.SdpMLineIndex is >= 0 and < 32)
+            if ((line.Length == 0 || line.StartsWith("candidate:", StringComparison.Ordinal)) && candidate.SdpMLineIndex is >= 0 and < 32)
                 Candidate(_peer, "add-ice-candidate", (uint)candidate.SdpMLineIndex, line);
         }
     }
@@ -234,11 +284,12 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
 
     internal bool AdvanceHandshake()
     {
-        CheckTransport();
+        if (!CheckTransport()) return false;
         if (!_handshakeSent && Open(_message))
         {
             Send(_message, new { type = "Handshake", version = "messageV1", id = Guid.NewGuid().ToString(), cv = "0" });
             _handshakeSent = true;
+            _trace?.Invoke("Xbox message handshake sent.");
         }
         if (!_authorized && Volatile.Read(ref _ack) != 0 && Open(_control) && Open(_input))
         {
@@ -260,24 +311,83 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     private void Config(string target, object value) => Send(_message, new { type = "Message", target, id = Guid.NewGuid().ToString(), cv = "", content = JsonSerializer.Serialize(value) });
     private void SendGamepad(bool added) => Send(_control, new { message = "gamepadChanged", gamepadIndex = 0, wasAdded = added });
 
-    internal void CheckTransport()
+    internal bool CheckTransport()
     {
         if (Volatile.Read(ref _linkFailed) != 0) throw new IOException("Could not route the negotiated Xbox media track.");
         var error = gst_bus_timed_pop_filtered(_bus, 0, 3); // EOS or ERROR
-        if (error != 0) { gst_mini_object_unref(error); throw new IOException("Xbox audio/video playback ended or the decoder failed."); }
+        if (error != 0)
+        {
+            string reason = "Xbox audio/video playback ended.";
+            try
+            {
+                var details = gst_message_get_structure(error);
+                var value = details == 0 ? 0 : gst_structure_get_value(details, "gerror");
+                var nativeError = value == 0 ? 0 : g_value_get_boxed(value);
+                if (nativeError != 0)
+                {
+                    // GError has two 32-bit fields followed by the message pointer. Only fixed categories reach the log.
+                    var message = Text(Marshal.ReadIntPtr(nativeError, 8));
+                    reason = message.Contains("window", StringComparison.OrdinalIgnoreCase) && message.Contains("clos", StringComparison.OrdinalIgnoreCase)
+                        ? "The Xbox playback window closed." : $"Xbox media playback failed ({Text(g_quark_to_string((uint)Marshal.ReadInt32(nativeError)))} {Marshal.ReadInt32(nativeError, 4)}).";
+                    nint source = MessageSource(error);
+                    nint factory = source != 0 && g_type_check_instance_is_a(source, gst_element_get_type()) != 0 ? gst_element_get_factory(source) : 0;
+                    if (factory != 0)
+                    {
+                        nint name = gst_object_get_name(factory);
+                        try { _trace?.Invoke($"Media error from {Text(name)}."); }
+                        finally { g_free(name); }
+                    }
+                }
+            }
+            finally { gst_mini_object_unref(error); }
+            _trace?.Invoke(reason);
+            throw new IOException(reason);
+        }
         Get(_peer, "connection-state", out int state, 0);
-        if (state >= 3) throw new IOException("The Xbox WebRTC connection was interrupted.");
+        if (state != _lastPeerState)
+        {
+            _lastPeerState = state;
+            _trace?.Invoke(TransportDescription());
+        }
+        // While opening a session, ICE can still find a working pair after a provisional disconnect.
+        // Once input is authorized, end a lost transport promptly so Studio disarms and releases it.
+        if (state == 3 && !_authorized) return false;
+        if (state >= 3) throw new IOException($"Xbox {(_authorized ? "Remote Play stopped" : "could not start Remote Play")}. {TransportDescription()}");
+        return true;
+    }
+
+    internal string TransportDescription()
+    {
+        Get(_peer, "connection-state", out int peer, 0);
+        Get(_peer, "ice-connection-state", out int ice, 0);
+        GetPointer(_peer, "sctp-transport", out var sctp, 0);
+        int dtls = -1;
+        if (sctp != 0)
+        {
+            try
+            {
+                GetPointer(sctp, "transport", out var transport, 0);
+                if (transport != 0)
+                    try { Get(transport, "state", out dtls, 0); } finally { gst_object_unref(transport); }
+            }
+            finally { gst_object_unref(sctp); }
+        }
+        string peerState = peer switch { 0 => "new", 1 => "connecting", 2 => "connected", 3 => "disconnected", 4 => "failed", 5 => "closed", _ => "unknown" };
+        string iceState = ice switch { 0 => "new", 1 => "checking", 2 => "connected", 3 => "completed", 4 => "failed", 5 => "disconnected", 6 => "closed", _ => "unknown" };
+        string dtlsState = dtls switch { 0 => "new", 1 => "closed", 2 => "failed", 3 => "connecting", 4 => "connected", _ => "unavailable" };
+        return $"WebRTC {peerState}, ICE {iceState}, DTLS {dtlsState}.";
     }
 
     internal IControllerOutput AttachController()
     {
         lock (_gate)
         {
-            if (_disposed || !_authorized || _output is not null || _writer?.IsAvailable != true) throw new InvalidOperationException("The Xbox controller channel is unavailable.");
+            if (_disposed || !_authorized || _output is not null || _writer?.PrepareAttachment() != true) throw new InvalidOperationException("The Xbox controller channel is unavailable.");
             SendGamepad(true);
             return _output = new OutputLease(this);
         }
     }
+    internal bool HasControllerOutput { get { lock (_gate) return _output is not null && _writer?.IsAvailable == true; } }
     private sealed class OutputLease(GStreamerPeer owner) : IControllerOutput
     {
         public bool UsesVirtualDevice => false;
@@ -325,7 +435,39 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     public DirectStreamMetrics? LatestTelemetry => Volatile.Read(ref _latest);
     internal XboxTransportStats ReadStats(CancellationToken ct)
     {
-        var stats = WithPromise("get-stats", 0, _stats.Sample, ct) with { VideoDecoder = Volatile.Read(ref _decoderName) };
+        string? videoMemory = null;
+        var caps = gst_pad_get_current_caps(_decodedPad);
+        if (caps != 0)
+        {
+            try
+            {
+                var format = gst_caps_get_structure(caps, 0);
+                if (gst_structure_get_int(format, "width", out int width) != 0 && gst_structure_get_int(format, "height", out int height) != 0)
+                    _stats.Dimensions(width, height);
+                var features = gst_caps_get_features(caps, 0);
+                videoMemory = gst_caps_features_contains(features, "memory:D3D12Memory") != 0 ? "D3D12" :
+                    gst_caps_features_contains(features, "memory:D3D11Memory") != 0 ? "D3D11" :
+                    gst_caps_features_contains(features, "memory:SystemMemory") != 0 ? "system" : "other";
+            }
+            finally { gst_mini_object_unref(caps); }
+        }
+        var stats = WithPromise("get-stats", 0, _stats.Sample, ct) with { VideoDecoder = Volatile.Read(ref _decoderName), VideoMemory = videoMemory,
+            ControllerStateChanges = _writer?.StateChanges ?? 0 };
+        nint renderer = Volatile.Read(ref _renderer);
+        if (renderer != 0)
+        {
+            GetPointer(renderer, "stats", out var presentation, 0);
+            if (presentation != 0)
+            {
+                try
+                {
+                    if (gst_structure_get_uint64(presentation, "rendered", out var rendered) != 0 &&
+                        gst_structure_get_uint64(presentation, "dropped", out var dropped) != 0)
+                        stats = stats with { RenderedFrames = rendered, RenderDroppedFrames = dropped };
+                }
+                finally { gst_structure_free(presentation); }
+            }
+        }
         GetPointer(_decodedAudio, "stats", out nint audio, 0);
         if (audio != 0)
         {
@@ -400,12 +542,20 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_frame is not null) throw new InvalidOperationException("An Xbox observation is already active.");
             _frame = frame; _ended = ended;
+            gst_util_set_object_arg(_observationValve, "drop", "false");
             return new Subscription(this, frame);
         }
     }
     private sealed class Subscription(GStreamerPeer owner, Action<DecodedBgraFrame> frame) : IDisposable
     {
-        public void Dispose() { lock (owner._gate) if (owner._frame == frame) { owner._frame = null; owner._ended = null; } }
+        public void Dispose()
+        {
+            lock (owner._gate) if (owner._frame == frame)
+            {
+                gst_util_set_object_arg(owner._observationValve, "drop", "true");
+                owner._frame = null; owner._ended = null;
+            }
+        }
     }
 
     // The media/session worker calls this after its last native operation. Controller
@@ -421,12 +571,13 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
         }
         ended?.Invoke();
         if (_pipeline != 0) gst_element_set_state(_pipeline, 1);
-        if (_decoderHandler != 0) g_signal_handler_disconnect(_pipeline, _decoderHandler);
+        if (_windowHandler is not null && _bus != 0) gst_bus_set_sync_handler(_bus, null, 0, 0);
+        if (_elementHandler != 0) g_signal_handler_disconnect(_pipeline, _elementHandler);
         if (_padHandler != 0) g_signal_handler_disconnect(_peer, _padHandler);
         if (_beforeHandler != 0) g_signal_handler_disconnect(_before, _beforeHandler);
         if (_afterHandler != 0) g_signal_handler_disconnect(_after, _afterHandler);
         if (_handler != 0) g_signal_handler_disconnect(_message, _handler);
-        foreach (var obj in new[] { _videoPad, _audioPad, _before, _after, _decodedAudio, _bus, _control, _input, _message, _sink, _peer, _pipeline })
+        foreach (var obj in new[] { _renderer, _videoPad, _audioPad, _before, _after, _decodedPad, _observationValve, _decodedAudio, _bus, _control, _input, _message, _sink, _peer, _pipeline })
             if (obj != 0) gst_object_unref(obj);
     }
 }

@@ -50,7 +50,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private bool _timingRevalidationRequired;
     private int _consecutiveOcrDir, _consecutiveOcrTempoDir, _excellentOcrStreak;
     private readonly object _ocrGate = new();
-    private string _notice = "Choose a window to preview gameplay.";
+    private string _notice = "Choose a capture source to preview gameplay.";
     private int _busy, _encodingPreview, _version;
     private long _sourcesRefreshedAt, _performanceRefreshedAt;
     private CancellationTokenSource _operation = new();
@@ -231,13 +231,19 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 case "sourceRefresh": RefreshSources(); return null;
                 case "sourceSelect":
                     RequireStopped();
-                    if (_direct) throw new InvalidOperationException("Select window capture first.");
                     string sourceId = args.Text("id");
                     RefreshSources();
                     if (sourceId.Length != 0 && !_sources.Any(s => SourceId(s) == sourceId))
-                        throw new InvalidOperationException("That window closed. Choose another Remote Play window.");
-                    if (sourceId != _selectedSourceId)
+                        throw new InvalidOperationException("That window closed. Choose another capture source.");
+                    if (_direct || sourceId != _selectedSourceId)
                     {
+                        if (_direct)
+                        {
+                            await DisconnectXboxAsync();
+                            _resumeControllerConsole = null;
+                            _direct = false;
+                            _notice = "";
+                        }
                         InvalidateSource(sourceId); SaveSettings();
                     }
                     return null;
@@ -518,7 +524,6 @@ internal sealed partial class DesktopVisionService : IDesktopModule
 
     private void RefreshSources()
     {
-        if (_direct) return;
         _sourcesRefreshedAt = Stopwatch.GetTimestamp();
         var sources = RemotePlayCapture.EnumerateWindows().ToArray();
         if (!_direct && _selectedSourceId.Length != 0 && !sources.Any(s => SourceId(s) == _selectedSourceId))
@@ -1150,7 +1155,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     {
         if (_disposed) return; _disposed = true; CancelOperation();
         if (_luaController is not null) _luaController.DirectOutput = null;
-        if (_xbox is { } connection) { _xbox = null; XboxShutdown = connection.CloseAsync(); }
+        _xbox?.Cancel();
         _feedbackOcr?.Dispose();
         _trainingJob.Dispose();
         _session?.Dispose(); _review?.Dispose(); _operation.Dispose(); ClearPreview();

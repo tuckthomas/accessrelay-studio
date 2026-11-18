@@ -22,6 +22,9 @@ internal sealed class XboxStreamControllerOutput : IControllerOutput
     private readonly long _origin = Stopwatch.GetTimestamp();
     private uint _sequence;
     private bool _failed, _disposed, _neutral;
+    private ControllerState _lastSent;
+    private long _stateChanges;
+    internal long StateChanges => Interlocked.Read(ref _stateChanges);
 
     internal XboxStreamControllerOutput(IXboxInputChannel channel)
     {
@@ -39,6 +42,20 @@ internal sealed class XboxStreamControllerOutput : IControllerOutput
     public bool UsesVirtualDevice => false;
     public bool IsAvailable { get { lock (_gate) return !_disposed && !_failed && _channel.IsOpen; } }
     public string Status => IsAvailable ? "Direct Xbox controller connected." : "The Xbox input channel is unavailable.";
+
+    // A failed write revokes the old lease. Only an explicit new attachment can resume it.
+    internal bool PrepareAttachment()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_channel.IsOpen) return false;
+            if (!_failed) return true;
+            if (!SendGamepad(default)) return false;
+            _neutral = true;
+            _failed = false;
+            return true;
+        }
+    }
 
     public bool TryWrite(ControllerState state)
     {
@@ -75,7 +92,10 @@ internal sealed class XboxStreamControllerOutput : IControllerOutput
         BinaryPrimitives.WriteUInt16LittleEndian(report[28..], (ushort)(257 * state.RightTrigger));
         BinaryPrimitives.WriteUInt32LittleEndian(report[30..], 1); // PhysicalPhysicality
         BinaryPrimitives.WriteUInt32BigEndian(report[34..], 1);    // VirtualPhysicality
-        return _channel.TrySend(report);
+        if (!_channel.TrySend(report)) return false;
+        if (state != _lastSent) Interlocked.Increment(ref _stateChanges);
+        _lastSent = state;
+        return true;
     }
 
     private void WriteHeader(Span<byte> report, ushort type, uint sequence)

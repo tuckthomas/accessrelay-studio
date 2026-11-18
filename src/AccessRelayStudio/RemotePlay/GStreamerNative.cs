@@ -14,7 +14,8 @@ internal static class GStreamerNative
         if (OperatingSystem.IsWindows())
         {
             string? configured = Environment.GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64");
-            string[] roots = [configured ?? "", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gstreamer", "1.0", "msvc_x86_64"),
+            string[] roots = [configured ?? "", Path.Combine(AppContext.BaseDirectory, "RemotePlay", "GStreamer"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gstreamer", "1.0", "msvc_x86_64"),
                 Path.Combine(Path.GetPathRoot(Environment.SystemDirectory)!, "gstreamer", "1.0", "msvc_x86_64")];
             _windowsBin = roots.Where(Path.IsPathFullyQualified).Select(root => Path.Combine(root, "bin"))
                 .FirstOrDefault(bin => File.Exists(Path.Combine(bin, "gstreamer-1.0-0.dll"))) ?? throw new DllNotFoundException();
@@ -50,6 +51,27 @@ internal static class GStreamerNative
     }
     internal static string Text(nint p) => Marshal.PtrToStringUTF8(p) ?? "";
     [StructLayout(LayoutKind.Sequential)]
+    internal struct MiniObject
+    {
+        private nuint type;
+        private int referenceCount, lockState;
+        private uint flags;
+        private nint copy, dispose, free;
+        private uint privateUInt;
+        private nint privatePointer;
+    }
+    // The public GST_MESSAGE_SRC macro reads this member of GstMessage.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MessagePrefix
+    {
+        private MiniObject miniObject;
+        private uint type;
+        private ulong timestamp;
+        public nint Source;
+    }
+    private static readonly int SourceOffset = (int)Marshal.OffsetOf<MessagePrefix>(nameof(MessagePrefix.Source));
+    internal static nint MessageSource(nint message) => Marshal.ReadIntPtr(message, SourceOffset);
+    [StructLayout(LayoutKind.Sequential)]
     internal struct Map
     {
         public nint Memory;
@@ -63,6 +85,9 @@ internal static class GStreamerNative
     [DllImport(Gst)] private static extern void gst_version(out uint major, out uint minor, out uint micro, out uint nano);
     [DllImport(Gst)] internal static extern nint gst_parse_launch(string pipeline, out nint error);
     [DllImport(Gst)] internal static extern nint gst_element_get_factory(nint element);
+    [DllImport(Gst)] internal static extern nuint gst_element_get_type();
+    [DllImport(Gst)] internal static extern nint gst_element_factory_find(string name);
+    [DllImport(Gst)] internal static extern void gst_util_set_object_arg(nint element, string property, string value);
     [DllImport(Gst)] internal static extern nint gst_element_factory_get_metadata(nint factory, string key);
     [DllImport(Gst)] internal static extern nint gst_object_get_name(nint obj);
     [DllImport(Gst)] internal static extern nint gst_bin_get_by_name(nint bin, string name);
@@ -70,14 +95,21 @@ internal static class GStreamerNative
     [DllImport(Gst)] internal static extern int gst_pad_get_direction(nint pad);
     [DllImport(Gst)] internal static extern int gst_pad_link(nint source, nint sink);
     [DllImport(Gst)] internal static extern nint gst_element_get_static_pad(nint element, string name);
+    [DllImport(Gst)] internal static extern nint gst_pad_get_current_caps(nint pad);
     [DllImport(Gst)] internal static extern nint gst_element_get_bus(nint pipeline);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate int BusSyncHandler(nint bus, nint message, nint data);
+    [DllImport(Gst)] internal static extern void gst_bus_set_sync_handler(nint bus, BusSyncHandler? handler, nint data, nint destroy);
     [DllImport(Gst)] internal static extern nint gst_bus_timed_pop_filtered(nint bus, ulong timeout, uint types);
+    [DllImport(Gst)] internal static extern nint gst_message_get_structure(nint message);
     [DllImport(Gst)] internal static extern void gst_object_unref(nint obj);
+    [DllImport(Gst)] internal static extern nint gst_object_ref(nint obj);
     [DllImport(Gst)] internal static extern void gst_mini_object_unref(nint obj);
     [DllImport(Gst)] internal static extern nint gst_structure_from_string(string value, nint end);
     [DllImport(Gst)] internal static extern void gst_structure_free(nint structure);
     [DllImport(Gst)] internal static extern nint gst_caps_from_string(string caps);
     [DllImport(Gst)] internal static extern nint gst_caps_get_structure(nint caps, uint index);
+    [DllImport(Gst)] internal static extern nint gst_caps_get_features(nint caps, uint index);
+    [DllImport(Gst)] internal static extern int gst_caps_features_contains(nint features, string name);
     [DllImport(Gst)] internal static extern int gst_structure_get_int(nint s, string name, out int value);
     [DllImport(Gst)] internal static extern int gst_structure_get_uint(nint s, string name, out uint value);
     [DllImport(Gst)] internal static extern int gst_structure_get_int64(nint s, string name, out long value);
@@ -98,6 +130,8 @@ internal static class GStreamerNative
     [DllImport(Gst)] internal static extern int gst_buffer_map(nint buffer, out Map map, int flags);
     [DllImport(Gst)] internal static extern void gst_buffer_unmap(nint buffer, ref Map map);
     [DllImport(Video)] internal static extern nint gst_buffer_get_video_meta(nint buffer);
+    [DllImport(Video)] internal static extern int gst_is_video_overlay_prepare_window_handle_message(nint message);
+    [DllImport(Video)] internal static extern void gst_video_overlay_set_window_handle(nint overlay, nuint window);
     [DllImport(Video)] internal static extern int gst_video_meta_map(nint meta, uint plane, out Map map, out nint data, out int stride, int flags);
     [DllImport(Video)] internal static extern int gst_video_meta_unmap(nint meta, uint plane, ref Map map);
     [DllImport(App)] internal static extern nint gst_app_sink_try_pull_sample(nint sink, ulong timeoutNs);
@@ -112,8 +146,10 @@ internal static class GStreamerNative
     [DllImport(GLib)] internal static extern void g_bytes_unref(nint data);
     [DllImport(GLib)] internal static extern void g_free(nint p);
     [DllImport(GLib)] internal static extern void g_error_free(nint p);
+    [DllImport(GLib)] internal static extern nint g_quark_to_string(uint quark);
     [DllImport(Obj)] internal static extern nint g_value_get_boxed(nint value);
     [DllImport(Obj)] internal static extern int g_type_check_value_holds(nint value, nint type);
+    [DllImport(Obj)] internal static extern int g_type_check_instance_is_a(nint instance, nuint type);
     [DllImport(Obj, EntryPoint = "g_object_get")] internal static extern void Get(nint obj, string name, out int result, nint end);
     [DllImport(Obj, EntryPoint = "g_object_get")] internal static extern void GetPointer(nint obj, string name, out nint result, nint end);
     [DllImport(Obj, EntryPoint = "g_object_get")] internal static extern void GetSize(nint obj, string name, out ulong result, nint end);

@@ -23,7 +23,7 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
             bool exactInstalled = controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256);
             var installedPack = controller.InstalledMarketplacePack(entry.Id);
             bool installed = exactInstalled || installedPack is not null;
-            bool updateAvailable = installedPack is not null && !exactInstalled && CompareVersions(entry.Version, installedPack.Manifest.Version) >= 0;
+            bool updateAvailable = installedPack is not null && !exactInstalled && GamePackVersions.Order.Compare(entry.Version, installedPack.Manifest.Version) >= 0;
             string? coverKey = !string.IsNullOrEmpty(entry.CoverSha256) && _covers.ContainsKey(entry.CoverSha256)
                 ? entry.CoverSha256
                 : installed && visionPlugins.HasCover(entry.Id, installedPack?.Manifest.Version ?? entry.Version)
@@ -143,7 +143,7 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
             var installedPack = controller.InstalledMarketplacePack(entry.Id);
             if (installedPack is null) continue;
             if (controller.HasMarketplacePack(entry.Id, entry.Version, entry.ManifestSha256)) continue;
-            if (CompareVersions(entry.Version, installedPack.Manifest.Version) < 0) continue;
+            if (GamePackVersions.Order.Compare(entry.Version, installedPack.Manifest.Version) < 0) continue;
             try
             {
                 await InstallEntryAsync(client, entry);
@@ -181,11 +181,6 @@ internal sealed class DesktopMarketplaceService(DesktopControllerService control
             }
         }
     }
-
-    private static int CompareVersions(string left, string right) =>
-        Version.TryParse(left, out var l) && Version.TryParse(right, out var r)
-            ? l.CompareTo(r)
-            : string.Compare(left, right, StringComparison.Ordinal);
 
     public void Dispose() { _stop.Cancel(); _http.Dispose(); }
     private async Task CacheCoversAsync(MarketplaceClient client, MarketplaceCatalog catalog)

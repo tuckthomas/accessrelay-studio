@@ -14,6 +14,8 @@ internal sealed partial class DesktopVisionService
     private XboxDevicePrompt? _signInPrompt;
     private XboxConsole? _console;
     private XboxRemoteConnection? _xbox;
+    private DesktopXboxPlayer? _xboxPlayer;
+    private string? _resumeControllerConsole;
     internal Task XboxShutdown { get; private set; } = Task.CompletedTask;
     private bool _direct, _signedIn;
     private string _windowSelection = "", _consoleMessage = "";
@@ -43,7 +45,8 @@ internal sealed partial class DesktopVisionService
     {
         direct = _direct, signedIn = _signedIn, consoles = _consoles, consoleId = _console?.Id,
         signInCode = _signInPrompt?.Code, verificationPage = _signInPrompt?.VerificationUri.AbsoluteUri,
-        connected = _xbox?.Peer is not null, message = _xbox?.Status ?? _consoleMessage, statistics = _xbox?.Stats
+        connected = _xbox is { Stopping: false, Peer: not null }, controllerConnected = _xbox?.Peer?.HasControllerOutput == true,
+        message = _xbox?.Status ?? _consoleMessage, statistics = _xbox?.Stats
     };
 
     private void InvalidateSource(string id)
@@ -53,18 +56,53 @@ internal sealed partial class DesktopVisionService
         _runtime()?.SetVisionArmed(false);
     }
 
-    private async Task DisconnectXboxAsync()
+    private void StopXboxConnection(XboxRemoteConnection connection)
     {
-        if (_xbox is not { } connection) return;
+        if (_xbox != connection || connection.Stopping) return;
+        if (connection.Peer is { } peer) _resumeControllerConsole = peer.HasControllerOutput ? _console?.Id : null;
         _luaController?.StopOutput();
-        _xbox = null;
-        XboxShutdown = connection.CloseAsync();
-        await XboxShutdown;
-        if (_direct) InvalidateSource("");
+        connection.Cancel();
+    }
+
+    private Task DisconnectXboxAsync()
+    {
+        if (_xbox is { } connection) StopXboxConnection(connection);
+        return XboxShutdown;
+    }
+
+    private async Task FinishXboxPlayerAsync(XboxRemoteConnection connection, DesktopXboxPlayer player)
+    {
+        await connection.Completion;
+        try { player.Destroy(); }
+        finally
+        {
+            if (_xbox == connection)
+            {
+                _xbox = null;
+                _xboxPlayer = null;
+                _consoleMessage = connection.Status;
+                if (!_disposed)
+                {
+                    if (connection.HadControllerAtEnd) _resumeControllerConsole = _console?.Id;
+                    _luaController?.StopOutput();
+                    if (_direct && _selectedSourceId.Length != 0) InvalidateSource("");
+                }
+            }
+        }
     }
 
     private async Task XboxActionAsync(string action, System.Text.Json.JsonElement args, CancellationToken ct)
     {
+        if (action == "xboxShowPlayer")
+        {
+            if (_xbox is { Stopping: false } && _xboxPlayer is { } player) player.Show();
+            return;
+        }
+        if (action == "xboxControllerDisconnect")
+        {
+            if (_direct) { _resumeControllerConsole = null; _luaController?.StopOutput(); }
+            return;
+        }
         RequireStopped();
         if (action == "captureMode")
         {
@@ -77,7 +115,7 @@ internal sealed partial class DesktopVisionService
                 _signedIn = _xboxAccount.HasAccount; _windowSelection = _selectedSourceId; _consoleMessage = "";
                 _luaController?.StopOutput();
             }
-            else await DisconnectXboxAsync();
+            else { await DisconnectXboxAsync(); _resumeControllerConsole = null; }
             _direct = direct; InvalidateSource(direct ? "" : _windowSelection); RefreshSources();
             _notice = direct ? "Choose your Xbox console." : "Choose a gameplay window.";
             return;
@@ -87,6 +125,7 @@ internal sealed partial class DesktopVisionService
         {
             case "xboxSignIn":
                 if (_xbox is not null) await DisconnectXboxAsync();
+                _resumeControllerConsole = null;
                 await _xboxAccount.SignInAsync(prompt =>
                 {
                     _signInPrompt = prompt;
@@ -107,25 +146,44 @@ internal sealed partial class DesktopVisionService
                 break;
             case "xboxConsole":
                 if (_xbox is { Ended: false }) throw new InvalidOperationException("Disconnect before changing consoles.");
+                if (_console?.Id != args.Text("id")) _resumeControllerConsole = null;
                 _console = _consoles.FirstOrDefault(x => x.Id == args.Text("id")) ?? throw new InvalidOperationException("Refresh the console list.");
                 break;
             case "xboxConnect":
                 if (_console is null) throw new InvalidOperationException("Choose a console first.");
-                if (_xbox is { Ended: false }) return;
+                if (_xbox is { Stopping: false, Peer: not null } && _xboxPlayer is { } current) { current.Show(); return; }
                 await DisconnectXboxAsync();
                 var client = await _xboxAccount.ServiceAsync(ct);
                 ct.ThrowIfCancellationRequested();
-                var connection = _xbox = new XboxRemoteConnection(client, _console.Id);
+                var window = new DesktopXboxPlayer(_owner);
+                XboxRemoteConnection connection;
+                try { connection = new XboxRemoteConnection(client, _console.Id, window.Handle); }
+                catch { window.Destroy(); throw; }
+                _xbox = connection;
+                _xboxPlayer = window;
+                window.CloseRequested += () => StopXboxConnection(connection);
+                XboxShutdown = FinishXboxPlayerAsync(connection, window);
                 using (ct.Register(connection.Cancel))
                 {
-                    try { await connection.Ready; ct.ThrowIfCancellationRequested(); }
+                    try
+                    {
+                        window.Show();
+                        await connection.Ready;
+                        ct.ThrowIfCancellationRequested();
+                        if (connection.Stopping || _xbox != connection) throw new OperationCanceledException("Xbox playback closed.");
+                    }
                     catch { await DisconnectXboxAsync(); throw; }
                 }
                 InvalidateSource(DirectSourceId); _notice = "Xbox connected. Start capture to observe the stream.";
+                if (_resumeControllerConsole == _console.Id)
+                {
+                    _resumeControllerConsole = null;
+                    await _connectOutput();
+                }
                 break;
             case "xboxDisconnect": await DisconnectXboxAsync(); _consoleMessage = _notice = "Xbox disconnected."; break;
             case "xboxSignOut":
-                await DisconnectXboxAsync(); _xboxAccount.SignOut(); _signedIn = false; _consoles = []; _console = null; InvalidateSource("");
+                await DisconnectXboxAsync(); _resumeControllerConsole = null; _xboxAccount.SignOut(); _signedIn = false; _consoles = []; _console = null; InvalidateSource("");
                 _consoleMessage = _notice = "Signed out of Xbox."; break;
             default: throw new InvalidDataException("Unknown Xbox Remote Play command.");
         }

@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
 if (args is ["--xbox-webrtc-loopback"]) { GStreamerLoopbackChecks.Run().GetAwaiter().GetResult(); return; }
+if (args is ["--xbox-player-reconnect"]) { GStreamerLoopbackChecks.CheckPlayerReconnect(); return; }
+if (args is ["--xbox-color-benchmark"]) { XboxColorConversionBenchmark.Run(); return; }
 
 if (args is ["--direct-stream"]) { DirectStreamChecks.Run(); XboxHomeServiceChecks.Run().GetAwaiter().GetResult(); return; }
 

@@ -115,12 +115,30 @@ internal sealed class XboxHomeSession(XboxHomeService service, string path) : IA
         return answer.GetProperty("sdp").GetString() ?? throw new InvalidDataException("Xbox returned an empty SDP answer.");
     }
 
-    internal async Task<XboxIce[]> ExchangeIceAsync(IReadOnlyList<XboxIce> candidates, CancellationToken ct)
+    internal async Task<XboxIce[]> ExchangeIceAsync(IReadOnlyList<XboxIce> candidates, CancellationToken ct, Action<string>? trace = null)
     {
-        var result = await ExchangeAsync("ice", new { messageType = "iceCandidate", candidate = candidates }, ct);
-        return result.EnumerateArray().Where(v => v.TryGetProperty("candidate", out var s) && s.ValueKind == JsonValueKind.String)
+        var exchange = ExchangeAsync("ice", new { messageType = "iceCandidate", candidate = candidates }, ct);
+        var configuration = ConsoleEndpointsAsync(ct);
+        await Task.WhenAll(exchange, configuration);
+        var result = await exchange;
+        var remote = result.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.Object && v.TryGetProperty("candidate", out var s) && s.ValueKind == JsonValueKind.String)
             .Select(v => new XboxIce(v.GetProperty("candidate").GetString()!, v.TryGetProperty("sdpMLineIndex", out var m) && int.TryParse(m.ToString(), out int index) ? index : 0,
-                v.TryGetProperty("sdpMid", out var mid) ? mid.GetString() : null)).ToArray();
+                v.TryGetProperty("sdpMid", out var mid) && mid.ValueKind is JsonValueKind.String or JsonValueKind.Number ? mid.ToString() : null)).ToArray();
+        var endpoints = await configuration;
+        var routes = XboxIceCandidates.ForPeer(remote, endpoints);
+        trace?.Invoke($"ICE exchange: {candidates.Count} local entries, {remote.Length} Xbox entries, {endpoints.Count} configured endpoints, {routes.Count(c => c.Candidate.Length != 0)} remote candidates.");
+        return routes;
+    }
+
+    private async Task<IReadOnlyList<System.Net.IPEndPoint>> ConsoleEndpointsAsync(CancellationToken ct)
+    {
+        // Some consoles supply their reachable LAN endpoint only in session configuration.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(3));
+        try { return XboxIceCandidates.ConsoleEndpoints(await service.RequestAsync(HttpMethod.Get, Path + "/configuration", null, timeout.Token)); }
+        catch (HttpRequestException) { return []; }
+        catch (JsonException) { return []; }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return []; }
     }
 
     private async Task<JsonElement> ExchangeAsync(string name, object body, CancellationToken ct)

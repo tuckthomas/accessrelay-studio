@@ -7,6 +7,7 @@ internal readonly record struct VisionPrediction(long SessionGeneration, long Sh
     double Confidence, double UncertaintyMs, bool PlayerTracked)
 {
     public bool ContinueCommittedAction { get; init; }
+    public string? TrackingFailure { get; init; }
 }
 
 internal enum VisionRunState { Disabled, Observing, Ready, TrackingShot, ReleaseScheduled, ReleasedLatched, Suspended }

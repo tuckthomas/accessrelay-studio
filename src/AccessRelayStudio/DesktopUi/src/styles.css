@@ -300,7 +300,7 @@ details[open] > summary { margin-bottom: 12px; }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration: .01ms!important; transition-duration: .01ms!important; scroll-behavior: auto!important; } }
 
 .remote-play-page > .section-header .field { min-width: 200px; }
-.remote-play-source { align-items: center; }
+.remote-play-source { align-items: flex-end; }
 .remote-play-source .field { flex: 1; }
 .training-folder-settings { margin-top:20px; }
 .training-folder-path { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }

@@ -371,13 +371,14 @@ internal sealed class VisionSession : IDisposable
                             if (signal.TimeToTargetMs.HasValue || signal.InvalidateAttempt || signal.ContinueCommittedAction)
                             {
                                 hasDecision = true; predictions++;
-                                if (fresh && sourceReady && predictor.CanArm)
+                                if (fresh && sourceReady && predictor.CanArm && context.Armed && context.ShotToken != 0)
                                 {
                                     submitted = true;
                                     accepted = _runtime.SubmitVisionPrediction(new(context.SessionGeneration, context.ShotToken,
                                         frame.Sequence, frame.CaptureTicks, Stopwatch.GetTimestamp(), signal.TimeToTargetMs ?? 0,
                                         signal.Confidence, signal.UncertaintyMs, signal.Acquired && !signal.InvalidateAttempt)
-                                    { ContinueCommittedAction = signal.ContinueCommittedAction && !signal.InvalidateAttempt });
+                                    { ContinueCommittedAction = signal.ContinueCommittedAction && !signal.InvalidateAttempt,
+                                        TrackingFailure = signal.InvalidateAttempt ? signal.Message : null });
                                 }
                             }
                         }

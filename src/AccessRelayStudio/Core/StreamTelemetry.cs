@@ -106,7 +106,11 @@ internal sealed class StreamTelemetryWindow(long frequency)
             (r.Rtt is double rtt && r.RttSource is string source && rttBaseline.TryGetValue(source, out double median) ? Math.Abs(rtt - median) : 0));
         bool gap = false;
         for (int i = 1; i < samples.Length; i++) gap |= samples[i].Timestamp - samples[i - 1].Timestamp > frequency * 3;
-        bool unstable = gap || uncertainty > budgetMs || samples.Any(r => r.Loss > 0 || r.Decode > Math.Max(12, budgetMs)
+        // Native decoder timing includes buffered frames. Steady one-frame latency at 60 Hz
+        // is about 17 ms even when the next frame arrives on time. Variation above still counts.
+        double DecodeLimit(Sample r) => r.Direct is not null && nominalFps is > 0
+            ? Math.Max(budgetMs, 2000 / nominalFps.Value) : Math.Max(12, budgetMs);
+        bool unstable = gap || uncertainty > budgetMs || samples.Any(r => r.Loss > 0 || r.Decode > DecodeLimit(r)
             || r.Fps < Math.Max(25, nominalFps.GetValueOrDefault() * .8));
         if (unstable) return Result("unstable", "Stream statistics exceeded the timing budget. Automatic tuning is paused.", false, uncertainty);
         if (samples.Any(r => !r.Jitter.HasValue || !r.Decode.HasValue || !r.Fps.HasValue))

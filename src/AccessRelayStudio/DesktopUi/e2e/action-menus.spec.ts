@@ -9,9 +9,6 @@ async function openLibrary(page: Page) {
     previewState.voice.profiles = Array.from({ length: 8 }, (_, index) => ({
       id: `voice-${index}`, name: `Voice ${index + 1}`, kind: 'reference', durationMs: 15000,
     }));
-    previewState.controller.activeProfile.recordings = Array.from({ length: 14 }, (_, index) => ({
-      id: `sequence-${index}`, name: `Sequence ${index + 1}`, durationMs: 500, frameCount: 12,
-    }));
     await desktop.command('app.page', { page: 'workspace' });
   });
   await page.getByRole('button', { name: 'Voice', exact: true }).click();
@@ -86,16 +83,17 @@ test('voice actions open below when space allows, dismiss outside and support ke
   await expect(trigger).toBeFocused();
 });
 
-test('saved sequence actions use the same adaptive menu inside the scrolling list', async ({ page }) => {
+test('duplicating a voice from the scrolled library opens the dialog for that row', async ({ page }) => {
   await openLibrary(page);
-  await page.getByRole('button', { name: 'Controller', exact: true }).click();
-  await page.getByRole('tab', { name: /^Sequences/ }).click();
-  const trigger = page.getByRole('button', { name: 'More actions for Sequence 14', exact: true });
+  const trigger = page.getByRole('button', { name: 'More actions for Voice 8', exact: true });
   await trigger.scrollIntoViewIfNeeded();
   await trigger.click();
-  const menu = page.getByRole('menu', { name: 'More actions for Sequence 14', exact: true });
+  const menu = page.getByRole('menu', { name: 'More actions for Voice 8', exact: true });
   await expectInside(menu, page.locator('.app-main'));
   await menu.getByRole('menuitem', { name: 'Duplicate', exact: true }).click();
   await expect(menu).not.toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Make another version' })).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: 'Duplicate voice' });
+  await expect(dialog.getByRole('textbox', { name: 'Voice profile name' })).toHaveValue('Voice 8 copy');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(trigger).toBeFocused();
 });

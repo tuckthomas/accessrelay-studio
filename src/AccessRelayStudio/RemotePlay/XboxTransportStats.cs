@@ -11,8 +11,12 @@ internal sealed record XboxTransportStats(long Timestamp, double? RttMs, double?
     double? DecodedFps, int Width, int Height, double? JitterBufferMs, long? PacketsLost, long? FramesDropped, double? PacketLossPercent, string? RttSource)
 {
     public ulong? DecodedAudioBuffers { get; init; }
+    public ulong? RenderedFrames { get; init; }
+    public ulong? RenderDroppedFrames { get; init; }
     public string? VideoDecoder { get; init; }
+    public string? VideoMemory { get; init; }
     public ControllerHandoffStats? ControllerWrites { get; init; }
+    public long ControllerStateChanges { get; init; }
     internal DirectStreamMetrics Reading => new(Timestamp, RttMs, RttSource, JitterMs, DecodeMs, DecodedFps,
         PacketLossPercent, JitterBufferMs, PacketsLost, FramesDropped, Width, Height) { ControllerWrites = ControllerWrites, VideoDecoder = VideoDecoder };
 }
@@ -81,12 +85,8 @@ internal sealed class XboxStatsCollector
     [StructLayout(LayoutKind.Sequential)]
     private struct BufferPrefix
     {
-        public nuint Type;
-        public int ReferenceCount, LockState;
-        public uint Flags;
-        public nint Copy, Dispose, Free;
-        public uint PrivateUInt;
-        public nint PrivatePointer, Pool;
+        private MiniObject miniObject;
+        private nint pool;
         public ulong Pts;
     }
     private static readonly int PtsOffset = checked((int)Marshal.OffsetOf<BufferPrefix>(nameof(BufferPrefix.Pts)));

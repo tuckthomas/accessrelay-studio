@@ -74,14 +74,14 @@ test('setup dialog works with keyboard and keeps the UI local in preview', async
   await dialog.getByLabel('Profile name').press('Enter');
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Controller profile', exact: true })).toHaveAttribute('value', /.+/);
-  await page.getByRole('tab', { name: 'Lua scripts 0' }).click();
+  await page.getByRole('tab', { name: 'Scripts 0', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Your script editor' })).toBeVisible();
 });
-test('mapping primary action stays visible on a desktop window', async ({ page }) => {
+test('mapping primary action stays visible on a desktop window', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1536, height: 960 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Controller', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Save mapping' })).toBeInViewport();
-  await expect(page.getByText('Use the sequence timing saved in this profile.')).toBeVisible();
-  await page.screenshot({ path: 'D:/AccessRelayStudio/DesignReview/controller-final.png', fullPage: false });
+  await expect(page.getByRole('combobox', { name: 'What should it do?' })).toHaveAccessibleDescription("Keep this control's usual behavior.");
+  await page.screenshot({ path: testInfo.outputPath('controller-final.png'), fullPage: false });
 });

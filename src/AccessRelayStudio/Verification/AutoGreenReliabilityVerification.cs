@@ -112,6 +112,12 @@ internal static class AutoGreenReliabilityVerification
         Check(direct.Assess(3000, 3200, 12, true).State == "unstable", "An incomplete native sample hid observed packet loss.");
         direct.Reset(); direct.Add(sample with { CaptureTimestamp = 3000, DecodeMs = null });
         Check(direct.Assess(3000, 3200, 12, true).State == "unavailable", "Missing decoder statistics permitted adaptation.");
+        direct.Reset();
+        direct.Add(sample with { CaptureTimestamp = 1000, Fps = 60, JitterMs = .1, DecodeMs = 17.1, PacketLossPercent = 0 });
+        direct.Add(sample with { CaptureTimestamp = 2000, Fps = 59.9, JitterMs = .1, DecodeMs = 17.2, PacketLossPercent = 0 });
+        Check(direct.Assess(1800, 2100, 12, true).State == "stable", "A steady pipelined Xbox decoder blocked every meter forecast.");
+        direct.Add(sample with { CaptureTimestamp = 3000, Fps = 60, JitterMs = .1, DecodeMs = 45, PacketLossPercent = 0 });
+        Check(direct.Assess(2900, 3200, 12, true).State == "unstable", "A stalled native decoder permitted adaptation.");
         var combined = Paddle();
         combined.ObserveStreamTelemetry(parsed! with { CaptureTimestamp = 20, JitterMs = 8 });
         combined.ObserveStreamTelemetry(parsed! with { CaptureTimestamp = 80, JitterMs = 8 });

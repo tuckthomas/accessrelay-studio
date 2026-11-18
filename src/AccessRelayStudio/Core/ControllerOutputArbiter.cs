@@ -238,8 +238,6 @@ internal sealed class ControllerOutputArbiter
         if (double.IsFinite(prediction.UncertaintyMs) && prediction.UncertaintyMs >= 0)
             prediction = prediction with { UncertaintyMs = Math.Sqrt(prediction.UncertaintyMs * prediction.UncertaintyMs
             + telemetry.AdditionalUncertaintyMs * telemetry.AdditionalUncertaintyMs) };
-        if (telemetry.State == "unstable")
-            prediction = prediction with { UncertaintyMs = Math.Max(prediction.UncertaintyMs, _settings.MaximumUncertaintyMs + 1) };
         _uncertainty = prediction.UncertaintyMs;
         // Explicit continuation cannot create or move a deadline, or excuse a tracking rejection.
         if (prediction.ContinueCommittedAction)
@@ -255,17 +253,23 @@ internal sealed class ControllerOutputArbiter
             _rejected++; CancelAttempt("Continuation rejected: no anchored stroke or fresh post-anchor frame.", now);
             return false;
         }
-        if (prediction.CaptureTimestamp < _shotStarted || prediction.CaptureTimestamp > prediction.CompletedTimestamp
-            || prediction.CompletedTimestamp > now || age < 0 || age > _settings.MaximumFrameAgeMs
-            || !double.IsFinite(prediction.TimeToReleaseMs) || prediction.TimeToReleaseMs < 0
-            || prediction.TimeToReleaseMs > _settings.MaximumShotDurationMs
-            || !double.IsFinite(prediction.Confidence) || prediction.Confidence < _settings.MinimumConfidence
-            || prediction.Confidence > 1 || !prediction.PlayerTracked
-            || !double.IsFinite(prediction.UncertaintyMs) || prediction.UncertaintyMs < 0
-            || prediction.UncertaintyMs > _settings.MaximumUncertaintyMs)
+        string? rejection = null;
+        if (prediction.CaptureTimestamp < _shotStarted) rejection = "The frame was captured before this shot started.";
+        else if (prediction.CaptureTimestamp > prediction.CompletedTimestamp || prediction.CompletedTimestamp > now || age < 0)
+            rejection = "The frame and prediction timestamps are out of order.";
+        else if (age > _settings.MaximumFrameAgeMs) rejection = $"The frame was {age:F1} ms old (limit {_settings.MaximumFrameAgeMs} ms).";
+        else if (!prediction.PlayerTracked) rejection = prediction.TrackingFailure ?? "The predictor lost track of the player or shot meter.";
+        else if (!double.IsFinite(prediction.TimeToReleaseMs) || prediction.TimeToReleaseMs < 0 || prediction.TimeToReleaseMs > _settings.MaximumShotDurationMs)
+            rejection = "The predicted release time was outside this shot's timing window.";
+        else if (!double.IsFinite(prediction.Confidence) || prediction.Confidence < _settings.MinimumConfidence || prediction.Confidence > 1)
+            rejection = $"Prediction confidence was {prediction.Confidence:P1} (minimum {_settings.MinimumConfidence:P1}).";
+        else if (telemetry.State == "unstable") rejection = telemetry.Message;
+        else if (!double.IsFinite(prediction.UncertaintyMs) || prediction.UncertaintyMs < 0 || prediction.UncertaintyMs > _settings.MaximumUncertaintyMs)
+            rejection = $"Timing uncertainty was {prediction.UncertaintyMs:F1} ms (limit {_settings.MaximumUncertaintyMs} ms).";
+        if (rejection is not null)
         {
             _rejected++;
-            CancelAttempt("Prediction rejected: stale frame, uncertain player/animation, or invalid timing.", now);
+            CancelAttempt(rejection, now);
             return false;
         }
         // A started ramp has fixed deadlines. Fresh, valid observations still

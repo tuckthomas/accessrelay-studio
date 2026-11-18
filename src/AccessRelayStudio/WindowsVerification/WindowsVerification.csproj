@@ -11,6 +11,7 @@
     <None Update="Fixtures/bars-320x180.h264" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="Program.cs" />
     <Compile Include="GStreamerLoopbackChecks.cs" />
+    <Compile Include="XboxColorConversionBenchmark.cs" />
     <Compile Include="DirectStreamChecks.cs" />
     <Compile Include="XboxHomeServiceChecks.cs" />
     <Compile Include="CaptureCadenceChecks.cs" />

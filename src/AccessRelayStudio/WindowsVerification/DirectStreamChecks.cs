@@ -129,7 +129,14 @@ internal static class DirectStreamChecks
         }
         channel.Reject = true;
         Check(!writer.TryWrite(default) && !writer.IsAvailable, "Backpressure was counted as a successful write.");
+        Check(!writer.PrepareAttachment(), "Reattachment succeeded while the channel still rejected input.");
         channel.Reject = false;
+        int beforeReattach = channel.Snapshot().Length;
+        Check(!writer.TryWrite(default) && writer.PrepareAttachment() && writer.IsAvailable, "Explicit reattachment failed to recover the controller channel.");
+        var resumed = channel.Snapshot();
+        Check(resumed.Length == beforeReattach + 1 && IsNeutral(resumed[^1]) &&
+            BinaryPrimitives.ReadUInt32LittleEndian(resumed[^1].AsSpan(2)) > BinaryPrimitives.ReadUInt32LittleEndian(resumed[^2].AsSpan(2)),
+            "Reattachment must send a fresh neutral report with a forward sequence number.");
         writer.Dispose();
         Check(!channel.IsOpen && IsNeutral(channel.Snapshot()[^1]), "Output teardown did not neutralize and close the channel.");
 
