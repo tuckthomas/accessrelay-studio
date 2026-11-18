@@ -32,6 +32,26 @@ internal static class RuntimeSignalContextChecks
         Wait(() => runtime.ReadVisionSignalContext().HoldStartedTimestamp > first.HoldStartedTimestamp,
             "A new physical press reused the previous transition timestamp.");
 
+        input.SetState(default);
+        Wait(() => runtime.ReadVisionSignalContext().HoldStartedTimestamp == 0, "Control did not release.");
+        runtime.ConfigureVision(VisionSettings.Default, new() { Kind = VisionActionKind.RightStickStroke,
+            TriggerControl = ControlId.X });
+        runtime.BeginVisionSession();
+        Check(runtime.SetVisionArmed(true), "Could not arm a face-button shot.");
+        var gathered = new ControllerState { Buttons = (ushort)ControlId.X, LeftX = -23000, LeftY = 10000 };
+        input.SetState(gathered);
+        Wait(() => runtime.Latest is { Output.RightY: short.MinValue } && runtime.VisionStatus.ShotToken > 0,
+            "X did not generate stick-down.");
+        var atPress = runtime.ReadVisionSignalContext().TriggerSample;
+        Check(atPress is { LeftX: -23000, LeftY: 10000 } && runtime.Latest is { Output.Buttons: 0, Output.LeftX: < 0, Output.LeftY: > 0 },
+            "The shot button leaked to the game or steering was lost.");
+        input.SetState(gathered with { LeftX = 0, LeftY = 0 });
+        Wait(() => runtime.ReadVisionSignalContext().Physical?.LeftX == 0, "Steering did not update.");
+        Check(runtime.ReadVisionSignalContext().TriggerSample == atPress, "Later steering overwrote the gather.");
+        input.SetState(default);
+        Wait(() => runtime.LastVisionAttempt?.Outcome == VisionActionOutcome.Cancelled, "Releasing X did not cancel.");
+        Check(runtime.LastVisionAttempt!.TriggerSample == atPress, "The receipt lost the movement at the press.");
+
         // Verify live auto-OCR feedback parsing & damped adaptive timing step.
         var rhythmSlightlyEarly = ShotFeedbackAnalysis.ParseFeedback([
             new("RHYTHM", .95, new(.42, .02, .10, .03)),

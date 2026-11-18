@@ -4,6 +4,7 @@ internal static class AutoGreenReliabilityVerification
 {
     internal static void Run()
     {
+        AssignedControls();
         LateStrokeAndActualHandoff();
         CancelledPaddleHold();
         BannerParsing();
@@ -11,6 +12,66 @@ internal static class AutoGreenReliabilityVerification
         LearningEvidence();
         Console.WriteLine("SUCCESS Auto-green reliability: lead time, actual handoffs, cancellations, banner association, stream health and learning evidence.");
     }
+    private static void AssignedControls()
+    {
+        var action = new VisionControllerAction { Kind = VisionActionKind.RightStickStroke, StrokeDurationMs = 40, EndHoldMs = 6 };
+        foreach (var id in ControlMap.All)
+        {
+            uint bit = (uint)id;
+            var input = new ControllerState((ushort)bit, id == ControlId.LeftTrigger ? (byte)30 : (byte)0,
+                id == ControlId.RightTrigger ? (byte)30 : (byte)0, 18000, -22000, 0, 0);
+            var paddles = (PaddleButtons)(bit >> 18);
+            Run(action with { TriggerControl = id }, input, paddles);
+        }
+        foreach (var direction in Enum.GetValues<StickDirection>())
+        {
+            var input = direction switch
+            {
+                StickDirection.LeftUp => new ControllerState { LeftY = 20000 },
+                StickDirection.LeftDown => new ControllerState { LeftY = -20000 },
+                StickDirection.LeftLeft => new ControllerState { LeftX = -20000 },
+                StickDirection.LeftRight => new ControllerState { LeftX = 20000 },
+                StickDirection.RightUp => new ControllerState { RightY = 20000 },
+                StickDirection.RightDown => new ControllerState { RightY = -20000 },
+                StickDirection.RightLeft => new ControllerState { RightX = -20000 },
+                _ => new ControllerState { RightX = 20000 }
+            };
+            Run(action with { TriggerDirection = direction }, input, PaddleButtons.None);
+        }
+
+        static void Run(VisionControllerAction binding, ControllerState input, PaddleButtons paddles)
+        {
+            binding.Validate();
+            var arbiter = new ControllerOutputArbiter(1000);
+            arbiter.Configure(VisionSettings.Default with { EstimatedVideoDelayMs = 0, EstimatedInputDelayMs = 0, CorrectionMs = 0 }, binding);
+            arbiter.BeginSession();
+            arbiter.Sample(default, default, true, true, false, 1);
+            Check(arbiter.SetArmed(true) && !binding.IsTriggerHeld(default, 0), "Neutral input triggered assistance.");
+            var manual = binding.WithoutAssignedTrigger(input);
+            Check(manual.LeftX == input.LeftX && manual.LeftY == input.LeftY, "The trigger consumed player movement.");
+            if (binding.TriggerControl is { } id)
+                Check(!ControlMap.IsPressed(id, manual, paddles & ~binding.ReservedPaddles), "The trigger also activated its ordinary binding.");
+            Check(arbiter.Sample(input, manual, true, true, false, 20, 19, paddles).RightY == short.MinValue &&
+                arbiter.Status.ShotToken != 0, "Assigned control did not open the shot.");
+            arbiter.Sample(default, default, true, true, false, 101);
+            Check(arbiter.LastAttempt is { Outcome: VisionActionOutcome.Cancelled, TriggerSample: { } press } &&
+                press.Timestamp == 19 && press.LeftX == input.LeftX && press.LeftY == input.LeftY,
+                "Release lost the original movement and press timestamp.");
+
+            arbiter.Sample(input, manual, true, true, false, 200, 200, paddles);
+            Check(arbiter.Submit(Prediction(arbiter, 1, 200, 50), 200), "Assigned trigger rejected the timing forecast.");
+            bool reachedUp = false;
+            for (int t = 202; t <= 302; t += 2)
+            {
+                var sent = arbiter.Sample(input, manual, true, true, false, t, t, paddles);
+                arbiter.RecordOutputSubmitted(sent, t);
+                reachedUp |= sent.RightY == short.MaxValue;
+            }
+            Check(reachedUp && arbiter.LastAction is { Outcome: VisionActionOutcome.Completed, TriggerSample: { Timestamp: 200 } },
+                "Assigned trigger did not complete its own down-to-up stroke.");
+        }
+    }
+
     private static ControllerOutputArbiter Paddle(double maxDuration = 5000)
     {
         var arbiter = new ControllerOutputArbiter(1000);

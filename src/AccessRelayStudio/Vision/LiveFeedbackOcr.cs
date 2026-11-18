@@ -100,14 +100,14 @@ internal sealed class LiveFeedbackOcr : IDisposable
 
                 var settings = getSettings();
                 if (!ShouldRead(settings)) continue;
-                // Only inspect shots triggered by a bound paddle action (never manual stick/button shots).
-                if (runtime.VisionAction.TriggerPaddle == PaddleButtons.None) continue;
+                // Read feedback for automatic strokes started by an assigned control.
+                if (!runtime.VisionAction.HasAssignedTrigger) continue;
 
                 // Ensure OCR reader models are loaded lazily on this background worker (CPU-only, skip pose).
                 _models ??= new(_modelSet, VisionExecutionProvider.Cpu, _modelDirectory, loadPose: false);
 
                 var result = await WatchShotFeedbackAsync(session, receipt, settings,
-                    () => getRuntime()?.LastVisionAttempt?.Id ?? 0, () => getRuntime()?.VisionStatus.HoldingCancelledPaddleShot == true, ct).ConfigureAwait(false);
+                    () => getRuntime()?.LastVisionAttempt?.Id ?? 0, () => getRuntime()?.VisionStatus.HoldingCancelledTriggerShot == true, ct).ConfigureAwait(false);
                 if (result is not null && (getRuntime()?.LastVisionAttempt?.Id ?? 0) == receipt.Id)
                     _onFeedback(result);
             }
@@ -126,11 +126,11 @@ internal sealed class LiveFeedbackOcr : IDisposable
     }
 
     private async Task<OcrFeedbackRead?> WatchShotFeedbackAsync(VisionSession session, VisionActionReceipt receipt,
-        VisionSettings settings, Func<long> getLatestReceiptId, Func<bool> holdingCancelledPaddleShot, CancellationToken ct)
+        VisionSettings settings, Func<long> getLatestReceiptId, Func<bool> holdingCancelledTriggerShot, CancellationToken ct)
     {
         // A pre-stroke tracking cancellation can still be holding down for the user.
         // Its HUD result belongs after their physical release, not the cancellation instant.
-        while (receipt.Outcome == VisionActionOutcome.Cancelled && holdingCancelledPaddleShot())
+        while (receipt.Outcome == VisionActionOutcome.Cancelled && holdingCancelledTriggerShot())
         {
             if (getLatestReceiptId() != receipt.Id) return null;
             await Task.Delay(50, ct).ConfigureAwait(false);
