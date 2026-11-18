@@ -15,7 +15,7 @@ In **Settings → Direct Xbox Remote Play → Capture color conversion**, Automa
 
 ## Interpret the numbers
 
-Direct playback requests 1920 × 1080. Studio displays the actual decoded dimensions and updates statistics about once per second. The shot diagnostics record the decoder’s factory name. On compatible Windows GPUs, video stays in Direct3D memory for display. Starting an observation opens a separate branch. With the D3D12 H.264 decoder, that branch downloads the decoded frame and converts it to full-resolution BGRA on the CPU for vision, preview, and recording. Windows audio uses the default output device with low-latency WASAPI settings. The internal preview has its own refresh cadence.
+Direct playback requests 1920 × 1080. Studio displays the actual decoded dimensions and updates statistics about once per second. The shot diagnostics record the decoder’s factory name. On compatible Windows GPUs, video stays in Direct3D memory for display. Starting an observation opens a separate branch that supplies full-resolution BGRA frames to vision, preview and recording. The D3D12 conversion path converts before download. The CPU path converts in system memory. Windows audio uses the default output device with low-latency WASAPI settings. The internal preview has its own refresh cadence.
 
 The [NBA gameplay replay](https://github.com/tuckthomas/accessrelay-marketplace/blob/main/docs/nba2k27-meter-color-replay.md) measures CPU and D3D12 conversion
 on the same recorded shots. It checks full-size OCR, preview and diagnostic images
