@@ -52,7 +52,12 @@ internal static class ResourceMonitorChecks
         Check(preferences.LoadResourceMonitoring(), "New preference default changed unexpectedly.");
         preferences.SaveResourceMonitoring(false);
         Check(!new DesktopPreferenceStore(directory).LoadResourceMonitoring(), "Off did not persist across launches.");
+        Check(!preferences.LoadXboxCpuConversion(), "A legacy installation did not default to automatic color conversion.");
+        preferences.SaveXboxCpuConversion(true);
+        Check(!preferences.LoadResourceMonitoring(), "Changing conversion enabled resource monitoring.");
         preferences.SaveResourceMonitoring(true);
+        Check(new DesktopPreferenceStore(directory).LoadXboxCpuConversion(), "CPU conversion did not persist independently.");
+        preferences.SaveXboxCpuConversion(false);
         Check(new DesktopPreferenceStore(directory).LoadResourceMonitoring(), "On did not persist across launches.");
         File.WriteAllText(Path.Combine(directory, "desktop-preferences.json"), "invalid");
         Check(!preferences.LoadResourceMonitoring(), "A damaged preference enabled sampling.");

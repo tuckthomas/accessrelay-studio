@@ -36,6 +36,14 @@ describe('workspace draft and capture visibility', () => {
     expect((screen.getByLabelText('What should it do?') as HTMLButtonElement).value).toBe('lua:' + draftScriptId);
     expect(harness.command).toHaveBeenCalledWith('app.draftState', { dirty: true });
   });
+  it('selects CPU color conversion for Direct Xbox in Settings', async () => {
+    render(<App />); await screen.findByRole('heading', { name: 'Your workspace', exact: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Settings', exact: true }));
+    const selector = await screen.findByRole('combobox', { name: 'Capture color conversion' });
+    expect(selector.textContent).toContain('Automatic');
+    selectValue(selector, 'cpu');
+    await waitFor(() => expect(harness.command).toHaveBeenCalledWith('app.xboxColorConversionSet', { forceCpu: true }));
+  });
   it('changes pages only after the user explicitly discards a draft', async () => {
     await openMappingDraft();
     fireEvent.click(screen.getByRole('button', { name: 'Settings', exact: true }));

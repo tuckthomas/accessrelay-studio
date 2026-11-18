@@ -21,12 +21,12 @@ internal sealed class XboxRemoteConnection
     internal bool HadControllerAtEnd { get; private set; }
     internal Task<GStreamerPeer> Ready => _ready.Task;
 
-    internal XboxRemoteConnection(XboxHomeService service, string console, nint playbackWindow)
+    internal XboxRemoteConnection(XboxHomeService service, string console, nint playbackWindow, bool forceCpu)
     {
         _worker = Task.Run(async () =>
         {
             Trace("Opening Xbox Remote Play.", start: true);
-            try { await RunAsync(service, console, playbackWindow, _stop.Token).ConfigureAwait(false); }
+            try { await RunAsync(service, console, playbackWindow, forceCpu, _stop.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested)
             { Trace("Session cancelled."); Volatile.Write(ref _status, "Xbox Remote Play disconnected."); _ready.TrySetCanceled(); }
             catch (Exception e)
@@ -61,9 +61,9 @@ internal sealed class XboxRemoteConnection
         { null => "absent", "0" => "rejected", _ => "accepted" };
     }
 
-    private async Task RunAsync(XboxHomeService service, string console, nint playbackWindow, CancellationToken ct)
+    private async Task RunAsync(XboxHomeService service, string console, nint playbackWindow, bool forceCpu, CancellationToken ct)
     {
-        using var peer = new GStreamerPeer(true, message => Trace(message), playbackWindow);
+        using var peer = new GStreamerPeer(true, message => Trace(message), playbackWindow, forceCpu);
         await using var session = await service.OpenAsync(console, ct);
         Trace("Home session provisioned.");
         Volatile.Write(ref _status, "Negotiating Xbox audio, video and input…");
@@ -111,7 +111,7 @@ internal sealed class XboxRemoteConnection
                         Trace($"Stream sample: {Value(stats.DecodedFps)} FPS, RTT {Value(stats.RttMs)} ms ({stats.RttSource ?? "unavailable"}), " +
                             $"jitter {Value(stats.JitterMs)} ms, jitter buffer {Value(stats.JitterBufferMs)} ms, decode {Value(stats.DecodeMs)} ms, " +
                             $"loss {Value(stats.PacketLossPercent)}%, {stats.RenderedFrames?.ToString() ?? "unknown"} frames rendered, " +
-                            $"{stats.RenderDroppedFrames?.ToString() ?? "unknown"} dropped by player, {input}.");
+                            $"{stats.RenderDroppedFrames?.ToString() ?? "unknown"} dropped by player, capture conversion {stats.ColorConversion ?? "pending"}, {input}.");
                         lastReport = sample;
                     }
                 }

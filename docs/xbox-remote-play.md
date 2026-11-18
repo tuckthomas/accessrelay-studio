@@ -2,6 +2,8 @@
 
 In **Live Gameplay → Capture source**, select an open window by title or choose **Direct Xbox Remote Play** to connect to a home console. Selecting a browser window captures its active tab.
 
+In **Settings → Direct Xbox Remote Play → Capture color conversion**, Automatic uses D3D12 for supported NV12 decoder surfaces after a local conversion check. Select **CPU** to convert after download. The setting takes effect on the next Xbox connection. Live Gameplay shows the conversion path selected for capture.
+
 ## Connect on Windows
 
 1. Enable remote features on the Xbox and use its Microsoft account. For the first run, put the Windows PC and Xbox on the same LAN and end any existing Remote Play session on the console.

@@ -107,7 +107,7 @@ public sealed partial class DesktopWindow : Window
                 _voice ??= new DesktopVoiceService(AppWindow.Id, () => _runtime);
                 _marketplace ??= new DesktopMarketplaceService(_controller, gamePlugins, () => _vision?.RequirePluginIdle());
                 _vision ??= new DesktopVisionService(AppWindow.Id, () => _runtime, () => _controller.ActiveProfile, () => _controller.StartOutputAsync(),
-                    () => gamePlugins.Plugins, gamePlugins, _controller);
+                    () => gamePlugins.Plugins, gamePlugins, _controller) { XboxCpuConversion = _preferences.LoadXboxCpuConversion() };
                 _assistant ??= new DesktopAssistantService(AppWindow.Id, DispatcherQueue, _controller, _vision, _voice,
                     () => _runtime, () => _hasUnsavedChanges);
                 _started = true;
@@ -250,6 +250,11 @@ public sealed partial class DesktopWindow : Window
                 string theme = args.Text("theme");
                 if (theme is not ("light" or "dark")) throw new InvalidDataException("Choose light or dark mode.");
                 ApplyTheme(theme); return null;
+            case "app.xboxColorConversionSet":
+                bool forceCpu = args.GetProperty("forceCpu").GetBoolean();
+                _preferences.SaveXboxCpuConversion(forceCpu);
+                _vision!.XboxCpuConversion = forceCpu;
+                return null;
             case "app.resourceMonitoringSet":
                 bool monitorEnabled = args.GetProperty("enabled").GetBoolean();
                 _preferences.SaveResourceMonitoring(monitorEnabled);
@@ -296,7 +301,7 @@ public sealed partial class DesktopWindow : Window
     private object Snapshot() => new
     {
         version = BuildInfo.Version, controller = _controller!.GetState(), vision = _vision!.GetState(), voice = _voice!.GetState(), marketplace = _marketplace!.GetState(), gamePlugins = _gamePlugins!.Presentations,
-        settings = new { driverAvailable = VirtualMicDriver.IsAvailable, buildFolder = AppContext.BaseDirectory, appDirectory = AppContext.BaseDirectory,
+        settings = new { xboxCpuConversion = _vision!.XboxCpuConversion, driverAvailable = VirtualMicDriver.IsAvailable, buildFolder = AppContext.BaseDirectory, appDirectory = AppContext.BaseDirectory,
             profileDirectory = _controller!.ProfileDirectory,
             engine = "C# / .NET", interfaceTechnology = "React / WebView2 · local bundled files", platform = "Windows x64",
             startupError = _startupError, isVerification = DesktopEnvironment.IsVerification, assistant = _assistant?.UiState(),

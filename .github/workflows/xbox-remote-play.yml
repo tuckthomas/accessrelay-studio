@@ -15,3 +15,5 @@ jobs:
         run: ./scripts/Install-XboxRemotePlay.ps1
       - name: Verify native H.264 reception and paddle output between WebRTC peers
         run: dotnet run --project ./src/AccessRelayStudio/WindowsVerification -c Release -- --xbox-webrtc-loopback
+      - name: Verify live capture with CPU color conversion selected
+        run: dotnet run --no-build --project ./src/AccessRelayStudio/WindowsVerification -c Release -- --xbox-webrtc-loopback --cpu-color

@@ -35,36 +35,26 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
     private readonly Action<string>? _trace;
     private readonly BusSyncHandler? _windowHandler;
     private nint _renderer;
+    private readonly bool _gpuColorRoute;
+    private nint _colorRoutes;
     private int _lastPeerState = -1;
 
     // decodebin chooses the installed decoder. These bounded queues keep presentation
     // and CPU analysis independent; local console audio uses the default audio sink.
-    private static string PlaybackPipeline(bool present)
+    private static string PlaybackPipeline(bool present, string conversion)
     {
-        string download = "";
-        if (OperatingSystem.IsWindows())
-        {
-            foreach (string name in new[] { "d3d12download", "d3d11download" })
-            {
-                nint factory = gst_element_factory_find(name);
-                if (factory == 0) continue;
-                gst_object_unref(factory);
-                download = name + " ! ";
-                break;
-            }
-        }
         string screen = present ? "autovideosink" : "fakesink", audio = present ? "autoaudiosink" : "fakesink";
         return "webrtcbin name=peer bundle-policy=max-bundle latency=25 " +
             "rtph264depay name=videoInput ! h264parse ! video/x-h264,alignment=au ! identity name=beforedecode ! decodebin ! identity name=afterdecode ! tee name=video " +
             "video. ! queue leaky=downstream max-size-buffers=1 ! valve name=observation drop=true drop-mode=forward-sticky-events ! " +
-            download + "videoconvert ! video/x-raw,format=BGRA ! appsink name=frames max-buffers=1 drop=true sync=false async=false " +
+            conversion + " ! video/x-raw,format=BGRA ! appsink name=frames max-buffers=1 drop=true sync=false async=false " +
             $"video. ! queue leaky=downstream max-size-buffers=1 ! videoconvert ! {screen} sync=false " +
             $"rtpopusdepay name=audioInput ! opusdec ! identity name=decodedAudio signal-handoffs=false ! audioconvert ! audioresample ! {audio} name=speakers sync=false";
     }
 
     internal GStreamerPeer(bool present = true, Action<string>? trace = null) : this(present, trace, 0) { }
 
-    internal GStreamerPeer(bool present, Action<string>? trace, nint playbackWindow)
+    internal GStreamerPeer(bool present, Action<string>? trace, nint playbackWindow, bool forceCpu = false)
     {
         _trace = trace;
         Initialize();
@@ -118,7 +108,7 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
         };
         try
         {
-            _pipeline = gst_parse_launch(PlaybackPipeline(present), out var error);
+            _pipeline = gst_parse_launch(PlaybackPipeline(present, XboxObservationConversion.Select(forceCpu, trace, out _gpuColorRoute)), out var error);
             if (error != 0 || _pipeline == 0) throw Error(error, "GStreamer requires WebRTC, NICE, H.264, Opus, playback and app plugins. Install its complete x64 runtime.");
             _elementHandler = ConnectElement(_pipeline, "deep-element-added", _elementAdded, 0, 0, 0);
             _peer = gst_bin_get_by_name(_pipeline, "peer"); _sink = gst_bin_get_by_name(_pipeline, "frames"); _bus = gst_element_get_bus(_pipeline);
@@ -139,6 +129,7 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
             _padHandler = g_signal_connect_data(_peer, "pad-added", _padAdded, 0, 0, 0);
             _before = gst_bin_get_by_name(_pipeline, "beforedecode"); _after = gst_bin_get_by_name(_pipeline, "afterdecode");
             _decodedPad = gst_element_get_static_pad(_after, "src"); _observationValve = gst_bin_get_by_name(_pipeline, "observation");
+            _colorRoutes = gst_bin_get_by_name(_pipeline, "colorRoutes");
             _decodedAudio = gst_bin_get_by_name(_pipeline, "decodedAudio");
             _beforeHandler = g_signal_connect_data(_before, "handoff", _beforeDecode, 0, 0, 0);
             _afterHandler = g_signal_connect_data(_after, "handoff", _afterDecode, 0, 0, 0);
@@ -451,7 +442,13 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
             }
             finally { gst_mini_object_unref(caps); }
         }
-        var stats = WithPromise("get-stats", 0, _stats.Sample, ct) with { VideoDecoder = Volatile.Read(ref _decoderName), VideoMemory = videoMemory,
+        string? conversion = "CPU";
+        if (_colorRoutes != 0)
+        {
+            Get(_colorRoutes, "current-path", out int path, 0);
+            conversion = path < 0 ? null : _gpuColorRoute && path == 0 ? "D3D12 GPU" : "CPU";
+        }
+        var stats = WithPromise("get-stats", 0, _stats.Sample, ct) with { VideoDecoder = Volatile.Read(ref _decoderName), VideoMemory = videoMemory, ColorConversion = conversion,
             ControllerStateChanges = _writer?.StateChanges ?? 0 };
         nint renderer = Volatile.Read(ref _renderer);
         if (renderer != 0)
@@ -577,7 +574,7 @@ internal sealed class GStreamerPeer : IDecodedVideoTrack, IXboxInputChannel
         if (_beforeHandler != 0) g_signal_handler_disconnect(_before, _beforeHandler);
         if (_afterHandler != 0) g_signal_handler_disconnect(_after, _afterHandler);
         if (_handler != 0) g_signal_handler_disconnect(_message, _handler);
-        foreach (var obj in new[] { _renderer, _videoPad, _audioPad, _before, _after, _decodedPad, _observationValve, _decodedAudio, _bus, _control, _input, _message, _sink, _peer, _pipeline })
+        foreach (var obj in new[] { _renderer, _colorRoutes, _videoPad, _audioPad, _before, _after, _decodedPad, _observationValve, _decodedAudio, _bus, _control, _input, _message, _sink, _peer, _pipeline })
             if (obj != 0) gst_object_unref(obj);
     }
 }

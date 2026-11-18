@@ -91,7 +91,7 @@ internal static class XboxColorConversionBenchmark
         Action<FrameTiming, CapturedVisionFrame> consume)
     {
         string location = "\"" + Path.GetFullPath(clip).Replace('\\', '/').Replace("\"", "\\\"") + "\"";
-        string conversion = onGpu ? "d3d12convert ! video/x-raw(memory:D3D12Memory),format=BGRA ! d3d12download" : "d3d12download ! videoconvert";
+        string conversion = onGpu ? XboxObservationConversion.Gpu : "d3d12download ! videoconvert";
         string pace = realtime ? "clocksync ! " : "";
         string queue = realtime ? "queue leaky=downstream max-size-buffers=1" : "queue max-size-buffers=1";
         string drop = realtime ? "true" : "false";

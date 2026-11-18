@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Badge, Button, Card, Icon, Notice, SectionHeader, type PageProps } from '../ui';
+import { Badge, Button, Card, Field, Icon, Notice, SectionHeader, Select, SelectOption, type PageProps } from '../ui';
 import { AssistantPanel } from './AssistantPanel';
 
 export function SettingsPage({ state, command, openSwitchNavigation }: PageProps & { openSwitchNavigation?: () => void }) {
@@ -22,6 +22,18 @@ export function SettingsPage({ state, command, openSwitchNavigation }: PageProps
           <p className="subtle">Training clips are saved in the folder you choose when recording.</p></div>
       </Card>
     </div>
+    <Card title="Direct Xbox Remote Play">
+      <Field label="Capture color conversion" hint="Applies the next time you connect to your Xbox.">
+        <Select aria-label="Capture color conversion" value={state.xboxCpuConversion ? 'cpu' : 'auto'} disabled={busy === 'xboxColorConversionSet'}
+          onValueChange={async mode => {
+            setBusy('xboxColorConversionSet');
+            try { await command('xboxColorConversionSet', { forceCpu: mode === 'cpu' }); } catch {} finally { setBusy(''); }
+          }}>
+          <SelectOption value="auto">Automatic (GPU when available)</SelectOption>
+          <SelectOption value="cpu">CPU</SelectOption>
+        </Select>
+      </Field>
+    </Card>
     <AssistantPanel initial={state.assistant} command={command} />
     <Card title="Switch and controller navigation" description="Navigate Studio with one or two switches. F8 starts or stops scanning; Escape stops it.">
       <Button onClick={openSwitchNavigation}>Switch navigation</Button>

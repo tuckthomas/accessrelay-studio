@@ -17,6 +17,7 @@ internal sealed partial class DesktopVisionService
     private DesktopXboxPlayer? _xboxPlayer;
     private string? _resumeControllerConsole;
     internal Task XboxShutdown { get; private set; } = Task.CompletedTask;
+    internal bool XboxCpuConversion { get; set; }
     private bool _direct, _signedIn;
     private string _windowSelection = "", _consoleMessage = "";
 
@@ -157,7 +158,7 @@ internal sealed partial class DesktopVisionService
                 ct.ThrowIfCancellationRequested();
                 var window = new DesktopXboxPlayer(_owner);
                 XboxRemoteConnection connection;
-                try { connection = new XboxRemoteConnection(client, _console.Id, window.Handle); }
+                try { connection = new XboxRemoteConnection(client, _console.Id, window.Handle, XboxCpuConversion); }
                 catch { window.Destroy(); throw; }
                 _xbox = connection;
                 _xboxPlayer = window;

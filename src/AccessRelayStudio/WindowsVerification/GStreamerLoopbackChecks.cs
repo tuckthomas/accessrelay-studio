@@ -36,9 +36,9 @@ internal static class GStreamerLoopbackChecks
         Console.WriteLine("PASS closed the first player and rendered a fresh session to the second Windows player for over a minute.");
     }
 
-    internal static async Task Run(nint window = 0, int renderSeconds = 1)
+    internal static async Task Run(nint window = 0, int renderSeconds = 1, bool forceCpu = false)
     {
-        using var client = new GStreamerPeer(window != 0, null, window);
+        using var client = new GStreamerPeer(window != 0, null, window, forceCpu);
         // A repeated, independently encoded IDR frame keeps the test independent of optional H.264 encoders.
         var bars = Path.Combine(AppContext.BaseDirectory, "Fixtures", "bars-320x180.h264").Replace('\\', '/');
         var server = gst_parse_launch("webrtcbin name=remote bundle-policy=max-bundle " +
@@ -104,7 +104,10 @@ internal static class GStreamerLoopbackChecks
                 if (first.Width != 320 || first.Height != 180 || !first.Pixels.Span.Slice(0, 320*4).ContainsAnyExcept((byte)0))
                     throw new Exception("Decoded H.264 geometry or pixels are invalid.");
             }
-            _ = client.ReadStats(ct);
+            var captureStats = client.ReadStats(ct);
+            if (captureStats.ColorConversion is null || (forceCpu && captureStats.ColorConversion != "CPU"))
+                throw new Exception("Live capture did not respect the color conversion setting.");
+            Console.WriteLine($"Live Xbox observation used {captureStats.ColorConversion} with {captureStats.VideoMemory} decoder memory.");
             long start = Stopwatch.GetTimestamp();
             while (Stopwatch.GetElapsedTime(start).TotalSeconds < renderSeconds) { ct.ThrowIfCancellationRequested(); client.CheckTransport(); client.PullFrame(); }
             var telemetry = client.ReadStats(ct);

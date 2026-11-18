@@ -14,6 +14,7 @@ internal sealed record XboxTransportStats(long Timestamp, double? RttMs, double?
     public ulong? RenderedFrames { get; init; }
     public ulong? RenderDroppedFrames { get; init; }
     public string? VideoDecoder { get; init; }
+    public string? ColorConversion { get; init; }
     public string? VideoMemory { get; init; }
     public ControllerHandoffStats? ControllerWrites { get; init; }
     public long ControllerStateChanges { get; init; }

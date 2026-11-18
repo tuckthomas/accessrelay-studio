@@ -40,6 +40,6 @@ export function CaptureSourceControls({ xbox = {}, sources, sourceId, locked, wo
     </div>}
     {xbox.direct && xbox.signInCode && <Notice>Enter <strong>{xbox.signInCode}</strong> at {xbox.verificationPage} in your browser.</Notice>}
     {xbox.direct && xbox.message && <p role="status">{xbox.message}</p>}
-    {xbox.direct && xbox.connected && stats && <p>{stats.width} × {stats.height} · {value(stats.decodedFps, ' FPS')} · {stats.rttSource === 'ICMP to selected LAN peer' ? 'LAN ping' : 'ICE RTT'} {value(stats.rttMs, ' ms')} · Jitter {value(stats.jitterMs, ' ms')} · Decode {value(stats.decodeMs, ' ms')} · Packet loss {value(stats.packetLossPercent, '%')}</p>}
+    {xbox.direct && xbox.connected && stats && <p>{stats.width} × {stats.height} · {value(stats.decodedFps, ' FPS')} · {stats.rttSource === 'ICMP to selected LAN peer' ? 'LAN ping' : 'ICE RTT'} {value(stats.rttMs, ' ms')} · Jitter {value(stats.jitterMs, ' ms')} · Decode {value(stats.decodeMs, ' ms')} · Packet loss {value(stats.packetLossPercent, '%')}{stats.colorConversion && ` · ${stats.colorConversion} color conversion`}</p>}
   </div>;
 }
