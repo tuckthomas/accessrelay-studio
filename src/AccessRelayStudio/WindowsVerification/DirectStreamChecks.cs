@@ -15,7 +15,8 @@ internal static class DirectStreamChecks
         CheckCapture();
         CheckVisionSession();
         CheckWriter();
-        CheckRuntimeOutput();
+        CheckRuntimeOutput(tap: false);
+        CheckRuntimeOutput(tap: true);
         Console.WriteLine("PASS direct Xbox capture leases, vision preview, upstream gamepad reports and runtime output routing");
     }
 
@@ -145,7 +146,7 @@ internal static class DirectStreamChecks
         Check(!failed.IsAvailable && !failed.TryWrite(default), "A rejected handshake enabled controller output.");
     }
 
-    private static void CheckRuntimeOutput()
+    private static void CheckRuntimeOutput(bool tap)
     {
         using var input = new FakeControllerInput();
         using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
@@ -155,20 +156,22 @@ internal static class DirectStreamChecks
         Wait(() => channel.Snapshot().Any(p => p.Length == 38 && p[16] == 16 &&
             BinaryPrimitives.ReadInt16LittleEndian(p.AsSpan(24)) == 0), "Physical input missed the direct channel.");
         Check(!input.VirtualOutputActive, "Direct output reserved the virtual USB identity.");
-        // Only P4 is held during the shot. Both physical stick axes stay centered.
+        // Both physical stick axes stay centered during each P4 shot.
         input.SetState(default);
         long resetAt = Stopwatch.GetTimestamp();
         Wait(() => runtime.ReadVisionSignalContext() is { Physical: { } physical, InputTimestamp: var timestamp }
             && timestamp > resetAt && physical == default, "Controller did not return to neutral.");
         runtime.ConfigureVision(VisionSettings.Default with { MaximumFrameAgeMs = 1000, MaximumLatenessMs = 100 },
-            new() { Kind = VisionActionKind.RightStickStroke, TriggerPaddle = PaddleButtons.LargeRight, HoldQualificationMs = 70, StrokeDurationMs = 56, AnchorFraction = .85 });
+            new() { Kind = VisionActionKind.RightStickStroke, TriggerPaddle = PaddleButtons.LargeRight,
+                ContinueAfterTriggerRelease = tap, HoldQualificationMs = tap ? 0 : 70, StrokeDurationMs = 56, AnchorFraction = .85 });
         runtime.BeginVisionSession();
         Check(runtime.SetVisionArmed(true), "Could not arm the direct output fixture.");
         int firstReport = channel.Snapshot().Length;
-        input.SetState(default, PaddleButtons.LargeRight);
-        Wait(() => runtime.VisionStatus.ShotToken != 0, "Held input did not qualify a stroke.");
+        if (tap) input.TapPaddle(PaddleButtons.LargeRight);
+        else input.SetState(default, PaddleButtons.LargeRight);
+        Wait(() => runtime.VisionStatus.ShotToken != 0, "P4 input did not qualify a stroke.");
         Check(channel.Snapshot().Skip(firstReport).Any(p => p.Length == 38 && BinaryPrimitives.ReadInt16LittleEndian(p.AsSpan(24)) == -32767),
-            "The held paddle did not generate full-down before forecasting.");
+            "P4 did not generate full-down before forecasting.");
         var shot = runtime.VisionStatus;
         long now = Stopwatch.GetTimestamp();
         Check(runtime.SubmitVisionPrediction(new(shot.SessionGeneration, shot.ShotToken, 1, now, now, 100, 1, 0, true)),
@@ -178,8 +181,9 @@ internal static class DirectStreamChecks
             .Select(report => BinaryPrimitives.ReadInt16LittleEndian(report.AsSpan(24))).ToList();
         int downIndex = stroke.IndexOf(-32767);
         int upIndex = stroke.IndexOf(short.MaxValue);
+        var context = runtime.ReadVisionSignalContext();
         Check(downIndex >= 0 && upIndex > downIndex && stroke.Skip(upIndex + 1).Contains((short)0)
-            && runtime.ReadVisionSignalContext() is { HeldPaddles: PaddleButtons.LargeRight, Physical: { RightX: 0, RightY: 0 } },
+            && context.Physical is { RightX: 0, RightY: 0 } && context.HeldPaddles == (tap ? PaddleButtons.None : PaddleButtons.LargeRight),
             "P4 did not deliver down, up and neutral with the physical stick centered.");
         input.SetState(default);
 

@@ -747,7 +747,7 @@ internal sealed class StudioRuntime : IDisposable
                     state = _stickDeadzone.Apply(state);
                     var beforeVision = _vision.Status;
                     state = _vision.Sample(input.State, state, input.IsConnected, _output?.IsAvailable == true,
-                        _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp(), sampleTicks, input.HeldPaddles);
+                        _recorder is not null || VisionMacroConflict(), Stopwatch.GetTimestamp(), sampleTicks, input.HeldPaddles, input.PressedPaddles);
                     CancelLostLockFeedbackLocked(beforeVision);
                     _latestInputSampleTicks = sampleTicks;
                     bool accepted = WriteTracedOutputLocked(state, VisionTrainingTraceKind.Poll, sampleTicks, input);

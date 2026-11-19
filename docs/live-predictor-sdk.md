@@ -39,7 +39,7 @@ to `ApplyLiveCalibration`. Failed/disconnected output clears the receipt. A rece
 records local scheduling, not the time Xbox applied the report. Plugin-owned
 validation must distinguish user feedback, measured latency and accuracy evidence.
 
-Studio beta.51 supports runtime contracts 1 through 7. Contract 7 records shot distance from the associated HUD result and applies feedback timing to the calibrated action across distances. Add-ons using this behavior require beta.51 or later.
+Studio beta.52 supports runtime contracts 1 through 8. Contract 7 introduced shot distance from the associated HUD result. Contract 8 adds `VisionControllerAction.ContinueAfterTriggerRelease`. When enabled, a fresh press starts one shot. Predictors use the host's shot token and start timestamp to track it after the control returns to rest. Hold-based actions remain the default.
 
 Contract 6 adds
 `VisionSignalContext.MinimumStrokeLeadMs`, the scheduler's current budget for a

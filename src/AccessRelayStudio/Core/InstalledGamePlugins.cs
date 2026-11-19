@@ -18,7 +18,7 @@ internal sealed class InstalledGamePlugins(string directory, Func<string, string
         uiModule = BaseUrl(item.Pack) + item.Pack.Manifest.Runtime!.UiEntry,
         coverUrl = FindCover(item.Pack) is { } cover ? BaseUrl(item.Pack) + cover.Path : null
     }).ToArray();
-    internal static bool Supports(GamePackManifest manifest) => manifest is { SchemaVersion: 2, ApiVersion: 2, Runtime.ContractVersion: >= 1 and <= 7 };
+    internal static bool Supports(GamePackManifest manifest) => manifest is { SchemaVersion: 2, ApiVersion: 2, Runtime.ContractVersion: >= 1 and <= 8 };
     private static string BaseUrl(GamePackDefinition pack) => "https://plugins.accessrelay.test/plugins/" + pack.Manifest.Id + "/" + pack.ManifestSha256 + "/";
     private static GamePackAsset? FindCover(GamePackDefinition pack) => pack.Manifest.Assets.FirstOrDefault(a =>
         a.Kind == GamePackAssetKind.Data && a.Path is "data/cover.jpg" or "data/cover.jpeg" or "data/cover.png" or "data/cover.webp");

@@ -5,6 +5,7 @@ internal static class AutoGreenReliabilityVerification
     internal static void Run()
     {
         AssignedControls();
+        TapActivation();
         LateStrokeAndActualHandoff();
         CancelledPaddleHold();
         BannerParsing();
@@ -71,6 +72,61 @@ internal static class AutoGreenReliabilityVerification
             }
             Check(reachedUp && arbiter.LastAction is { Outcome: VisionActionOutcome.Completed, TriggerSample: { Timestamp: 200 } },
                 "Assigned trigger did not complete its own down-to-up stroke.");
+        }
+    }
+
+    private static void TapActivation()
+    {
+        var stroke = new VisionControllerAction { Kind = VisionActionKind.RightStickStroke, TriggerControl = ControlId.LargeRight,
+            ContinueAfterTriggerRelease = true, StrokeDurationMs = 40, EndHoldMs = 6 };
+        var down = new ControllerState { RightY = -20000 };
+        var button = new ControllerState { Buttons = (ushort)VisionSettings.Default.ShootButton };
+        foreach (var action in new[] { stroke, stroke with { TriggerControl = null, TriggerDirection = StickDirection.RightDown },
+            new VisionControllerAction { Kind = VisionActionKind.ButtonRelease, ContinueAfterTriggerRelease = true } })
+        {
+            var a = new ControllerOutputArbiter(1000);
+            a.Configure(VisionSettings.Default with { EstimatedVideoDelayMs = 0, EstimatedInputDelayMs = 0 }, action);
+            a.BeginSession(); a.Sample(default, default, true, true, false, 1);
+            Check(a.SetArmed(true), "Cannot arm tap activation.");
+            bool isButton = action.Kind == VisionActionKind.ButtonRelease;
+            var input = isButton ? button : action.TriggerDirection.HasValue ? down : default;
+            var paddle = action.TriggerControl.HasValue ? PaddleButtons.LargeRight : PaddleButtons.None;
+            ControllerState Sample(int t, bool pressed, bool pulseOnly = false) =>
+                a.Sample(pressed ? input : default, pressed ? action.WithoutAssignedTrigger(input) : default,
+                    true, true, false, t, t, pressed && !pulseOnly ? paddle : 0, pressed ? paddle : 0);
+            bool IsDown(ControllerState state) => isButton ? (state.Buttons & button.Buttons) != 0 : state.RightY == short.MinValue;
+            Check(IsDown(Sample(20, true, pulseOnly: true)) && IsDown(Sample(22, false)), "Short tap lost virtual down.");
+            long original = a.Status.ShotToken;
+            Check(original > 0 && !a.Status.ShootHeld && a.HoldStartedTimestamp == 0 && a.TriggerSample?.Timestamp == 20,
+                "A tap did not separate the physical release from the active shot.");
+            Sample(24, true); Sample(26, false);
+            Check(a.Status.ShotToken == original && a.TriggerSample?.Timestamp == 20, "A second tap replaced the active shot.");
+            Check(a.Submit(Prediction(a, 1, 30, 48), 30), "A released trigger rejected its meter forecast.");
+            bool reachedUp = false;
+            for (int t = 32; t <= 124; t += 2)
+            {
+                var sent = Sample(t, false);
+                a.RecordOutputSubmitted(sent, t);
+                reachedUp |= isButton ? !IsDown(sent) : sent.RightY == short.MaxValue;
+            }
+            Check(reachedUp && a.LastAttempt is { Id: 1, EligibleForFeedback: true, TriggerSample.Timestamp: 20 }
+                && a.Status.ShotToken == 0 && a.Output == default, "Tap did not finish exactly one action and return to rest.");
+            Sample(130, true);
+            Check(a.Status.ShotToken != 0 && a.Submit(Prediction(a, 1, 130, 48), 130), "Released tap did not rearm.");
+            for (int t = 132; t <= 250; t += 2) a.RecordOutputSubmitted(Sample(t, true), t);
+            Check(a.LastAttempt?.Id == 2 && a.Status.ShotToken == 0, "Sustained activation fired twice.");
+            if (action.TriggerDirection.HasValue)
+            {
+                a.Sample(down with { RightY = -12000 }, default, true, true, false, 252);
+                Sample(254, true);
+                Check(a.Status.ShotToken == 0, "Wavering at the stick threshold fired a second shot.");
+            }
+            Sample(260, false); Sample(262, true); Sample(264, false);
+            a.SetArmed(false);
+            Check(a.LastAttempt is { Id: 3, Outcome: VisionActionOutcome.Cancelled } && a.Output == default, "Stop failed to cancel a tap.");
+            a.SetArmed(true); Sample(270, true); Sample(272, false);
+            a.Sample(default, default, false, false, false, 274);
+            Check(a.LastAttempt is { Id: 4, Outcome: VisionActionOutcome.Cancelled } && a.Output == default, "Disconnected tap retained output.");
         }
     }
 

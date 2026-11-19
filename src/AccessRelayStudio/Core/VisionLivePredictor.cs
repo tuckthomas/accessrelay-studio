@@ -15,6 +15,7 @@ public sealed record VisionControllerAction
     public PaddleButtons TriggerPaddle { get; init; }
     public ControlId? TriggerControl { get; init; }
     public StickDirection? TriggerDirection { get; init; }
+    public bool ContinueAfterTriggerRelease { get; init; }
     public bool HasAssignedTrigger => TriggerControl.HasValue || TriggerDirection.HasValue || TriggerPaddle != PaddleButtons.None;
     internal PaddleButtons ReservedPaddles => TriggerPaddle | (PaddleButtons)(((uint)(TriggerControl ?? 0) >> 18) & 15);
 
@@ -25,6 +26,10 @@ public sealed record VisionControllerAction
         if (TriggerPaddle != PaddleButtons.None) return (paddles & TriggerPaddle) == TriggerPaddle;
         return state.RightY <= -AxisThreshold && Math.Abs((int)state.RightX) < AxisThreshold;
     }
+
+    internal bool IsTriggerStillHeld(ControllerState state, PaddleButtons paddles, bool previouslyHeld) =>
+        ContinueAfterTriggerRelease && previouslyHeld && TriggerDirection is { } direction
+            ? Deflection(state, direction) >= 4000 : IsTriggerHeld(state, paddles);
 
     internal ControllerState WithoutAssignedTrigger(ControllerState state)
     {
@@ -61,6 +66,7 @@ public sealed record VisionControllerAction
             || (TriggerControl is { } control && !Enum.IsDefined(control))
             || (TriggerDirection is { } direction && !Enum.IsDefined(direction))
             || (TriggerControl.HasValue && TriggerDirection.HasValue)
+            || (ContinueAfterTriggerRelease && Kind == VisionActionKind.RightStickStroke && !HasAssignedTrigger)
             || (TriggerPaddle != PaddleButtons.None && (TriggerControl.HasValue || TriggerDirection.HasValue))
             || !double.IsFinite(HoldQualificationMs)
             || HoldQualificationMs is < 0 or > 500 || AxisThreshold is < 4000 or > 30000
