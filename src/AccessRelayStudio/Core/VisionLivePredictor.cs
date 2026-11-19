@@ -111,6 +111,8 @@ public readonly record struct VisionSignalContext(ControllerState? Physical, lon
     public long HoldStartedTimestamp { get; init; }
     // Nonzero only after the host has actually started the calibrated stroke.
     public long StrokeAnchorTimestamp { get; init; }
+    // Current scheduler budget in capture time, including its active per-profile corrections.
+    public double? MinimumStrokeLeadMs { get; init; }
     public PaddleButtons HeldPaddles { get; init; }
 }
 
@@ -121,6 +123,10 @@ public sealed record VisionSignalObservation(long Sequence, long CaptureTimestam
 {
     // A fresh frame may finish an already anchored stroke; this is never a new timing forecast.
     public bool ContinueCommittedAction { get; init; }
+    public bool WithdrawPendingForecast { get; init; }
+    public string? ForecastLimit { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasDecision => TimeToTargetMs.HasValue || InvalidateAttempt || ContinueCommittedAction || WithdrawPendingForecast;
 }
 
 /// <summary>Trusted plugin CPU predictor. No model loading or output/device APIs are exposed.</summary>

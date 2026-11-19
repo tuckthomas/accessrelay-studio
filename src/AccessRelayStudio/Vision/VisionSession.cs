@@ -361,14 +361,18 @@ internal sealed class VisionSession : IDisposable
                         bool accepted = false;
                         bool submitted = false;
                         bool hasDecision = false;
-                        VisionSignalContext? signalContext = _runtime.ReadVisionSignalContext();
+                        var sampled = _runtime.ReadVisionSignalContext();
+                        VisionSignalContext? signalContext = sampled with { MinimumStrokeLeadMs = sampled.MinimumStrokeLeadMs
+                            + Math.Max(0, Stopwatch.GetElapsedTime(frame.CaptureTicks, Stopwatch.GetTimestamp()).TotalMilliseconds) };
                         if (predictor is not null)
                         {
                             var context = signalContext.Value;
                             var signal = predictor.Observe(frame.Pixels.Span, frame.Width, frame.Height, frame.Stride,
                                 frame.Sequence, frame.SourceGeneration, frame.CaptureTicks, context);
                             Volatile.Write(ref _signal, signal); modelMessage = predictor.Status;
-                            if (signal.TimeToTargetMs.HasValue || signal.InvalidateAttempt || signal.ContinueCommittedAction)
+                            if (context.ShotToken != 0 && signal.ForecastLimit is { } limit)
+                                _runtime.NoteVisionForecastLimit(context.SessionGeneration, context.ShotToken, limit);
+                            if (signal.HasDecision)
                             {
                                 hasDecision = true; predictions++;
                                 if (fresh && sourceReady && predictor.CanArm && context.Armed && context.ShotToken != 0)
@@ -377,7 +381,7 @@ internal sealed class VisionSession : IDisposable
                                     accepted = _runtime.SubmitVisionPrediction(new(context.SessionGeneration, context.ShotToken,
                                         frame.Sequence, frame.CaptureTicks, Stopwatch.GetTimestamp(), signal.TimeToTargetMs ?? 0,
                                         signal.Confidence, signal.UncertaintyMs, signal.Acquired && !signal.InvalidateAttempt)
-                                    { ContinueCommittedAction = signal.ContinueCommittedAction && !signal.InvalidateAttempt,
+                                    { WithdrawPendingForecast = signal.WithdrawPendingForecast, ContinueCommittedAction = signal.ContinueCommittedAction && !signal.InvalidateAttempt,
                                         TrackingFailure = signal.InvalidateAttempt ? signal.Message : null });
                                 }
                             }

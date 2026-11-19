@@ -61,10 +61,10 @@ internal static class PaddleDeliveryReplay
                     if (e.StreamTelemetry?.Direct is { } direct) arbiter.ObserveStreamTelemetry(direct);
                     var s = e.Signal; var before = arbiter.Status;
                     if (s == null || !e.PhysicalContext.Armed || !e.SourceFresh || before.ShotToken == 0 ||
-                        !(s.TimeToTargetMs.HasValue || s.InvalidateAttempt || s.ContinueCommittedAction)) continue;
+                        !(s.HasDecision)) continue;
                     arbiter.Submit(new(before.SessionGeneration, before.ShotToken, s.Sequence, e.CaptureTicks, now, s.TimeToTargetMs ?? 0,
                         s.Confidence, s.UncertaintyMs, s.Acquired && !s.InvalidateAttempt)
-                        { ContinueCommittedAction = s.ContinueCommittedAction && !s.InvalidateAttempt, TrackingFailure = s.Message }, now);
+                        { WithdrawPendingForecast = s.WithdrawPendingForecast, ContinueCommittedAction = s.ContinueCommittedAction && !s.InvalidateAttempt, TrackingFailure = s.Message }, now);
                 }
                 Poll(input[^1].CompletedTicks);
                 var r = arbiter.LastAttempt;

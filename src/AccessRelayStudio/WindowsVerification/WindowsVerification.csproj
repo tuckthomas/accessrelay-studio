@@ -16,6 +16,7 @@
     <Compile Include="XboxHomeServiceChecks.cs" />
     <Compile Include="CaptureCadenceChecks.cs" />
     <Compile Include="DiagnosticRecordingChecks.cs" />
+    <Compile Include="ShotFeedbackReplayChecks.cs" />
     <Compile Include="RuntimeSignalContextChecks.cs" />
     <Compile Include="RuntimeTrainingChecks.cs" />
     <Compile Include="RuntimeAccessibilityChecks.cs" />

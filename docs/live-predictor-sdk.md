@@ -1,4 +1,4 @@
-# Live predictor and controller actions (runtime contract 2)
+# Live predictor and controller actions
 
 An installed game implementation may create `IVisionLivePredictor` from its
 selected profile. The host passes a captured BGRA frame, monotonic receipt QPC,
@@ -39,9 +39,13 @@ to `ApplyLiveCalibration`. Failed/disconnected output clears the receipt. A rece
 records local scheduling, not the time Xbox applied the report. Plugin-owned
 validation must distinguish user feedback, measured latency and accuracy evidence.
 
-Runtime contracts 1 and 2 remain supported. New packages declare contract 2;
-older hosts reject it before loading native code. The React/UI API stays 1, uses
-the host singleton and shared components, and contains no output-writing API.
+Studio beta.50 supports runtime contracts 1 through 6. Contract 6 adds
+`VisionSignalContext.MinimumStrokeLeadMs`, the scheduler's current budget for a
+complete stroke including frame arrival age. A predictor can set
+`WithdrawPendingForecast` when fresh meter evidence contradicts a scheduled
+stroke before it starts. The controller keeps the physical hold and accepts a new
+qualified forecast on the same press. A started stroke keeps its deadlines.
+The React/UI API stays at version 1.
 
 Focused verification: `tools/vision/Verification --meter-scheduler`. Game detection
 and calibration checks belong to the separate plugin repository.

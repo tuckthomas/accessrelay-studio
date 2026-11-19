@@ -25,7 +25,29 @@ internal sealed class ControllerOutputArbiter
     private short _rightY;
     private readonly string _runId = Guid.NewGuid().ToString("N");
     public VisionActionReceipt? LastAction { get; private set; }
-    public VisionActionReceipt? LastAttempt { get; private set; }
+    private readonly VisionActionReceipt?[] _recentAttempts = new VisionActionReceipt?[64];
+    private VisionActionReceipt? _lastAttempt;
+    private VisionSettings? _nextShotSettings;
+    private string? _forecastLimit;
+    internal void NoteForecastLimit(long generation, long token, string reason)
+    {
+        if (_shot != 0 && token == _shot && generation == _generation) _forecastLimit ??= reason;
+    }
+    public VisionActionReceipt? LastAttempt
+    {
+        get => _lastAttempt;
+        private set
+        {
+            _lastAttempt = value;
+            if (value is null) Array.Clear(_recentAttempts);
+            else _recentAttempts[value.Id % _recentAttempts.Length] = value;
+        }
+    }
+    internal VisionActionReceipt[] AttemptsAfter(long id)
+    {
+        if (_lastAttempt is null || _lastAttempt.Id <= id) return [];
+        return _recentAttempts.OfType<VisionActionReceipt>().Where(r => r.Id > id).OrderBy(r => r.Id).ToArray();
+    }
     public VisionControllerAction Action => _action;
     private VisionTriggerSample _press;
     public VisionTriggerSample? TriggerSample => HoldStartedTimestamp > 0 && _press.Timestamp == HoldStartedTimestamp ? _press : null;
@@ -46,7 +68,10 @@ internal sealed class ControllerOutputArbiter
         _settings.MaximumUncertaintyMs, _settings.StreamTelemetry.Enabled);
     public VisionSettings Settings => _settings;
     private double EffectiveStrokeDurationMs => Math.Clamp(_action.StrokeDurationMs + _settings.TempoCorrectionMs, 8, 500);
+    public double MinimumStrokeLeadMs => _settings.EstimatedVideoDelayMs + _settings.EstimatedInputDelayMs
+        - _settings.CorrectionMs + _action.AnchorTimeFraction * EffectiveStrokeDurationMs - _settings.MaximumLatenessMs;
     public long? DeadlineTimestamp => _deadline;
+    internal bool StrokeStartDue(long now) => _action.Kind == VisionActionKind.RightStickStroke && !_strokeStarted && _deadline is { } due && due <= now;
     public ControllerState Output
     {
         get
@@ -84,6 +109,18 @@ internal sealed class ControllerOutputArbiter
         if (action is not null) action.Validate();
         _settings = nextSettings;
         if (action is not null) _action = action;
+        return true;
+    }
+    internal bool StageFeedbackTiming(VisionActionReceipt receipt, double timing, double tempo)
+    {
+        if (receipt.Outcome != VisionActionOutcome.Completed || !receipt.EligibleForFeedback
+            || receipt.RunId != _runId || LastAttempt?.Id != receipt.Id || receipt.SessionGeneration != _generation
+            || receipt.CorrectionMs != _settings.CorrectionMs || receipt.TempoCorrectionMs != _settings.TempoCorrectionMs
+            || _nextShotSettings is not null) return false;
+        var next = _settings with { CorrectionMs = timing, TempoCorrectionMs = tempo };
+        next.Validate();
+        if (!_held && _shot == 0 && !_strokeStarted && !_deadline.HasValue) _settings = next;
+        else _nextShotSettings = next;
         return true;
     }
 
@@ -130,6 +167,7 @@ internal sealed class ControllerOutputArbiter
     public void Invalidate(string reason, bool sourceLost = false, bool disarm = false)
     {
         if (_shot != 0) RecordCancelled(reason, _lastSampleAt);
+        if (_nextShotSettings is { } next) { _settings = next; _nextShotSettings = null; }
         _cancelledTriggerHold = false;
         _generation++;
         _shot = _shotStarted = 0;
@@ -183,6 +221,7 @@ internal sealed class ControllerOutputArbiter
             _ownsRightStick = false;
             if (_action.Kind != VisionActionKind.RightStickStroke || _physicalNeutral) _needsPhysicalRelease = false;
             _holdStarted = 0;
+            if (_nextShotSettings is { } next) { _settings = next; _nextShotSettings = null; }
             if (_armed && _sourceReady) _message = usingAssignedTrigger
                 ? "Armed. Hold the assigned shot control."
                 : "Armed. Waiting for a fresh physical press.";
@@ -207,6 +246,8 @@ internal sealed class ControllerOutputArbiter
         if (qualified && _shot == 0 && readyForTrigger)
         {
             _shot = ++_nextShot;
+            _forecastLimit = null;
+            _strokeStart = _strokeAnchor = 0;
             _shotStarted = _action.HoldQualificationMs > 0 || _action.Kind == VisionActionKind.RightStickStroke ? _holdStarted : now;
             _deadline = null;
             _actualStrokeStart = _actualAnchor = 0;
@@ -275,6 +316,15 @@ internal sealed class ControllerOutputArbiter
             _rejected++;
             CancelAttempt(rejection, now);
             return false;
+        }
+        if (prediction.WithdrawPendingForecast)
+        {
+            if (_action.Kind != VisionActionKind.RightStickStroke || _strokeStarted || !_deadline.HasValue)
+            { _rejected++; return false; }
+            _deadline = null; _strokeStart = _strokeAnchor = 0;
+            _accepted++;
+            _message = "Meter evidence changed before stroke start. Waiting for a new forecast.";
+            return true;
         }
         // A started ramp has fixed deadlines. Fresh, valid observations still
         // refresh tracking, but their revised target cannot retroactively make
@@ -362,6 +412,7 @@ internal sealed class ControllerOutputArbiter
     private void RecordCancelled(string message, long now)
     {
         _cancelled++;
+        if (_forecastLimit is { } limit && !message.Contains(limit, StringComparison.Ordinal)) message = limit + " " + message;
         LastAttempt = new(++_receiptId, _generation, _shot, _strokeStart > 0 ? _strokeStart : _shotStarted, _strokeAnchor, now,
             _action.Kind == VisionActionKind.RightStickStroke ? EffectiveStrokeDurationMs : 0,
             _action.AnchorFraction, _action.ConfigurationKey, _runId)

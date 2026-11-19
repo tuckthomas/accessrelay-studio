@@ -1,219 +1,144 @@
 using System.Diagnostics;
-using System.Text;
 using EliteScriptStudio.Core;
 
 namespace EliteScriptStudio.Vision;
 
-/// <summary>Reads the post-shot HUD feedback banner asynchronously on captured crop frames so the
-/// 60 Hz meter tracker and release scheduler stay untouched.</summary>
-internal sealed class LiveFeedbackOcr : IDisposable
+internal sealed class LiveFeedbackOcr(Action<VisionActionReceipt, OcrFeedbackRead> onFeedback) : IDisposable
 {
-    private readonly string _modelDirectory;
-    private readonly VisionCaptureModelSet _modelSet;
-    private readonly Action<OcrFeedbackRead> _onFeedback;
+    private readonly CancellationTokenSource _stop = new();
     private readonly object _gate = new();
-    private CancellationTokenSource? _cts;
-    private Task? _worker;
     private VisionAnalysisModels? _models;
-    private string _lastRunId = "";
-    private long _lastReceiptId;
-    private VisionCrop? _discoveredCrop;
-    private int _discoveredMisses;
-    private string _priorBannerText = "";
-    private long _priorBannerAt, _lastClearCheck, _lastClearFrame;
-    private bool _previousBannerCleared;
-    private int _clearObservations;
+    private Task? _worker;
+    private FeedbackHeadingProbe? _probe;
+    private long _clearedAt;
+    private string _status = "Loading the shot feedback reader.";
+    internal string Status => Volatile.Read(ref _status);
 
-    internal LiveFeedbackOcr(string modelDirectory, VisionCaptureModelSet modelSet, Action<OcrFeedbackRead> onFeedback)
+    internal void Start(VisionSession session, StudioRuntime runtime, VisionSettings settings,
+        Func<VisionAnalysisModels> loadModels)
     {
-        _modelDirectory = modelDirectory;
-        _modelSet = modelSet;
-        _onFeedback = onFeedback;
+        long cursor = runtime.LastVisionAttempt?.Id ?? 0;
+        _worker = Task.Run(() => RunAsync(session, runtime, settings, loadModels, cursor, _stop.Token));
     }
 
-    internal void Start(Func<VisionSession?> getSession, Func<StudioRuntime?> getRuntime, Func<VisionSettings> getSettings)
+    private async Task RunAsync(VisionSession session, StudioRuntime runtime, VisionSettings settings,
+        Func<VisionAnalysisModels> loadModels, long cursor, CancellationToken ct)
     {
-        lock (_gate)
+        string? unavailable = null;
+        var sequence = new ShotFeedbackBannerSequence();
+        var primary = ShotFeedbackAnalysis.BuildBannerSearchCrop(settings.TrainingCapture.FeedbackRegion);
+        VisionActionReceipt? pending = null;
+        long after = 0;
+        int misses = 0;
+        Task? probeWorker = null;
+        using var probeStop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        void Finish(string reason)
         {
-            if (_worker is { IsCompleted: false }) return;
-            if (getRuntime()?.LastVisionAttempt is { } existing)
+            if (pending is not { } shot) return;
+            pending = null;
+            onFeedback(shot, new(shot.Id, shot.RunId, "unrecognized", "none", "none", "", 0, 0, Disposition: reason));
+        }
+        void Collect(long through)
+        {
+            foreach (var receipt in runtime.VisionAttemptsAfter(cursor))
             {
-                _lastRunId = existing.RunId;
-                _lastReceiptId = existing.Id;
+                if (receipt.CompletedTimestamp > through) break;
+                Finish("The next attempt finished before a fresh HUD result was confirmed.");
+                cursor = receipt.Id; pending = receipt; after = receipt.CompletedTimestamp; misses = 0;
+                if (unavailable is not null) Finish(unavailable);
+                else if (!runtime.VisionAction.HasAssignedTrigger) Finish("This attempt had no assigned shot trigger.");
             }
-            _cts?.Dispose();
-            _cts = new();
-            var ct = _cts.Token;
-            _worker = Task.Run(() => RunLoopAsync(getSession, getRuntime, getSettings, ct), ct);
+        }
+        try
+        {
+            if (settings.PluginAssistance is not { } config
+                || config.TryGetProperty("autoOcrTiming", out var enabled) && enabled.ValueKind == System.Text.Json.JsonValueKind.False)
+                unavailable = "Automatic shot feedback is turned off.";
+            else
+            {
+                try { var models = loadModels(); lock (_gate) _models = models; }
+                catch (Exception ex) { unavailable = "Shot feedback reader unavailable. " + ex.GetBaseException().Message; }
+            }
+            Volatile.Write(ref _status, unavailable ?? "Shot feedback reader ready.");
+            if (unavailable is null) probeWorker = WatchHeadingAsync(session, probeStop.Token);
+            while (!ct.IsCancellationRequested)
+            {
+                Collect(Stopwatch.GetTimestamp());
+                if (unavailable is not null)
+                { await Task.Delay(80, ct).ConfigureAwait(false); continue; }
+                if (pending is { Outcome: VisionActionOutcome.Cancelled } && runtime.VisionStatus.HoldingCancelledTriggerShot)
+                    after = Stopwatch.GetTimestamp();
+                if (pending is not null && Stopwatch.GetElapsedTime(after).TotalSeconds > 3)
+                    Finish("No fresh HUD result was confirmed before the feedback window closed.");
+                // Prefer the known HUD. Probe alternative layouts after sustained misses in the primary crop.
+                bool searching = pending is not null && misses >= 5 && Stopwatch.GetElapsedTime(after).TotalMilliseconds > 1200;
+                var crop = searching && misses % 2 == 1 ? ShotFeedbackAnalysis.SelectSearchCrop(2 + (misses / 2) % 4, primary) : primary;
+                var frame = await session.CaptureRegionOnceAsync(crop, ct).ConfigureAwait(false);
+                if (frame is null) { await Task.Delay(40, ct).ConfigureAwait(false); continue; }
+                long began = Stopwatch.GetTimestamp();
+                var regions = _models!.ReadText(frame.Pixels, frame.Width, frame.Height, frame.Stride);
+                var banner = ShotFeedbackAnalysis.ParseFeedback(regions);
+                long cleared = Volatile.Read(ref _clearedAt);
+                if (cleared < frame.CaptureTicks) sequence.ConfirmClear(cleared);
+                var appearance = sequence.Observe(frame.CaptureTicks, banner, ShotFeedbackAnalysis.HasHeading(regions), crop == primary);
+                if (banner is not null && (_probe is null || appearance is not null)
+                    && regions.FirstOrDefault(r => r.Confidence >= .8 && ShotFeedbackAnalysis.HasHeading([r])) is { } heading)
+                    Volatile.Write(ref _probe, FeedbackHeadingProbe.Create(frame, crop, heading));
+                if (banner is null) misses++; else misses = 0;
+                if (banner?.BannerBounds is { } box && crop != primary)
+                    primary = ShotFeedbackAnalysis.BuildBannerSearchCrop(ShotFeedbackAnalysis.ProjectCrop(crop, box));
+                Collect(frame.CaptureTicks);
+                if (pending is { } shot && appearance is { } fresh && fresh.StartedAt > after)
+                {
+                    pending = null;
+                    var result = fresh.Banner;
+                    onFeedback(shot, new(shot.Id, shot.RunId, result.ShotType, result.Timing, result.Tempo, result.RawText,
+                        frame.CaptureTicks, Stopwatch.GetElapsedTime(began).TotalMilliseconds, result.Distance, result.Coverage));
+                }
+                await Task.Delay(pending is not null ? 10 : 90, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            unavailable = "Shot feedback reader failed. " + ex.GetBaseException().Message;
+            Volatile.Write(ref _status, unavailable);
+            Finish(unavailable);
+            try
+            {
+                while (!ct.IsCancellationRequested) { Collect(Stopwatch.GetTimestamp()); await Task.Delay(80, ct).ConfigureAwait(false); }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        }
+        finally
+        {
+            probeStop.Cancel();
+            if (probeWorker is not null)
+                try { await probeWorker.ConfigureAwait(false); } catch (OperationCanceledException) { }
+            Collect(Stopwatch.GetTimestamp());
+            Finish("Gameplay capture ended before a fresh HUD result was confirmed.");
+            lock (_gate) { _models?.Dispose(); _models = null; }
+        }
+    }
+
+    private async Task WatchHeadingAsync(VisionSession session, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var probe = Volatile.Read(ref _probe);
+            if (probe is not null && await session.CaptureRegionOnceAsync(probe.Region, ct).ConfigureAwait(false) is { } frame
+                && probe == Volatile.Read(ref _probe) && probe.Cleared(frame))
+                Volatile.Write(ref _clearedAt, frame.CaptureTicks);
+            await Task.Delay(probe is null ? 60 : 20, ct).ConfigureAwait(false);
         }
     }
 
     internal void Stop()
     {
-        Task? worker;
-        lock (_gate)
-        {
-            _cts?.Cancel();
-            worker = _worker;
-            _models?.RequestStop();
-        }
-        try { worker?.Wait(TimeSpan.FromSeconds(1)); } catch { /* cancellation / shutdown timeout */ }
-        lock (_gate)
-        {
-            _cts?.Dispose();
-            _cts = null;
-            _worker = null;
-        }
+        _stop.Cancel();
+        lock (_gate) _models?.RequestStop();
+        try { _worker?.GetAwaiter().GetResult(); }
+        catch (Exception) when (_stop.IsCancellationRequested) { }
     }
-
-    private async Task RunLoopAsync(Func<VisionSession?> getSession, Func<StudioRuntime?> getRuntime,
-        Func<VisionSettings> getSettings, CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(50, ct).ConfigureAwait(false);
-                var session = getSession();
-                var runtime = getRuntime();
-                if (session is null || runtime is null || !session.Status.Running) continue;
-                var receipt = runtime.LastVisionAttempt;
-                if (receipt is null || (receipt.RunId == _lastRunId && receipt.Id == _lastReceiptId))
-                {
-                    if (_models is not null && _priorBannerAt > 0 && !_previousBannerCleared
-                        && Stopwatch.GetElapsedTime(_lastClearCheck).TotalMilliseconds >= 500)
-                    {
-                        _lastClearCheck = Stopwatch.GetTimestamp();
-                        var empty = await session.CaptureRegionOnceAsync(ShotFeedbackAnalysis.BuildBannerSearchCrop(_discoveredCrop ?? getSettings().TrainingCapture.FeedbackRegion), ct).ConfigureAwait(false);
-                        if (empty is not null && empty.CaptureTicks > _lastClearFrame)
-                        {
-                            _lastClearFrame = empty.CaptureTicks;
-                            var text = _models.ReadText(empty.Pixels, empty.Width, empty.Height, empty.Stride);
-                            _clearObservations = ShotFeedbackAnalysis.HasHeading(text) ? 0 : _clearObservations + 1;
-                            if (_clearObservations >= 2) _previousBannerCleared = true;
-                        }
-                    }
-                    continue;
-                }
-                _lastRunId = receipt.RunId;
-                _lastReceiptId = receipt.Id;
-
-                var settings = getSettings();
-                if (!ShouldRead(settings)) continue;
-                // Read feedback for automatic strokes started by an assigned control.
-                if (!runtime.VisionAction.HasAssignedTrigger) continue;
-
-                // Ensure OCR reader models are loaded lazily on this background worker (CPU-only, skip pose).
-                _models ??= new(_modelSet, VisionExecutionProvider.Cpu, _modelDirectory, loadPose: false);
-
-                var result = await WatchShotFeedbackAsync(session, receipt, settings,
-                    () => getRuntime()?.LastVisionAttempt?.Id ?? 0, () => getRuntime()?.VisionStatus.HoldingCancelledTriggerShot == true, ct).ConfigureAwait(false);
-                if (result is not null && (getRuntime()?.LastVisionAttempt?.Id ?? 0) == receipt.Id)
-                    _onFeedback(result);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-            catch { /* Never crash live session on background OCR read */ }
-        }
-    }
-
-    private static bool ShouldRead(VisionSettings settings)
-    {
-        if (settings.PluginAssistance is not { } json) return false;
-        if (json.TryGetProperty("enabled", out var en) && !en.GetBoolean()) return false;
-        if (json.TryGetProperty("autoOcrTiming", out var auto) && auto.ValueKind is System.Text.Json.JsonValueKind.False)
-            return false;
-        return true;
-    }
-
-    private async Task<OcrFeedbackRead?> WatchShotFeedbackAsync(VisionSession session, VisionActionReceipt receipt,
-        VisionSettings settings, Func<long> getLatestReceiptId, Func<bool> holdingCancelledTriggerShot, CancellationToken ct)
-    {
-        // A pre-stroke tracking cancellation can still be holding down for the user.
-        // Its HUD result belongs after their physical release, not the cancellation instant.
-        while (receipt.Outcome == VisionActionOutcome.Cancelled && holdingCancelledTriggerShot())
-        {
-            if (getLatestReceiptId() != receipt.Id) return null;
-            await Task.Delay(50, ct).ConfigureAwait(false);
-        }
-        long watchStarted = Math.Max(receipt.CompletedTimestamp, Stopwatch.GetTimestamp());
-        double elapsedSinceCompleteMs = Stopwatch.GetElapsedTime(receipt.CompletedTimestamp).TotalMilliseconds;
-        if (elapsedSinceCompleteMs < 180)
-            await Task.Delay((int)Math.Ceiling(180 - elapsedSinceCompleteMs), ct).ConfigureAwait(false);
-
-        var preferredSourceCrop = _discoveredCrop ?? settings.TrainingCapture.FeedbackRegion;
-        var crop = ShotFeedbackAnalysis.BuildBannerSearchCrop(preferredSourceCrop);
-        bool sawClearedSincePrevious = _priorBannerAt == 0 || _previousBannerCleared;
-        string candidate = ""; int agreements = 0, clearFrames = 0; long candidateCapture = 0;
-        string bestUnparsedRaw = "";
-        long lastCaptureTicks = receipt.CompletedTimestamp;
-        double lastProcMs = 0;
-
-        for (int attempt = 0; attempt < 14 && !ct.IsCancellationRequested; attempt++)
-        {
-            if (getLatestReceiptId() != receipt.Id) return null;
-            if (Stopwatch.GetElapsedTime(watchStarted).TotalMilliseconds > 2600) break;
-            // Cycle across configured/discovered crop, top band, middle above-player band (y=0.24..0.72), and lower band
-            // so custom HUD or above-player banners are never stranded in a vertical blind spot.
-            var activeCrop = ShotFeedbackAnalysis.SelectSearchCrop(attempt, crop);
-            var frame = await session.CaptureRegionOnceAsync(activeCrop, ct).ConfigureAwait(false);
-            if (frame is null || getLatestReceiptId() != receipt.Id) return null;
-
-            if (frame.CaptureTicks <= lastCaptureTicks)
-            { await Task.Delay(100, ct).ConfigureAwait(false); continue; }
-            long t0 = Stopwatch.GetTimestamp();
-            var regions = _models!.ReadText(frame.Pixels, frame.Width, frame.Height, frame.Stride);
-            double procMs = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
-            lastCaptureTicks = frame.CaptureTicks;
-            lastProcMs = procMs;
-            var parsed = ShotFeedbackAnalysis.ParseFeedback(regions);
-            if (parsed is null)
-            {
-                if (regions.Length > 0)
-                {
-                    string rawCandidate = string.Join(" | ", regions.Where(r => !string.IsNullOrWhiteSpace(r.Text))
-                        .Select(r => ShotFeedbackAnalysis.CleanOcrLine(r.Text)).Where(t => t.Length > 0));
-                    if (rawCandidate.Length > bestUnparsedRaw.Length)
-                        bestUnparsedRaw = rawCandidate;
-                }
-                // Only scanning the primary banner crop proves the previous shot's banner disappeared.
-                agreements = 0;
-                if (activeCrop == crop && !ShotFeedbackAnalysis.HasHeading(regions) && ++clearFrames >= 2)
-                    sawClearedSincePrevious = true;
-            }
-            else
-            {
-                // Previous-shot banners commonly remain visible 750-950 ms into quick follow-up shots.
-                if (!sawClearedSincePrevious && ShotFeedbackAnalysis.GradeIdentity(parsed) == _priorBannerText)
-                {
-                    await Task.Delay(170, ct).ConfigureAwait(false);
-                    continue;
-                }
-                string identity = ShotFeedbackAnalysis.Identity(parsed);
-                if (frame.CaptureTicks <= candidateCapture) continue;
-                candidateCapture = frame.CaptureTicks;
-                agreements = candidate == identity ? agreements + 1 : 1;
-                candidate = identity;
-                if (agreements < 2) { await Task.Delay(100, ct).ConfigureAwait(false); continue; }
-                if (parsed.BannerBounds is { } localBounds)
-                {
-                    _discoveredCrop = ShotFeedbackAnalysis.ProjectCrop(activeCrop, localBounds);
-                    _discoveredMisses = 0;
-                }
-                _priorBannerText = ShotFeedbackAnalysis.GradeIdentity(parsed);
-                _previousBannerCleared = false; _clearObservations = 0;
-                _priorBannerAt = frame.CaptureTicks;
-                return new(receipt.Id, receipt.RunId, parsed.ShotType, parsed.Timing, parsed.Tempo,
-                    parsed.RawText, frame.CaptureTicks, procMs, parsed.Distance, parsed.Coverage);
-            }
-            await Task.Delay(175, ct).ConfigureAwait(false);
-        }
-        if (_discoveredCrop is not null && ++_discoveredMisses >= 2)
-        {
-            _discoveredCrop = null;
-            _discoveredMisses = 0;
-        }
-        return new(receipt.Id, receipt.RunId, "unrecognized", "none", "none", bestUnparsedRaw, lastCaptureTicks, lastProcMs);
-    }
-
-    public void Dispose() => Stop();
+    public void Dispose() { Stop(); _stop.Dispose(); }
 }

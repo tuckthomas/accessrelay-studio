@@ -23,7 +23,7 @@ internal sealed class VisionAnalysisModels : IVisionAnalysisModels
         {
             string path = Path.Combine(root, name);
             if (!File.Exists(path) || new FileInfo(path).Length is <= 0 or > 128 * 1024 * 1024)
-                throw new InvalidDataException("The plugin's capture models are missing. Install its capture model assets.");
+                throw new InvalidDataException($"The installed capture model {name} is missing or has an invalid size.");
             using var stream = File.OpenRead(path);
             if (!Convert.ToHexStringLower(SHA256.HashData(stream)).Equals(expected, StringComparison.Ordinal))
                 throw new InvalidDataException("Capture model integrity check failed: " + name);

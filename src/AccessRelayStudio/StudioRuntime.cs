@@ -332,10 +332,15 @@ internal sealed class StudioRuntime : IDisposable
     }
 
     public VisionActionReceipt? LastVisionAction { get { lock (_sync) return _vision.LastAction; } }
+    internal bool StageVisionFeedback(VisionActionReceipt receipt, double timing, double tempo)
+    { lock (_sync) return _vision.StageFeedbackTiming(receipt, timing, tempo); }
     public StreamTelemetryAssessment VisionStreamTelemetry { get { lock (_sync) return _vision.StreamTelemetry(Stopwatch.GetTimestamp()); } }
     internal void ObserveVisionStreamTelemetry(DirectStreamMetrics reading) { lock (_sync) _vision.ObserveStreamTelemetry(reading); }
     public void ObserveVisionStreamTelemetry(StreamTelemetryReading reading) { lock (_sync) _vision.ObserveStreamTelemetry(reading); }
     public VisionActionReceipt? LastVisionAttempt { get { lock (_sync) return _vision.LastAttempt; } }
+    internal VisionActionReceipt[] VisionAttemptsAfter(long id) { lock (_sync) return _vision.AttemptsAfter(id); }
+    internal void NoteVisionForecastLimit(long generation, long token, string reason)
+    { lock (_sync) _vision.NoteForecastLimit(generation, token, reason); }
     public VisionControllerAction VisionAction { get { lock (_sync) return _vision.Action; } }
     public long LatestInputTimestamp => Volatile.Read(ref _latestInputSampleTicks);
     public VisionSignalContext ReadVisionSignalContext()
@@ -348,6 +353,7 @@ internal sealed class StudioRuntime : IDisposable
             {
                 HoldStartedTimestamp = _vision.HoldStartedTimestamp, TriggerSample = _vision.TriggerSample,
                 StrokeAnchorTimestamp = _vision.StrokeAnchorTimestamp,
+                MinimumStrokeLeadMs = _vision.MinimumStrokeLeadMs,
                 HeldPaddles = _latest?.Input is { IsConnected: true } connectedInput ? connectedInput.HeldPaddles : PaddleButtons.None
             };
         }
@@ -394,6 +400,7 @@ internal sealed class StudioRuntime : IDisposable
             if (token != 0) _lockMeasurements.Record(RuntimeLockPath.VisionSubmission, token, requested, Stopwatch.GetTimestamp());
             var before = _vision.Status;
             accepted = _vision.Submit(prediction, Stopwatch.GetTimestamp());
+            if (accepted && _vision.StrokeStartDue(Stopwatch.GetTimestamp())) AdvanceVisionDeadlineLocked();
             CancelLostLockFeedbackLocked(before);
             var identity = new FeedbackIdentity(prediction.SessionGeneration, prediction.ShotToken);
             if (accepted && _lockedFeedback != identity)
@@ -830,24 +837,29 @@ internal sealed class StudioRuntime : IDisposable
         lock (_sync)
         {
             if (token != 0) _lockMeasurements.Record(RuntimeLockPath.ReleaseDeadline, token, requested, Stopwatch.GetTimestamp());
-            if (_stop.IsCancellationRequested) return;
-            var before = _vision.Status;
-            // Callback time can precede waiting for this lock. Recheck lateness
-            // and physical-input freshness using the clock after ownership is acquired.
-            if (!_vision.TryAdvanceDeadline(Stopwatch.GetTimestamp())) { CancelLostLockFeedbackLocked(before); return; }
-            try
-            {
-                WriteTracedOutputLocked(_vision.Output, VisionTrainingTraceKind.DeadlineOutput,
-                    _latestInputSampleTicks, _latest?.Input ?? default);
-                PublishReleaseFeedbackLocked();
-                if (_latest is { } previous)
-                    Volatile.Write(ref _latest, previous with { Output = _vision.Output, OutputActive = _output is not null });
-            }
-            catch (Exception)
-            {
-                try { DisconnectOutput("Vision release stopped after an output error."); }
-                catch { _outputStatus = "Vision release stopped after an output error."; }
-            }
+            AdvanceVisionDeadlineLocked();
+        }
+    }
+
+    private void AdvanceVisionDeadlineLocked()
+    {
+        if (_stop.IsCancellationRequested) return;
+        var before = _vision.Status;
+        // Callback time can precede waiting for this lock. Recheck lateness
+        // and physical-input freshness using the clock after ownership is acquired.
+        if (!_vision.TryAdvanceDeadline(Stopwatch.GetTimestamp())) { CancelLostLockFeedbackLocked(before); return; }
+        try
+        {
+            WriteTracedOutputLocked(_vision.Output, VisionTrainingTraceKind.DeadlineOutput,
+                _latestInputSampleTicks, _latest?.Input ?? default);
+            PublishReleaseFeedbackLocked();
+            if (_latest is { } previous)
+                Volatile.Write(ref _latest, previous with { Output = _vision.Output, OutputActive = _output is not null });
+        }
+        catch (Exception)
+        {
+            try { DisconnectOutput("Vision release stopped after an output error."); }
+            catch { _outputStatus = "Vision release stopped after an output error."; }
         }
     }
 

@@ -44,6 +44,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private VisionPerformanceSnapshot? _performance;
     private LiveFeedbackOcr? _feedbackOcr;
     private object? _lastOcrFeedback;
+    private string? _practiceKey;
     private readonly List<object> _ocrHistory = [];
     private static readonly string OcrHistoryPath = Path.Combine(DesktopEnvironment.DataDirectory("Vision") ?? AppContext.BaseDirectory, "ShotFeedbackHistory.jsonl");
     private readonly ShotFeedbackLearningGate _feedbackLearning = new();
@@ -137,6 +138,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             streamTelemetry = _runtime()?.VisionStreamTelemetry,
             streamTelemetryReader = _session?.StreamTelemetryReaderStatus,
             ocrFeedback = Volatile.Read(ref _lastOcrFeedback),
+            ocrReaderStatus = _session?.Status.Running == true ? _feedbackOcr?.Status : null,
+            ocrEffectiveTimingMs = _settings.FeedbackCorrection(_practiceKey),
             ocrHistory = SnapshotOcrHistory(),
             ocrHistoryPath = OcrHistoryPath,
             luaCalibration = LuaCalibrationSnapshot(),
@@ -572,7 +575,9 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 throw new InvalidOperationException("Tracked crops currently require CPU image preparation. CUDA model inference remains available.");
             if (manifest.OutputContract != plugin.OutputContract) throw new InvalidDataException("The model does not match this game plugin's vision contract.");
         }
-        _feedbackOcr?.Stop();
+        _feedbackOcr?.Dispose(); _feedbackOcr = null;
+        _practiceKey = _settings.PracticeKey(predictor?.Action.ConfigurationKey);
+        var captureSettings = _practiceKey is null ? _settings : _settings with { CorrectionMs = _settings.FeedbackCorrection(_practiceKey) };
         _timingRevalidationRequired = false; _feedbackLearning.Reset();
         Volatile.Write(ref _lastOcrFeedback, null);
         lock (_ocrGate) { _consecutiveOcrDir = 0; _consecutiveOcrTempoDir = 0; _excellentOcrStreak = 0; }
@@ -584,11 +589,11 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         {
             var tracker = predictor is null ? _profile?.CreateRegionTracker(_settings,
                 models => new VisionAnalysisModels(models, captureProvider, _installedPlugins?.ModelDirectory(RequirePlugin().Id))) : null;
-            if (peer is not null) _session.StartDirect(peer, _settings, loadModel, tracker, predictor);
-            else _session.Start(source!.Hwnd, _settings, loadModel, tracker, predictor);
+            if (peer is not null) _session.StartDirect(peer, captureSettings, loadModel, tracker, predictor);
+            else _session.Start(source!.Hwnd, captureSettings, loadModel, tracker, predictor);
         }
         catch { predictor?.Dispose(); throw; }
-        if (loadModel && predictor is not null) StartFeedbackOcr();
+        if (loadModel && predictor is not null) StartFeedbackOcr(_session, runtime);
         _lastObservedSourceId = _selectedSourceId;
         _notice = loadModel && (predictor is not null || _settings.ModelManifestPath.Length != 0)
             ? "Preparing live analysis. Assistance remains disarmed until you arm it."
@@ -1009,39 +1014,35 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             && int.TryParse(frame, out int index)) return review.ReadFrame(region, index);
         return null;
     }
-    private void StartFeedbackOcr()
+    private void StartFeedbackOcr(VisionSession session, StudioRuntime runtime)
     {
-        try
+        var plugins = _installedPlugins;
+        var id = _plugin?.Id;
+        _feedbackOcr = new(HandleOcrFeedback);
+        _feedbackOcr.Start(session, runtime, _settings, () =>
         {
-            var pluginId = _plugin?.Id;
-            string? modelDir = pluginId is null ? null : _installedPlugins?.ModelDirectory(pluginId);
-            if (string.IsNullOrWhiteSpace(modelDir) || !File.Exists(Path.Combine(modelDir, "text-det.onnx"))
-                || !File.Exists(Path.Combine(modelDir, "text-rec.onnx")))
-                return;
-            var modelSet = _installedPlugins?.FeedbackModels(pluginId!);
-            if (modelSet is null) return;
-            _feedbackOcr?.Dispose();
-            _feedbackOcr = new(modelDir, modelSet, HandleOcrFeedback);
-            _feedbackOcr.Start(() => _session, _runtime, () => _settings);
-        }
-        catch { /* OCR banner feedback is optional */ }
+            if (plugins is null || id is null || plugins.FeedbackModels(id) is not { } set)
+                throw new InvalidDataException("The installed add-on does not declare its feedback model assets.");
+            return new(set, VisionExecutionProvider.Cpu, plugins.ModelDirectory(id), loadPose: false);
+        });
     }
 
     private object[] SnapshotOcrHistory() { lock (_ocrGate) return [.. _ocrHistory]; }
 
     private object BuildOcrEntry(OcrFeedbackRead read, VisionActionReceipt receipt,
-        double expectedPreAnchorMs, double actualPreAnchorMs, bool strokeClamped,
+        double? expectedPreAnchorMs, double? actualPreAnchorMs, bool strokeClamped,
         double prevCorr, double nextCorr, double prevTempo, double nextTempo, string message) => new
     {
         timestampUtc = DateTimeOffset.UtcNow,
         profileId = _profile?.Id.ToString() ?? "",
         profileName = _profile?.Name ?? "",
-        read.ReceiptId, read.RunId, read.ShotType, read.Timing, read.Tempo, read.Distance, read.Coverage, read.RawText,
+        read.ReceiptId, read.RunId, receipt.ShotToken, read.CaptureTicks, read.ShotType, read.Timing, read.Tempo, read.Distance, read.Coverage, read.RawText,
         receipt.Outcome, receipt.CancellationReason, receipt.ActualStartedTimestamp, receipt.ActualAnchorTimestamp,
         receipt.AnchorLatenessMs, receipt.EligibleForFeedback, receipt.StreamTelemetry,
         actionCorrectionMs = receipt.CorrectionMs, actionTempoCorrectionMs = receipt.TempoCorrectionMs,
-        feedbackEligible = receipt.EligibleForFeedback && receipt.Outcome == VisionActionOutcome.Completed && receipt.StreamTelemetry?.State != "unstable",
-        feedbackContext = ShotFeedbackLearningGate.Context(read),
+        feedbackEligible = read.Disposition is null && read.ShotType != "unrecognized" && receipt.EligibleForFeedback && receipt.Outcome == VisionActionOutcome.Completed && receipt.StreamTelemetry?.State != "unstable",
+        feedbackContext = ShotFeedbackLearningGate.Context(read, _settings.PracticeBand),
+        read.Disposition,
         receipt.TriggerSample,
         triggerToStrokeStartMs = receipt.TriggerSample is { } press && receipt.ActualStartedTimestamp >= press.Timestamp
             ? Stopwatch.GetElapsedTime(press.Timestamp, receipt.ActualStartedTimestamp).TotalMilliseconds : (double?)null,
@@ -1068,13 +1069,14 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         catch { /* History logging is optional */ }
     }
 
-    private void HandleOcrFeedback(OcrFeedbackRead read)
+    private void HandleOcrFeedback(VisionActionReceipt latestReceipt, OcrFeedbackRead read)
     {
         lock (_ocrGate)
         {
-            if (_disposed || _session?.Status.Running != true) return;
-            var latestReceipt = _runtime()?.LastVisionAttempt;
-            if (latestReceipt is null || latestReceipt.RunId != read.RunId || latestReceipt.Id != read.ReceiptId) return;
+            bool current = !_disposed && _session?.Status.Running == true && _runtime()?.LastVisionAttempt is { } active
+                && active.Id == latestReceipt.Id && active.RunId == latestReceipt.RunId;
+            int? practiceBand = _settings.PracticeBand;
+            double currentTiming = _settings.FeedbackCorrection(_practiceKey);
             bool calibrationTrial = _settings.PluginAssistance is { } json
                 && (!json.TryGetProperty("confirmed", out var conf) || !conf.GetBoolean())
                 && (!json.TryGetProperty("calibrationTrial", out var trial) || trial.GetBoolean());
@@ -1083,74 +1085,57 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             bool rhythmMode = _settings.PluginAssistance is { } modeJson
                 && (!modeJson.TryGetProperty("inputMode", out var modeProp) || modeProp.GetString() == "rhythm");
             bool assignedTrigger = _runtime()?.VisionAction.HasAssignedTrigger == true;
-            double expectedPreAnchorMs = latestReceipt.AnchorTimestamp > latestReceipt.StartedTimestamp
-                ? Stopwatch.GetElapsedTime(latestReceipt.StartedTimestamp, latestReceipt.AnchorTimestamp).TotalMilliseconds
-                : latestReceipt.AnchorFraction * latestReceipt.StrokeDurationMs;
-            double actualPreAnchorMs = latestReceipt.ActualStartedTimestamp > 0 && latestReceipt.ActualAnchorTimestamp >= latestReceipt.ActualStartedTimestamp
+            double? expectedPreAnchorMs = latestReceipt.AnchorTimestamp >= latestReceipt.StartedTimestamp && latestReceipt.AnchorTimestamp > 0
+                ? Stopwatch.GetElapsedTime(latestReceipt.StartedTimestamp, latestReceipt.AnchorTimestamp).TotalMilliseconds : null;
+            double? actualPreAnchorMs = latestReceipt.ActualStartedTimestamp > 0 && latestReceipt.ActualAnchorTimestamp >= latestReceipt.ActualStartedTimestamp
                 ? Stopwatch.GetElapsedTime(latestReceipt.ActualStartedTimestamp, latestReceipt.ActualAnchorTimestamp).TotalMilliseconds
-                : expectedPreAnchorMs;
+                : null;
             bool strokeClamped = expectedPreAnchorMs > 0 && actualPreAnchorMs + 2.5 < expectedPreAnchorMs;
-            string? learningBlocked = rhythmMode && read.ShotType == "timing"
-                ? "Plain TIMING feedback cannot tune a rhythm shot."
-                : _feedbackLearning.Check(latestReceipt, read, _settingsProfile.ToString());
-            if (learningBlocked is not null)
-                _consecutiveOcrDir = _consecutiveOcrTempoDir = _excellentOcrStreak = 0;
-            if (autoAdjust && learningBlocked is null && assignedTrigger && read.ShotType != "unrecognized" && !(rhythmMode && read.ShotType == "timing"))
+            string? learningBlocked = read.Disposition ?? (!current ? "A newer attempt or session superseded this grade."
+                : practiceBand.HasValue && _practiceKey is null ? "The current setup has no saved practice timing identity."
+                : rhythmMode && read.ShotType == "timing" ? "Plain TIMING feedback cannot tune a rhythm shot."
+                : _feedbackLearning.Check(latestReceipt, read, _settingsProfile.ToString(), practiceBand));
+            if (learningBlocked is null && (latestReceipt.CorrectionMs != currentTiming || latestReceipt.TempoCorrectionMs != _settings.TempoCorrectionMs))
+                learningBlocked = "This shot used an earlier correction. Waiting for feedback from the current setting.";
+            if (autoAdjust && learningBlocked is null && assignedTrigger)
             {
-                var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(_settings.CorrectionMs, _settings.TempoCorrectionMs,
-                    read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir, ref _excellentOcrStreak);
-                bool applied = !step.Changed;
-                if (step.Changed)
+                var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(currentTiming, _settings.TempoCorrectionMs,
+                    read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir, ref _excellentOcrStreak,
+                    confirmDirection: true, timingOnly: practiceBand.HasValue);
+                bool applied = !step.Changed || _runtime()?.StageVisionFeedback(latestReceipt, step.Timing.NextCorrectionMs, step.Tempo.NextCorrectionMs) == true;
+                string updateMessage = applied ? step.Message : "Timing update was not applied because the controller or session changed.";
+                if (applied && step.Changed)
                 {
-                    // Only an idle, unchanged session may accept this shot's correction.
-                    var expectedSettings = _settings;
-                    var expectedSession = _session;
-                    var expectedProfile = _settingsProfile;
-                    for (int retry = 0; retry < 8; retry++)
+                    _settings = _settings.WithFeedbackCorrection(_practiceKey, step.Timing.NextCorrectionMs)
+                        with { TempoCorrectionMs = step.Tempo.NextCorrectionMs };
+                    try { _settingsStore.Save(_settingsProfile, _settings); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    { updateMessage += " Applied for this session. Saving the correction failed. " + ex.Message; }
+                    if (step.Tempo.DeltaMs != 0)
                     {
-                        if (_disposed || _session != expectedSession || _settingsProfile != expectedProfile || _settings != expectedSettings
-                            || _runtime()?.LastVisionAttempt?.Id != latestReceipt.Id) break;
-                        if (_runtime()?.TryAdjustVisionTiming(s => s with
-                        {
-                            CorrectionMs = step.Timing.NextCorrectionMs,
-                            TempoCorrectionMs = step.Tempo.NextCorrectionMs
-                        }) == true)
-                        { applied = true; break; }
-                        Thread.Sleep(60);
+                        _timingRevalidationRequired = true;
+                        _runtime()?.SetVisionArmed(false);
                     }
-                    if (applied)
-                    {
-                        _settings = _settings with
-                        {
-                            CorrectionMs = step.Timing.NextCorrectionMs,
-                            TempoCorrectionMs = step.Tempo.NextCorrectionMs
-                        };
-                        _settingsStore.Save(_settingsProfile, _settings);
-                        if (step.Tempo.DeltaMs != 0)
-                        {
-                            _timingRevalidationRequired = true;
-                            _runtime()?.SetVisionArmed(false);
-                        }
-                        _version++;
-                        _notice = step.Message + (_timingRevalidationRequired ? " Assistance paused. Validate the changed tempo in practice before continuing." : "");
-                    }
+                    _version++;
+                    if (_timingRevalidationRequired) updateMessage += " Validate the changed tempo in practice before continuing.";
+                    _notice = updateMessage;
                 }
-                double nextCorr = applied ? step.Timing.NextCorrectionMs : step.Timing.PreviousCorrectionMs;
-                double nextTempo = applied ? step.Tempo.NextCorrectionMs : step.Tempo.PreviousCorrectionMs;
+                double nextCorr = applied ? step.Timing.NextCorrectionMs : currentTiming;
+                double nextTempo = applied ? step.Tempo.NextCorrectionMs : _settings.TempoCorrectionMs;
                 RecordOcrEntryLocked(BuildOcrEntry(read, latestReceipt, expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,
-                    step.Timing.PreviousCorrectionMs, nextCorr, step.Tempo.PreviousCorrectionMs, nextTempo, applied ? step.Message + (_timingRevalidationRequired ? " Assistance paused for tempo validation." : "") : "Timing update was not applied; controller or session changed."));
+                    step.Timing.PreviousCorrectionMs, nextCorr, step.Tempo.PreviousCorrectionMs, nextTempo, updateMessage));
                 return;
             }
-            string passiveMessage = latestReceipt.Outcome == VisionActionOutcome.Cancelled
+            string passiveMessage = read.Disposition ?? (latestReceipt.Outcome == VisionActionOutcome.Cancelled
                 ? $"Attempt cancelled: {latestReceipt.CancellationReason}. Feedback is diagnostic only."
                 : learningBlocked is not null ? learningBlocked
                 : read.ShotType == "unrecognized"
                 ? $"Shot #{read.ReceiptId} completed, but OCR did not find a RHYTHM/TIMING banner{(string.IsNullOrWhiteSpace(read.RawText) ? "." : $" (saw: {read.RawText}).")}"
                 : rhythmMode && read.ShotType == "timing"
                 ? $"OCR ignored non-rhythm TIMING result ({read.Timing}); correction unchanged."
-                : $"OCR read: {read.ShotType.ToUpperInvariant()} · {read.Timing}{(read.Tempo is not ("none" or "") ? $" · {read.Tempo}" : "")}";
+                : $"OCR read: {read.ShotType.ToUpperInvariant()} · {read.Timing}{(read.Tempo is not ("none" or "") ? $" · {read.Tempo}" : "")}");
             RecordOcrEntryLocked(BuildOcrEntry(read, latestReceipt, expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,
-                _settings.CorrectionMs, _settings.CorrectionMs, _settings.TempoCorrectionMs, _settings.TempoCorrectionMs, passiveMessage));
+                currentTiming, currentTiming, _settings.TempoCorrectionMs, _settings.TempoCorrectionMs, passiveMessage));
         }
     }
 

@@ -43,12 +43,12 @@ internal static class CommittedStrokeReplayVerification
                 previous = physical;
                 var before = arbiter.Status;
                 bool accepted = false;
-                if (signal.TimeToTargetMs.HasValue || signal.InvalidateAttempt || signal.ContinueCommittedAction)
+                if (signal.HasDecision)
                     accepted = arbiter.Submit(new(before.SessionGeneration, before.ShotToken,
                         signal.Sequence, signal.CaptureTimestamp, frame.GetProperty("completedTicks").GetInt64(),
                         signal.TimeToTargetMs ?? 0, signal.Confidence, signal.UncertaintyMs,
                         signal.Acquired && !signal.InvalidateAttempt)
-                        { ContinueCommittedAction = signal.ContinueCommittedAction && !signal.InvalidateAttempt }, now);
+                        { WithdrawPendingForecast = signal.WithdrawPendingForecast, ContinueCommittedAction = signal.ContinueCommittedAction && !signal.InvalidateAttempt }, now);
                 string original = frame.GetProperty("output").GetProperty("message").GetString() ?? "";
                 if (signal.TimeToTargetMs.HasValue
                     && ((original == "Prediction arrived after the allowed release deadline." && context.StrokeAnchorTimestamp > 0)

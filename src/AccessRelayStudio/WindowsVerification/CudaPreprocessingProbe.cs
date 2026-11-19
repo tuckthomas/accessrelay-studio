@@ -166,7 +166,7 @@ internal static class CudaPreprocessingProbe
         }
         return maximum;
     }
-    private static void ConfigureOrt(string directory)
+    internal static void ConfigureOrt(string directory)
     {
         directory = Path.GetFullPath(directory); string runtime = Path.Combine(directory, "onnxruntime.dll");
         if (!File.Exists(runtime)) throw new FileNotFoundException("Choose the complete published app containing onnxruntime.dll.", runtime);

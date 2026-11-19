@@ -52,6 +52,21 @@ public sealed record VisionSettings
     public double EstimatedInputDelayMs { get; init; }
     public double CorrectionMs { get; init; }
     public double TempoCorrectionMs { get; init; }
+    // Solo ranges are selected before the press. The game's distance arrives after release.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, double>? PracticeTimingCorrections { get; init; }
+    internal int? PracticeBand => PluginAssistance is { } cfg && cfg.TryGetProperty("practiceDistanceFeet", out var feet)
+        && feet.ValueKind == JsonValueKind.Number && feet.TryGetInt32(out int value) && value is >= 0 and <= 90 && value % 5 == 0 ? value : null;
+    internal string? PracticeKey(string? actionKey) => PracticeBand is { } band && actionKey is { Length: 64 } && actionKey.All(char.IsAsciiHexDigit)
+        ? $"{actionKey}/{band}" : null;
+    internal double FeedbackCorrection(string? key) => key is not null && PracticeTimingCorrections is { } saved && saved.TryGetValue(key, out var value) ? value : CorrectionMs;
+    internal VisionSettings WithFeedbackCorrection(string? key, double value)
+    {
+        if (key is null) return this with { CorrectionMs = value };
+        var saved = PracticeTimingCorrections is { } prior ? new Dictionary<string, double>(prior) : [];
+        saved[key] = value;
+        return this with { PracticeTimingCorrections = saved };
+    }
     public double MaximumLatenessMs { get; init; } = 5;
     public double MaximumShotDurationMs { get; init; } = 5000;
 
@@ -85,6 +100,11 @@ public sealed record VisionSettings
         Check(EstimatedInputDelayMs, 0, 1000, "Estimated input delay");
         Check(CorrectionMs, -1000, 1000, "Timing correction");
         Check(TempoCorrectionMs, -200, 200, "Tempo correction");
+        if (PracticeTimingCorrections?.Any(p =>
+            p.Key.Length is < 66 or > 67 || p.Key[64] != '/' || !p.Key[..64].All(char.IsAsciiHexDigit)
+            || !int.TryParse(p.Key[65..], out int band) || band is < 0 or > 90 || band % 5 != 0
+            || !double.IsFinite(p.Value) || Math.Abs(p.Value) > 1000) == true)
+            throw new InvalidDataException("The saved practice timing ranges are invalid.");
         Check(MaximumLatenessMs, 0, 100, "Deadline lateness");
         Check(MaximumShotDurationMs, 1, 10000, "Shot duration");
     }

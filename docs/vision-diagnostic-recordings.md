@@ -1,5 +1,11 @@
 # Gameplay diagnostic recordings
 
+## Shot feedback in Studio beta.50
+
+Shot meter shows whether the packaged HUD reader loaded. The feedback log records the controller receipt, the time of the HUD frame, the recognized heading and grades, and the reason a correction changed or stayed fixed. A confirmed heading wipe lets identical grades on consecutive shots count separately.
+
+For solo practice, select the shooting distance under **Feedback context**. The HUD can omit defender coverage in this mode. Two eligible grades in the same direction at the same correction qualify a timing step. A different distance, a visible defender, a cancelled stroke or a plain TIMING grade during rhythm assistance contributes no timing change. Each selected range saves its own correction for this calibration. Solo practice keeps tempo at its calibrated value.
+
 ## Auto-green reliability branch (runtime contract 4)
 
 Shot receipts now distinguish `completed` from `cancelled`. `lastAction` retains the

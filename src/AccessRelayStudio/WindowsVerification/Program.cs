@@ -2,6 +2,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using EliteScriptStudio.Vision;
 
+if (args is ["--shot-feedback-replay", var library, var recording, var report])
+{ ShotFeedbackReplayChecks.Run(library, recording, report); return; }
+
 if (args is ["--xbox-webrtc-loopback"] or ["--xbox-webrtc-loopback", "--cpu-color"])
 {
     GStreamerLoopbackChecks.Run(forceCpu: args.Length == 2).GetAwaiter().GetResult();

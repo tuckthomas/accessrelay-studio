@@ -10,23 +10,32 @@ internal sealed class ShotFeedbackLearningGate
     private string _lastRun = "";
     private long _lastReceipt;
     internal void Reset() { _context = _lastRun = ""; _consecutive = 0; _lastReceipt = 0; }
-    internal static string Context(OcrFeedbackRead read)
+    private static int? Band(string? distance)
     {
-        var feet = Regex.Match(read.Distance ?? "", @"^\d+");
-        string distance = int.TryParse(feet.Value, out int ft) && ft is >= 1 and <= 94 ? (ft / 5 * 5).ToString() + "–" + (ft / 5 * 5 + 4) + " ft" : "distance unknown";
-        return string.Join(" / ", read.ShotType, distance, read.Coverage ?? "coverage unknown");
+        var feet = Regex.Match(distance ?? "", @"^\d+");
+        return int.TryParse(feet.Value, out int ft) && ft is >= 1 and <= 94 ? ft / 5 * 5 : null;
     }
-    internal string? Check(VisionActionReceipt receipt, OcrFeedbackRead read, string profile)
+    internal static string Context(OcrFeedbackRead read, int? soloBand = null) =>
+        string.Join(" / ", read.ShotType, Band(read.Distance) is { } ft ? $"{ft}–{ft + 4} ft" : "distance unknown",
+            read.Coverage ?? (soloBand.HasValue ? "solo practice" : "coverage unknown"));
+    internal string? Check(VisionActionReceipt receipt, OcrFeedbackRead read, string profile, int? soloBand = null)
     {
         if (receipt.RunId == _lastRun && receipt.Id <= _lastReceipt)
             return "Duplicate or superseded feedback cannot change timing.";
         _lastRun = receipt.RunId; _lastReceipt = receipt.Id;
+        if (read.Disposition is not null) return read.Disposition;
         if (receipt.Outcome != VisionActionOutcome.Completed || !receipt.EligibleForFeedback)
         { _consecutive = 0; return "Feedback logged only: action was cancelled or local output timing was not validated."; }
         if (read.ShotType == "unrecognized") { _consecutive = 0; return "Feedback was not recognized reliably; timing unchanged."; }
         if (receipt.StreamTelemetry?.CanAdapt != true)
         { _consecutive = 0; return receipt.StreamTelemetry?.Message ?? "No stream-health evidence for this shot; automatic tuning is paused."; }
-        if (string.IsNullOrWhiteSpace(read.Distance) || string.IsNullOrWhiteSpace(read.Coverage))
+        if (soloBand is { } selected)
+        {
+            if (read.Coverage is not null) return "The HUD shows defender coverage. This shot cannot tune a solo practice range.";
+            if (Band(read.Distance) != selected) return $"This shot is outside the selected {selected}–{selected + 4} ft solo practice range or its distance is unreadable.";
+            return null;
+        }
+        if (Band(read.Distance) is null || string.IsNullOrWhiteSpace(read.Coverage))
         { _consecutive = 0; return "Shot distance or coverage was unreadable; feedback logged without changing timing."; }
         string context = profile + "/" + Context(read);
         if (_context.Length == 0) _context = context;

@@ -7,6 +7,7 @@ internal readonly record struct VisionPrediction(long SessionGeneration, long Sh
     double Confidence, double UncertaintyMs, bool PlayerTracked)
 {
     public bool ContinueCommittedAction { get; init; }
+    public bool WithdrawPendingForecast { get; init; }
     public string? TrackingFailure { get; init; }
 }
 

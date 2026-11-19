@@ -10,6 +10,8 @@ internal static class AutoGreenReliabilityVerification
         BannerParsing();
         StreamStatistics();
         LearningEvidence();
+        SoloFeedback();
+        RepeatedBanner();
         Console.WriteLine("SUCCESS Auto-green reliability: lead time, actual handoffs, cancellations, banner association, stream health and learning evidence.");
     }
     private static void AssignedControls()
@@ -100,10 +102,27 @@ internal static class AutoGreenReliabilityVerification
         var receipt = valid.LastAction ?? throw new Exception("No valid stroke receipt.");
         Check(receipt.AnchorTimestamp == 148 && receipt.ActualAnchorTimestamp == 149 && receipt.ActualStartedTimestamp == 101
             && receipt.AnchorLatenessMs == 1 && receipt.EligibleForFeedback, "Receipt did not distinguish planned anchor from successful output handoff.");
+        double previousLead = valid.MinimumStrokeLeadMs;
+        Check(valid.StageFeedbackTiming(receipt, -4, 0) && valid.MinimumStrokeLeadMs == previousLead, "Feedback moved a held shot.");
+        Poll(valid, 210, false);
+        Check(valid.MinimumStrokeLeadMs == previousLead + 4, "The next press did not receive the scheduler's new lead.");
+        Poll(valid, 215); Poll(valid, 225, false);
+        Check(valid.LastAttempt is { Outcome: VisionActionOutcome.Cancelled, AnchorTimestamp: 0, ActualStartedTimestamp: 0, ActualAnchorTimestamp: 0 },
+            "A cancelled press inherited its predecessor's planned or actual anchor.");
         var unobserved = Paddle();
         unobserved.Submit(Prediction(unobserved, 1, 100, 48), 100);
         for (int t = 100; t <= 206; t += 2) unobserved.Sample(default, default, true, true, false, t, heldPaddles: PaddleButtons.LargeRight);
         Check(unobserved.LastAction is { EligibleForFeedback: false, ActualAnchorTimestamp: 0 }, "An unobserved output claimed successful handoff timing.");
+        var withdrawn = Paddle();
+        Check(withdrawn.Submit(Prediction(withdrawn, 1, 100, 90), 100), "The test stroke did not schedule.");
+        Check(withdrawn.Submit(Prediction(withdrawn, 2, 116, 0) with { WithdrawPendingForecast = true }, 116),
+            "A contradicted forecast could not withdraw before stroke start.");
+        for (int t = 118; t < 205; t += 2) Poll(withdrawn, t);
+        Check(withdrawn.DeadlineTimestamp == null && withdrawn.Output.RightY == short.MinValue && withdrawn.LastAttempt == null,
+            "A withdrawn forecast produced output or released the user's hold.");
+        Check(withdrawn.Submit(Prediction(withdrawn, 3, 206, 68), 206), "The same physical shot could not qualify on new evidence.");
+        for (int t = 208; t < 350; t += 2) Poll(withdrawn, t);
+        Check(withdrawn.LastAction is { Id: 1, ActualAnchorTimestamp: > 0 }, "A replacement forecast did not produce exactly one stroke.");
     }
     private static void CancelledPaddleHold()
     {
@@ -201,6 +220,39 @@ internal static class AutoGreenReliabilityVerification
         Check(gate.Check(receipt with { Id = 5, Outcome = VisionActionOutcome.Cancelled }, read, "profile") is not null, "Cancelled shot qualified for adaptation.");
         Check(gate.Check(receipt with { Id = 6, StreamTelemetry = new("unstable", "spike", false, 30, null, 2) }, read, "profile") == "spike",
             "Unstable stream qualified for adaptation.");
+    }
+    private static void SoloFeedback()
+    {
+        var gate = new ShotFeedbackLearningGate();
+        var r = new VisionActionReceipt(1, 1, 1, 1, 2, 3, 54, .85, "key", "run") { EligibleForFeedback = true, StreamTelemetry = new("stable", "", true, 1, null, 1) };
+        var read = new OcrFeedbackRead(1, "run", "rhythm", "late", "fast", "", 5, 1, "24'3");
+        Check(gate.Check(r, read, "profile") != null, "Unknown multiplayer coverage tuned a shot.");
+        Check(gate.Check(r with { Id = 2 }, read, "profile", 20) == null, "Solo HUD required a defender.");
+        Check(gate.Check(r with { Id = 3 }, read with { Coverage = "Open" }, "profile", 20) != null, "Covered and solo practice evidence mixed.");
+        Check(gate.Check(r with { Id = 4 }, read with { Distance = "25'1" }, "profile", 20) != null, "A different practice range affected this one.");
+        int direction = 0, tempo = 0, excellent = 0;
+        AdaptiveFeedbackResult Step() => ShotFeedbackAnalysis.ComputeAdaptiveFeedback(2, 6, read, false, ref direction, ref tempo, ref excellent, true, true);
+        Check(!Step().Changed, "One Late changed the correction.");
+        var second = Step();
+        Check(second.Timing.NextCorrectionMs < 2 && second.Tempo.NextCorrectionMs == 6, "Repeated Late did not advance timing independently of tempo.");
+        var settings = VisionSettings.Default with { CorrectionMs = 2, PluginAssistance = System.Text.Json.JsonSerializer.SerializeToElement(new { practiceDistanceFeet = 20 }) };
+        string key = settings.PracticeKey(new string('a', 64))!;
+        var changed = settings.WithFeedbackCorrection(key, second.Timing.NextCorrectionMs);
+        changed = System.Text.Json.JsonSerializer.Deserialize<VisionSettings>(System.Text.Json.JsonSerializer.Serialize(changed))!;
+        changed.Validate();
+        Check(changed.FeedbackCorrection(key) == second.Timing.NextCorrectionMs && changed.FeedbackCorrection(key[..^2] + "25") == 2 && changed.CorrectionMs == 2,
+            "Saving/reloading a practice correction changed a different range or the baseline.");
+    }
+    private static void RepeatedBanner()
+    {
+        var seq = new ShotFeedbackBannerSequence();
+        var late = new ShotFeedbackAnalysis.ParsedBanner("rhythm", "late", "none", "RHYTHM LATE", null, "23'9");
+        Check(seq.Observe(1, late, true, true) == null && seq.Observe(2, late, true, true) == null, "An existing HUD was credited on startup.");
+        seq.Observe(3, null, false, false); seq.Observe(4, null, false, false);
+        Check(seq.Observe(5, late, true, true) == null, "A search outside the HUD manufactured a wipe.");
+        seq.ConfirmClear(6); seq.Observe(7, late, true, true);
+        Check(seq.Observe(8, late, true, true)?.StartedAt == 7 && seq.Observe(9, late, true, true) == null,
+            "A repeated grade and distance were lost or counted twice.");
     }
     private static void Check(bool pass, string message) { if (!pass) throw new InvalidOperationException(message); }
 }

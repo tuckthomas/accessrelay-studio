@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace EliteScriptStudio.Core;
 
 internal sealed record OcrFeedbackRead(long ReceiptId, string RunId, string ShotType, string Timing, string Tempo,
-    string RawText, long CaptureTicks, double ProcessingMs, string? Distance = null, string? Coverage = null);
+    string RawText, long CaptureTicks, double ProcessingMs, string? Distance = null, string? Coverage = null, string? Disposition = null);
 
 internal sealed record AdaptiveTimingStep(double PreviousCorrectionMs, double NextCorrectionMs, double DeltaMs, string Reason);
 
@@ -39,11 +39,11 @@ internal static class ShotFeedbackAnalysis
         return new(.22, 0, .56, .38);
     }
 
-    internal static VisionCrop ProjectCrop(VisionCrop parent, VisionCrop child) =>
-        new(Math.Clamp(parent.Left + child.Left * parent.Width, 0, 1),
-            Math.Clamp(parent.Top + child.Top * parent.Height, 0, 1),
-            Math.Clamp(child.Width * parent.Width, .01, 1),
-            Math.Clamp(child.Height * parent.Height, .01, 1));
+    internal static VisionCrop ProjectCrop(VisionCrop parent, VisionCrop child)
+    {
+        double left = parent.Left + child.Left * parent.Width, top = parent.Top + child.Top * parent.Height;
+        return new(left, top, Math.Min(1 - left, parent.Width * child.Width), Math.Min(1 - top, parent.Height * child.Height));
+    }
 
     internal sealed record ParsedBanner(string ShotType, string Timing, string Tempo, string RawText, VisionCrop? BannerBounds,
         string? Distance = null, string? Coverage = null);
@@ -147,7 +147,8 @@ internal static class ShotFeedbackAnalysis
     }
 
     internal static AdaptiveFeedbackResult ComputeAdaptiveFeedback(double currentCorrectionMs, double currentTempoCorrectionMs,
-        OcrFeedbackRead read, bool strokeClamped, ref int consecutiveTimingDir, ref int consecutiveTempoDir, ref int excellentStreak)
+        OcrFeedbackRead read, bool strokeClamped, ref int consecutiveTimingDir, ref int consecutiveTempoDir, ref int excellentStreak,
+        bool confirmDirection = false, bool timingOnly = false)
     {
         bool timingAdjusted = false;
         bool heldAfterExcellent = false;
@@ -166,11 +167,11 @@ internal static class ShotFeedbackAnalysis
         else
         {
             var candidateStep = ComputeAdaptiveStep(currentCorrectionMs, read.Timing, ref consecutiveTimingDir);
-            if (excellentStreak >= 2 && Math.Abs(consecutiveTimingDir) == 1 && candidateStep.DeltaMs != 0)
+            if ((excellentStreak >= 2 || confirmDirection) && Math.Abs(consecutiveTimingDir) == 1 && candidateStep.DeltaMs != 0)
             {
                 heldAfterExcellent = true;
                 timingStep = new(currentCorrectionMs, currentCorrectionMs, 0,
-                    $"Timing correction held at {FormatMs(currentCorrectionMs)} ms after {excellentStreak} Excellents (confirming with next shot).");
+                    $"Holding timing at {FormatMs(currentCorrectionMs)} ms pending a second {read.Timing} result.");
             }
             else
             {
@@ -180,9 +181,14 @@ internal static class ShotFeedbackAnalysis
             }
         }
 
-        var tempoStep = read.ShotType == "timing" || read.Tempo is "none" or ""
+        bool hasTempo = read.ShotType == "rhythm" && read.Tempo is not ("none" or "");
+        if (!hasTempo) consecutiveTempoDir = 0;
+        var tempoStep = !hasTempo
             ? new AdaptiveTimingStep(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, "Tempo unchanged.")
             : ComputeAdaptiveTempoStep(currentTempoCorrectionMs, read.Tempo, ref consecutiveTempoDir);
+        if (tempoStep.DeltaMs != 0 && (timingOnly || (confirmDirection && Math.Abs(consecutiveTempoDir) < 2)))
+            tempoStep = new(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, timingOnly
+                ? "The solo timing trial keeps the calibrated stroke duration." : "Waiting for a second matching tempo grade.");
 
         bool timingMoved = timingAdjusted && timingStep.DeltaMs != 0;
         bool tempoMoved = tempoStep.DeltaMs != 0;
@@ -207,6 +213,10 @@ internal static class ShotFeedbackAnalysis
                 : read.Timing;
             summary = $"OCR {tag}: {string.Join("; ", parts)}.";
         }
+        if (hasTempo && tempoStep.DeltaMs == 0 && read.Tempo != "excellent") summary += " " + tempoStep.Reason;
+        // A changed setting needs its own two agreeing grades before another step.
+        if (confirmDirection && timingMoved) consecutiveTimingDir = 0;
+        if (confirmDirection && tempoMoved) consecutiveTempoDir = 0;
         return new(timingStep, tempoStep, strokeClamped && read.Timing != "excellent", timingMoved || tempoMoved, summary);
     }
 
