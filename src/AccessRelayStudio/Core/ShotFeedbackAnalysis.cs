@@ -148,7 +148,7 @@ internal static class ShotFeedbackAnalysis
 
     internal static AdaptiveFeedbackResult ComputeAdaptiveFeedback(double currentCorrectionMs, double currentTempoCorrectionMs,
         OcrFeedbackRead read, bool strokeClamped, ref int consecutiveTimingDir, ref int consecutiveTempoDir, ref int excellentStreak,
-        bool confirmDirection = false, bool timingOnly = false)
+        bool confirmDirection = false)
     {
         bool timingAdjusted = false;
         bool heldAfterExcellent = false;
@@ -186,9 +186,8 @@ internal static class ShotFeedbackAnalysis
         var tempoStep = !hasTempo
             ? new AdaptiveTimingStep(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, "Tempo unchanged.")
             : ComputeAdaptiveTempoStep(currentTempoCorrectionMs, read.Tempo, ref consecutiveTempoDir);
-        if (tempoStep.DeltaMs != 0 && (timingOnly || (confirmDirection && Math.Abs(consecutiveTempoDir) < 2)))
-            tempoStep = new(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, timingOnly
-                ? "The solo timing trial keeps the calibrated stroke duration." : "Waiting for a second matching tempo grade.");
+        if (tempoStep.DeltaMs != 0 && confirmDirection && Math.Abs(consecutiveTempoDir) < 2)
+            tempoStep = new(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, "Waiting for a second matching tempo grade.");
 
         bool timingMoved = timingAdjusted && timingStep.DeltaMs != 0;
         bool tempoMoved = tempoStep.DeltaMs != 0;
@@ -242,6 +241,7 @@ internal static class ShotFeedbackAnalysis
     internal static string CleanOcrLine(string raw)
     {
         var sb = new StringBuilder(raw.Length);
+        raw = raw.Replace('′', '\'').Replace('’', '\'').Replace('″', '"');
         foreach (char ch in raw.Normalize(NormalizationForm.FormKC).ToUpperInvariant())
         {
             if (char.IsAsciiLetterOrDigit(ch) || ch is ' ' or '.' or '\'') sb.Append(ch);
@@ -279,11 +279,11 @@ internal static class ShotFeedbackAnalysis
     private static (string? Distance, string? Coverage) ExtractShotContext((string Raw, string Match, VisionCrop Bounds)[] lines)
     {
         string? distance = null, coverage = null;
-        bool sawDistanceHeading = lines.Any(l => ContainsKeyword(l.Match, "DISTANCE"));
         for (int i = 0; i < lines.Length; i++)
         {
             coverage ??= ParseCoverage(lines[i].Match);
-            distance ??= ExtractDistanceToken(lines[i].Raw, allowBareNumber: sawDistanceHeading && (i > 0 && ContainsKeyword(lines[i - 1].Match, "DISTANCE") || (lines[i].Raw.All(ch => char.IsAsciiDigit(ch) || ch == '\'' || ch == ' ') && lines[i].Raw.Length <= 4)));
+            bool afterLabel = i > 0 && ContainsKeyword(lines[i - 1].Match, "DISTANCE");
+            distance ??= ExtractDistanceToken(lines[i].Raw, allowBareNumber: ContainsKeyword(lines[i].Match, "DISTANCE") || afterLabel);
         }
         return (distance, coverage);
     }
@@ -298,7 +298,12 @@ internal static class ShotFeedbackAnalysis
             if (quoteIdx > 0 && int.TryParse(rawTok[..quoteIdx], out int ftWithInches) && ftWithInches is >= 1 and <= 94)
             {
                 string inchesPart = rawTok[(quoteIdx + 1)..];
-                if (inchesPart.Length == 0) return $"{ftWithInches} ft";
+                if (inchesPart.Length == 0)
+                {
+                    if (i + 1 < tokens.Length && int.TryParse(tokens[i + 1], out int separateInches) && separateInches is >= 0 and <= 11)
+                        return $"{ftWithInches}'{separateInches}";
+                    return $"{ftWithInches} ft";
+                }
                 if (int.TryParse(inchesPart, out int inches) && inches is >= 0 and <= 11)
                     return $"{ftWithInches}'{inches}";
             }

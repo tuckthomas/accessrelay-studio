@@ -44,7 +44,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private VisionPerformanceSnapshot? _performance;
     private LiveFeedbackOcr? _feedbackOcr;
     private object? _lastOcrFeedback;
-    private string? _practiceKey;
+    private string? _feedbackActionKey;
     private readonly List<object> _ocrHistory = [];
     private static readonly string OcrHistoryPath = Path.Combine(DesktopEnvironment.DataDirectory("Vision") ?? AppContext.BaseDirectory, "ShotFeedbackHistory.jsonl");
     private readonly ShotFeedbackLearningGate _feedbackLearning = new();
@@ -139,7 +139,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             streamTelemetryReader = _session?.StreamTelemetryReaderStatus,
             ocrFeedback = Volatile.Read(ref _lastOcrFeedback),
             ocrReaderStatus = _session?.Status.Running == true ? _feedbackOcr?.Status : null,
-            ocrEffectiveTimingMs = _settings.FeedbackCorrection(_practiceKey),
+            ocrEffectiveTimingMs = _settings.FeedbackCorrection(_feedbackActionKey),
             ocrHistory = SnapshotOcrHistory(),
             ocrHistoryPath = OcrHistoryPath,
             luaCalibration = LuaCalibrationSnapshot(),
@@ -576,8 +576,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             if (manifest.OutputContract != plugin.OutputContract) throw new InvalidDataException("The model does not match this game plugin's vision contract.");
         }
         _feedbackOcr?.Dispose(); _feedbackOcr = null;
-        _practiceKey = _settings.PracticeKey(predictor?.Action.ConfigurationKey);
-        var captureSettings = _practiceKey is null ? _settings : _settings with { CorrectionMs = _settings.FeedbackCorrection(_practiceKey) };
+        _feedbackActionKey = predictor?.Action.ConfigurationKey;
+        var captureSettings = _settings with { CorrectionMs = _settings.FeedbackCorrection(_feedbackActionKey) };
         _timingRevalidationRequired = false; _feedbackLearning.Reset();
         Volatile.Write(ref _lastOcrFeedback, null);
         lock (_ocrGate) { _consecutiveOcrDir = 0; _consecutiveOcrTempoDir = 0; _excellentOcrStreak = 0; }
@@ -1041,7 +1041,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         receipt.AnchorLatenessMs, receipt.EligibleForFeedback, receipt.StreamTelemetry,
         actionCorrectionMs = receipt.CorrectionMs, actionTempoCorrectionMs = receipt.TempoCorrectionMs,
         feedbackEligible = read.Disposition is null && read.ShotType != "unrecognized" && receipt.EligibleForFeedback && receipt.Outcome == VisionActionOutcome.Completed && receipt.StreamTelemetry?.State != "unstable",
-        feedbackContext = ShotFeedbackLearningGate.Context(read, _settings.PracticeBand),
+        feedbackContext = string.Join(" / ", new[] { read.ShotType, read.Distance, read.Coverage }.OfType<string>()),
         read.Disposition,
         receipt.TriggerSample,
         triggerToStrokeStartMs = receipt.TriggerSample is { } press && receipt.ActualStartedTimestamp >= press.Timestamp
@@ -1075,12 +1075,8 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         {
             bool current = !_disposed && _session?.Status.Running == true && _runtime()?.LastVisionAttempt is { } active
                 && active.Id == latestReceipt.Id && active.RunId == latestReceipt.RunId;
-            int? practiceBand = _settings.PracticeBand;
-            double currentTiming = _settings.FeedbackCorrection(_practiceKey);
-            bool calibrationTrial = _settings.PluginAssistance is { } json
-                && (!json.TryGetProperty("confirmed", out var conf) || !conf.GetBoolean())
-                && (!json.TryGetProperty("calibrationTrial", out var trial) || trial.GetBoolean());
-            bool autoAdjust = !calibrationTrial && _settings.PluginAssistance is { } cfg
+            double currentTiming = _settings.FeedbackCorrection(_feedbackActionKey);
+            bool autoAdjust = !_settings.IsFeedbackCalibrationTrial && _settings.PluginAssistance is { } cfg
                 && (!cfg.TryGetProperty("autoOcrTiming", out var enabled) || enabled.ValueKind != JsonValueKind.False);
             bool rhythmMode = _settings.PluginAssistance is { } modeJson
                 && (!modeJson.TryGetProperty("inputMode", out var modeProp) || modeProp.GetString() == "rhythm");
@@ -1092,21 +1088,20 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                 : null;
             bool strokeClamped = expectedPreAnchorMs > 0 && actualPreAnchorMs + 2.5 < expectedPreAnchorMs;
             string? learningBlocked = read.Disposition ?? (!current ? "A newer attempt or session superseded this grade."
-                : practiceBand.HasValue && _practiceKey is null ? "The current setup has no saved practice timing identity."
                 : rhythmMode && read.ShotType == "timing" ? "Plain TIMING feedback cannot tune a rhythm shot."
-                : _feedbackLearning.Check(latestReceipt, read, _settingsProfile.ToString(), practiceBand));
+                : _feedbackLearning.Check(latestReceipt, read));
             if (learningBlocked is null && (latestReceipt.CorrectionMs != currentTiming || latestReceipt.TempoCorrectionMs != _settings.TempoCorrectionMs))
                 learningBlocked = "This shot used an earlier correction. Waiting for feedback from the current setting.";
             if (autoAdjust && learningBlocked is null && assignedTrigger)
             {
                 var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(currentTiming, _settings.TempoCorrectionMs,
                     read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir, ref _excellentOcrStreak,
-                    confirmDirection: true, timingOnly: practiceBand.HasValue);
+                    confirmDirection: true);
                 bool applied = !step.Changed || _runtime()?.StageVisionFeedback(latestReceipt, step.Timing.NextCorrectionMs, step.Tempo.NextCorrectionMs) == true;
                 string updateMessage = applied ? step.Message : "Timing update was not applied because the controller or session changed.";
                 if (applied && step.Changed)
                 {
-                    _settings = _settings.WithFeedbackCorrection(_practiceKey, step.Timing.NextCorrectionMs)
+                    _settings = _settings.WithFeedbackCorrection(_feedbackActionKey, step.Timing.NextCorrectionMs)
                         with { TempoCorrectionMs = step.Tempo.NextCorrectionMs };
                     try { _settingsStore.Save(_settingsProfile, _settings); }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

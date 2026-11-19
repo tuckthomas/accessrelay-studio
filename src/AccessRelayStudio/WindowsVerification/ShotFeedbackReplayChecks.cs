@@ -85,24 +85,25 @@ internal static class ShotFeedbackReplayChecks
         }
         End("Recording ended");
         var trials = new List<object>();
-        foreach (int range in new[] { 20, 25 })
+        double correction = settings.CorrectionMs, tempoCorrection = settings.TempoCorrectionMs;
+        int direction = 0, tempo = 0, excellent = 0;
+        var gate = new ShotFeedbackLearningGate();
+        foreach (var (shot, read) in reads)
         {
-            double correction = settings.CorrectionMs;
-            int direction = 0, tempo = 0, excellent = 0;
-            var gate = new ShotFeedbackLearningGate();
-            foreach (var (shot, read) in reads)
+            string? hold = read.ShotType == "timing" ? "Plain TIMING" : gate.Check(shot, read);
+            double before = correction;
+            bool eligible = hold is null;
+            if (eligible)
             {
-                string? hold = read.ShotType == "timing" ? "Plain TIMING" : gate.Check(shot, read, "recorded-profile", range);
-                double before = correction;
-                if (hold is null)
-                {
-                    var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(correction, settings.TempoCorrectionMs, read, false,
-                        ref direction, ref tempo, ref excellent, confirmDirection: true, timingOnly: true);
-                    correction = step.Timing.NextCorrectionMs; hold = step.Message;
-                    if (step.Tempo.DeltaMs != 0) throw new Exception("Solo timing trial changed tempo.");
-                }
-                trials.Add(new { range, shot.ShotToken, before, correction, hold });
+                double? expected = shot.AnchorTimestamp > 0 && shot.AnchorTimestamp >= shot.StartedTimestamp
+                    ? (shot.AnchorTimestamp - shot.StartedTimestamp) * 1000d / frequency : null;
+                double? actual = shot.ActualStartedTimestamp > 0 && shot.ActualAnchorTimestamp >= shot.ActualStartedTimestamp
+                    ? (shot.ActualAnchorTimestamp - shot.ActualStartedTimestamp) * 1000d / frequency : null;
+                var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(correction, tempoCorrection, read, expected > 0 && actual + 2.5 < expected,
+                    ref direction, ref tempo, ref excellent, confirmDirection: true);
+                correction = step.Timing.NextCorrectionMs; tempoCorrection = step.Tempo.NextCorrectionMs; hold = step.Message;
             }
+            trials.Add(new { shot.ShotToken, read.Distance, read.Coverage, eligible, before, correction, tempoCorrection, hold });
         }
         File.WriteAllText(report, JsonSerializer.Serialize(new { modelSet = set.Id, invalidHashRejected = true, inferences, wipes,
             medianOcrMs = costs.Order().ElementAt(costs.Count / 2), grades = reads.Select(r => new { r.Receipt.ShotToken, r.Receipt.Outcome, r.Read }), trials }, json));

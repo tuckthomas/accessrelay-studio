@@ -210,38 +210,39 @@ internal static class AutoGreenReliabilityVerification
     {
         var gate = new ShotFeedbackLearningGate();
         var read = new OcrFeedbackRead(1, "run", "rhythm", "late", "none", "RHYTHM LATE", 100, 1, "25'6", "Open");
-        var receipt = new VisionActionReceipt(1, 1, 1, 10, 20, 30, 56, .85, "key") { EligibleForFeedback = true,
+        var receipt = new VisionActionReceipt(1, 1, 1, 10, 20, 30, 56, .85, "key", "run") { EligibleForFeedback = true,
             StreamTelemetry = new("stable", "", true, 1, null, 2) };
-        Check(gate.Check(receipt, read, "profile") is not null && gate.Check(receipt with { Id = 2 }, read with { ReceiptId = 2 }, "profile") is null,
-            "Reliable repeated context could not qualify.");
-        Check(gate.Check(receipt with { Id = 3 }, read with { Distance = "12 ft" }, "profile") is not null, "Different shot distance shared its correction streak.");
-        Check(gate.Check(receipt with { Id = 4 }, read with { Distance = "12 ft" }, "profile") is not null, "Repeated different context changed the shared correction.");
-        Check(gate.Check(receipt with { Id = 4 }, read, "profile") is not null, "Duplicate receipt counted as new learning evidence.");
-        Check(gate.Check(receipt with { Id = 5, Outcome = VisionActionOutcome.Cancelled }, read, "profile") is not null, "Cancelled shot qualified for adaptation.");
-        Check(gate.Check(receipt with { Id = 6, StreamTelemetry = new("unstable", "spike", false, 30, null, 2) }, read, "profile") == "spike",
+        Check(gate.Check(receipt, read with { RunId = "previous" }) != null, "An earlier session supplied this shot's grade.");
+        Check(gate.Check(receipt, read) == null, "A valid HUD grade could not qualify.");
+        Check(gate.Check(receipt with { Id = 2 }, read) != null, "A previous shot supplied this shot's distance.");
+        var next = read with { ReceiptId = 2, Distance = "12 ft", Coverage = null };
+        Check(gate.Check(receipt with { Id = 2 }, next) == null, "Moving to another distance or missing coverage blocked feedback.");
+        Check(gate.Check(receipt with { Id = 2 }, next) != null, "Duplicate receipt counted as new learning evidence.");
+        Check(gate.Check(receipt with { Id = 3 }, read with { ReceiptId = 3, Distance = null }) == null, "An unreadable distance discarded a qualified grade.");
+        Check(gate.Check(receipt with { Id = 4, Outcome = VisionActionOutcome.Cancelled }, read with { ReceiptId = 4 }) != null, "Cancelled shot qualified for adaptation.");
+        Check(gate.Check(receipt with { Id = 5, StreamTelemetry = new("unstable", "spike", false, 30, null, 2) }, read with { ReceiptId = 5 }) == "spike",
             "Unstable stream qualified for adaptation.");
     }
     private static void SoloFeedback()
     {
-        var gate = new ShotFeedbackLearningGate();
-        var r = new VisionActionReceipt(1, 1, 1, 1, 2, 3, 54, .85, "key", "run") { EligibleForFeedback = true, StreamTelemetry = new("stable", "", true, 1, null, 1) };
-        var read = new OcrFeedbackRead(1, "run", "rhythm", "late", "fast", "", 5, 1, "24'3");
-        Check(gate.Check(r, read, "profile") != null, "Unknown multiplayer coverage tuned a shot.");
-        Check(gate.Check(r with { Id = 2 }, read, "profile", 20) == null, "Solo HUD required a defender.");
-        Check(gate.Check(r with { Id = 3 }, read with { Coverage = "Open" }, "profile", 20) != null, "Covered and solo practice evidence mixed.");
-        Check(gate.Check(r with { Id = 4 }, read with { Distance = "25'1" }, "profile", 20) != null, "A different practice range affected this one.");
+        var read = new OcrFeedbackRead(1, "run", "rhythm", "late", "none", "", 5, 1, "24'3");
         int direction = 0, tempo = 0, excellent = 0;
-        AdaptiveFeedbackResult Step() => ShotFeedbackAnalysis.ComputeAdaptiveFeedback(2, 6, read, false, ref direction, ref tempo, ref excellent, true, true);
-        Check(!Step().Changed, "One Late changed the correction.");
-        var second = Step();
+        AdaptiveFeedbackResult Step(OcrFeedbackRead result) => ShotFeedbackAnalysis.ComputeAdaptiveFeedback(2, 6, result, false, ref direction, ref tempo, ref excellent, true);
+        Check(!Step(read).Changed, "One Late changed the correction.");
+        var second = Step(read with { ReceiptId = 2, Distance = "26'7" });
         Check(second.Timing.NextCorrectionMs < 2 && second.Tempo.NextCorrectionMs == 6, "Repeated Late did not advance timing independently of tempo.");
-        var settings = VisionSettings.Default with { CorrectionMs = 2, PluginAssistance = System.Text.Json.JsonSerializer.SerializeToElement(new { practiceDistanceFeet = 20 }) };
-        string key = settings.PracticeKey(new string('a', 64))!;
+        var key = new string('a', 64);
+        var settings = VisionSettings.Default with { CorrectionMs = 2, PracticeTimingCorrections = new() { [key + "/20"] = -18 },
+            PluginAssistance = System.Text.Json.JsonSerializer.SerializeToElement(new { confirmed = true, practiceDistanceFeet = 20 }) };
+        Check(settings.FeedbackCorrection(key) == 2, "A historical distance-specific offset was applied to every shot.");
         var changed = settings.WithFeedbackCorrection(key, second.Timing.NextCorrectionMs);
         changed = System.Text.Json.JsonSerializer.Deserialize<VisionSettings>(System.Text.Json.JsonSerializer.Serialize(changed))!;
         changed.Validate();
-        Check(changed.FeedbackCorrection(key) == second.Timing.NextCorrectionMs && changed.FeedbackCorrection(key[..^2] + "25") == 2 && changed.CorrectionMs == 2,
-            "Saving/reloading a practice correction changed a different range or the baseline.");
+        Check(changed.FeedbackCorrection(key) == second.Timing.NextCorrectionMs && changed.FeedbackCorrection("different-action") == 2
+            && changed.PracticeTimingCorrections?[key + "/20"] == -18 && changed.CorrectionMs == 2,
+            "Reloading changed another action, legacy history, or the confirmed baseline.");
+        var trial = changed with { PluginAssistance = System.Text.Json.JsonSerializer.SerializeToElement(new { confirmed = true, calibrationTrial = true }) };
+        Check(trial.FeedbackCorrection(key) == 2, "A new calibration trial inherited an automatic timing offset.");
     }
     private static void RepeatedBanner()
     {

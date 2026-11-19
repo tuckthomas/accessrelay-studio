@@ -87,6 +87,11 @@ internal static class RuntimeSignalContextChecks
         ]);
         Check(distanceBanner is { ShotType: "rhythm", Timing: "late", Tempo: "fast", Distance: "25'6", Coverage: "Open" }
             && distanceBanner.RawText.Contains("25'6", StringComparison.Ordinal), "Distance/coverage OCR extraction altered feet-inches or failed.");
+        var soloBanner = ShotFeedbackAnalysis.ParseFeedback([
+            new("RHYTHM LATE", .96, new(.40, .02, .20, .03)),
+            new("DISTANCE 26′ 7″", .95, new(.42, .05, .18, .03))
+        ]);
+        Check(soloBanner is { Timing: "late", Distance: "26'7", Coverage: null }, "Solo HUD distance lost inches or inferred coverage.");
         int tStreak = 0, tempoStreak = 0, excStreak = 0;
         var fastLate = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(-10, 0,
             new(1, "run", "rhythm", "late", "fast", "RHYTHM | FAST | LATE", 1, 1, "25'6", "Open"),

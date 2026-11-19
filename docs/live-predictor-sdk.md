@@ -39,7 +39,9 @@ to `ApplyLiveCalibration`. Failed/disconnected output clears the receipt. A rece
 records local scheduling, not the time Xbox applied the report. Plugin-owned
 validation must distinguish user feedback, measured latency and accuracy evidence.
 
-Studio beta.50 supports runtime contracts 1 through 6. Contract 6 adds
+Studio beta.51 supports runtime contracts 1 through 7. Contract 7 records shot distance from the associated HUD result and applies feedback timing to the calibrated action across distances. Add-ons using this behavior require beta.51 or later.
+
+Contract 6 adds
 `VisionSignalContext.MinimumStrokeLeadMs`, the scheduler's current budget for a
 complete stroke including frame arrival age. A predictor can set
 `WithdrawPendingForecast` when fresh meter evidence contradicts a scheduled
