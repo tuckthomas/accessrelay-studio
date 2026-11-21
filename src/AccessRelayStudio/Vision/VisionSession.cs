@@ -126,6 +126,25 @@ internal sealed class VisionSession : IDisposable
     }
     internal VisionPreview? TakePreview() { lock (_gate) { var value = _preview; _preview = null; return value; } }
 
+    internal async Task WaitForArmReadinessAsync(CancellationToken cancellation)
+    {
+        long started = Stopwatch.GetTimestamp();
+        var status = Status;
+        while (!status.CanArm && status.Running && !status.ModelLoadFailed && !status.CaptureFailed &&
+            Stopwatch.GetElapsedTime(started).TotalSeconds < 3)
+        {
+            if (TrainingSnapshot is { HasTake: true, IsFinalized: false })
+                throw new InvalidOperationException("Finish saving the training clip before enabling assistance.");
+            await Task.Delay(25, cancellation).ConfigureAwait(false);
+            status = Status;
+        }
+        cancellation.ThrowIfCancellationRequested();
+        if (!status.CanArm)
+            throw new InvalidOperationException(status.Running && status.Frames == 0 && !status.ModelLoadFailed && !status.CaptureFailed
+                ? "Waiting for gameplay frames. Start assistance again when the picture is moving."
+                : status.Message);
+    }
+
     // Presentation is optional. Hiding a tab must not stop observation, recording or controller output.
     internal void SetPreviewEnabled(bool enabled)
     {

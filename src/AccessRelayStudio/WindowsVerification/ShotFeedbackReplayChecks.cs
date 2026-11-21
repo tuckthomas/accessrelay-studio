@@ -85,13 +85,17 @@ internal static class ShotFeedbackReplayChecks
         }
         End("Recording ended");
         var trials = new List<object>();
-        double correction = settings.CorrectionMs, tempoCorrection = settings.TempoCorrectionMs;
+        var firstShot = reads.FirstOrDefault().Receipt;
+        double correction = firstShot?.CorrectionMs ?? settings.CorrectionMs, tempoCorrection = firstShot?.TempoCorrectionMs ?? settings.TempoCorrectionMs;
         int direction = 0, tempo = 0, excellent = 0;
         var gate = new ShotFeedbackLearningGate();
         foreach (var (shot, read) in reads)
         {
             string? hold = read.ShotType == "timing" ? "Plain TIMING" : gate.Check(shot, read);
+            if (hold is null && (shot.CorrectionMs != correction || shot.TempoCorrectionMs != tempoCorrection))
+                hold = "This receipt used a different correction.";
             double before = correction;
+            double? suggestedPracticeTempoMs = null;
             bool eligible = hold is null;
             if (eligible)
             {
@@ -100,10 +104,11 @@ internal static class ShotFeedbackReplayChecks
                 double? actual = shot.ActualStartedTimestamp > 0 && shot.ActualAnchorTimestamp >= shot.ActualStartedTimestamp
                     ? (shot.ActualAnchorTimestamp - shot.ActualStartedTimestamp) * 1000d / frequency : null;
                 var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(correction, tempoCorrection, read, expected > 0 && actual + 2.5 < expected,
-                    ref direction, ref tempo, ref excellent, confirmDirection: true);
+                    ref direction, ref tempo, ref excellent, liveAssistance: true);
                 correction = step.Timing.NextCorrectionMs; tempoCorrection = step.Tempo.NextCorrectionMs; hold = step.Message;
+                suggestedPracticeTempoMs = step.SuggestedPracticeTempoMs;
             }
-            trials.Add(new { shot.ShotToken, read.Distance, read.Coverage, eligible, before, correction, tempoCorrection, hold });
+            trials.Add(new { shot.ShotToken, read.Distance, read.Coverage, eligible, before, correction, tempoCorrection, suggestedPracticeTempoMs, hold });
         }
         File.WriteAllText(report, JsonSerializer.Serialize(new { modelSet = set.Id, invalidHashRejected = true, inferences, wipes,
             medianOcrMs = costs.Order().ElementAt(costs.Count / 2), grades = reads.Select(r => new { r.Receipt.ShotToken, r.Receipt.Outcome, r.Read }), trials }, json));

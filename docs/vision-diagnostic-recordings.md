@@ -1,10 +1,10 @@
 # Gameplay diagnostic recordings
 
-## Shot feedback in Studio beta.51
+## Shot feedback in Studio beta.53
 
 Shot meter shows whether the packaged HUD reader loaded. The feedback log records the controller receipt, the time of the HUD frame, the recognized heading and grades, and the reason a correction changed or stayed fixed. A confirmed heading wipe lets identical grades on consecutive shots count separately.
 
-Studio records the distance and defender coverage shown on each shot's feedback banner. An unreadable or absent field stays empty. Two eligible grades in the same direction at the current correction qualify a timing step for that shot setup, even if the player moved between attempts. Tempo adjustments require an explicit tempo grade. Cancelled strokes and plain TIMING grades during rhythm assistance are recorded for review.
+Studio records the distance and defender coverage shown on each shot's feedback banner. An unreadable or absent field stays empty. Two eligible grades in the same direction at the current correction qualify a timing step for that shot setup, even if the player moved between attempts. Two matching Fast or Slow grades can suggest a tempo for a practice trial. The feedback log records that suggestion separately from the tempo actually used. During live assistance, Studio keeps the calibrated stroke duration and continues assisting on the next press. Cancelled strokes and plain TIMING grades during rhythm assistance are recorded for review.
 
 ## Auto-green reliability branch (runtime contract 4)
 

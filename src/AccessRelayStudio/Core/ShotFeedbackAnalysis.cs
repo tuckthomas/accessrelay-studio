@@ -9,7 +9,7 @@ internal sealed record OcrFeedbackRead(long ReceiptId, string RunId, string Shot
 internal sealed record AdaptiveTimingStep(double PreviousCorrectionMs, double NextCorrectionMs, double DeltaMs, string Reason);
 
 internal sealed record AdaptiveFeedbackResult(AdaptiveTimingStep Timing, AdaptiveTimingStep Tempo, bool TimingClampedSkipped,
-    bool Changed, string Message);
+    bool Changed, string Message, double? SuggestedPracticeTempoMs);
 
 internal static class ShotFeedbackAnalysis
 {
@@ -148,7 +148,7 @@ internal static class ShotFeedbackAnalysis
 
     internal static AdaptiveFeedbackResult ComputeAdaptiveFeedback(double currentCorrectionMs, double currentTempoCorrectionMs,
         OcrFeedbackRead read, bool strokeClamped, ref int consecutiveTimingDir, ref int consecutiveTempoDir, ref int excellentStreak,
-        bool confirmDirection = false)
+        bool liveAssistance = false)
     {
         bool timingAdjusted = false;
         bool heldAfterExcellent = false;
@@ -167,7 +167,7 @@ internal static class ShotFeedbackAnalysis
         else
         {
             var candidateStep = ComputeAdaptiveStep(currentCorrectionMs, read.Timing, ref consecutiveTimingDir);
-            if ((excellentStreak >= 2 || confirmDirection) && Math.Abs(consecutiveTimingDir) == 1 && candidateStep.DeltaMs != 0)
+            if ((excellentStreak >= 2 || liveAssistance) && Math.Abs(consecutiveTimingDir) == 1 && candidateStep.DeltaMs != 0)
             {
                 heldAfterExcellent = true;
                 timingStep = new(currentCorrectionMs, currentCorrectionMs, 0,
@@ -186,8 +186,20 @@ internal static class ShotFeedbackAnalysis
         var tempoStep = !hasTempo
             ? new AdaptiveTimingStep(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, "Tempo unchanged.")
             : ComputeAdaptiveTempoStep(currentTempoCorrectionMs, read.Tempo, ref consecutiveTempoDir);
-        if (tempoStep.DeltaMs != 0 && confirmDirection && Math.Abs(consecutiveTempoDir) < 2)
-            tempoStep = new(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, "Waiting for a second matching tempo grade.");
+        double? suggestedPracticeTempoMs = null;
+        if (liveAssistance && tempoStep.DeltaMs != 0)
+        {
+            string reason = "Waiting for a second matching tempo grade.";
+            if (Math.Abs(consecutiveTempoDir) >= 2)
+            {
+                // A different stroke duration needs its own practice results. Keep the active stroke calibrated.
+                suggestedPracticeTempoMs = tempoStep.NextCorrectionMs;
+                reason = $"Two {read.Tempo} grades suggest {FormatMs(tempoStep.NextCorrectionMs)} ms for a practice trial. " +
+                    $"Live tempo stays at {FormatMs(currentTempoCorrectionMs)} ms.";
+                consecutiveTempoDir = 0;
+            }
+            tempoStep = new(currentTempoCorrectionMs, currentTempoCorrectionMs, 0, reason);
+        }
 
         bool timingMoved = timingAdjusted && timingStep.DeltaMs != 0;
         bool tempoMoved = tempoStep.DeltaMs != 0;
@@ -214,9 +226,8 @@ internal static class ShotFeedbackAnalysis
         }
         if (hasTempo && tempoStep.DeltaMs == 0 && read.Tempo != "excellent") summary += " " + tempoStep.Reason;
         // A changed setting needs its own two agreeing grades before another step.
-        if (confirmDirection && timingMoved) consecutiveTimingDir = 0;
-        if (confirmDirection && tempoMoved) consecutiveTempoDir = 0;
-        return new(timingStep, tempoStep, strokeClamped && read.Timing != "excellent", timingMoved || tempoMoved, summary);
+        if (liveAssistance && timingMoved) consecutiveTimingDir = 0;
+        return new(timingStep, tempoStep, strokeClamped && read.Timing != "excellent", timingMoved || tempoMoved, summary, suggestedPracticeTempoMs);
     }
 
     private static AdaptiveTimingStep ComputeAdaptiveStepCore(double current, int dir, bool _, ref int consecutiveDirection,

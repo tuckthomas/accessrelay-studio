@@ -34,7 +34,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private string _selectedSourceId = "", _lastObservedSourceId = "";
     private VisionModelLibraryEntry[] _models = [];
     private string[] _modelErrors = [];
-    private bool _modelScanComplete, _visible, _disposed;
+    private bool _modelScanComplete, _visible, _disposed, _waitingToArm;
     private VisionSession? _session;
     private PreviewImage? _preview;
     private FrozenImage? _frozen;
@@ -48,7 +48,6 @@ internal sealed partial class DesktopVisionService : IDesktopModule
     private readonly List<object> _ocrHistory = [];
     private static readonly string OcrHistoryPath = Path.Combine(DesktopEnvironment.DataDirectory("Vision") ?? AppContext.BaseDirectory, "ShotFeedbackHistory.jsonl");
     private readonly ShotFeedbackLearningGate _feedbackLearning = new();
-    private bool _timingRevalidationRequired;
     private int _consecutiveOcrDir, _consecutiveOcrTempoDir, _excellentOcrStreak;
     private readonly object _ocrGate = new();
     private string _notice = "Choose a capture source to preview gameplay.";
@@ -164,6 +163,13 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         if (action == "trainingCancel") { _trainingJob.Cancel(); return null; }
         // Stop never waits behind model import, native pickers or startup waits.
         if (action == "diagnosticStop") { _session?.StopDiagnosticRecording(); return null; }
+        if (action == "armedSet" && !args.Flag("armed"))
+        {
+            if (_waitingToArm) CancelOperation();
+            _runtime()?.SetVisionArmed(false);
+            _notice = "Live assistance is off.";
+            return null;
+        }
         if (action is "stop" or "recordStop")
         {
             CancelOperation();
@@ -365,22 +371,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     bool loadModel = args.Flag("loadModel", true);
                     bool arm = args.Flag("armed", false);
                     Start(loadModel);
-                    if (arm)
-                    {
-                        if (_runtime()?.HasOutput != true)
-                            throw new InvalidOperationException("Connect controller output before enabling assistance.");
-                        long deadline = Stopwatch.GetTimestamp() + 3 * Stopwatch.Frequency;
-                        while (_session?.Status is { Running: true, CanArm: false } && Stopwatch.GetTimestamp() < deadline)
-                        {
-                            cancellation.ThrowIfCancellationRequested();
-                            await Task.Delay(25, cancellation);
-                        }
-                        if (_session?.Status.CanArm != true)
-                            throw new InvalidOperationException(_session?.Status.Message ?? "Start gameplay capture and wait for live frames before enabling assistance.");
-                        if (_runtime()?.SetVisionArmed(true) != true)
-                            throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
-                        _notice = "Live assistance is on.";
-                    }
+                    if (arm) await ArmWhenReadyAsync(cancellation);
                     return null;
                 }
                 case "connectOutput":
@@ -389,11 +380,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
                     _notice = "Controller output is connected.";
                     return new { connected = true, message = _notice };
                 case "armedSet":
-                    bool armed = args.Flag("armed");
-                    if (armed && (_timingRevalidationRequired || _session?.Status.CanArm != true))
-                        throw new InvalidOperationException("Start a calibrated predictor, explicit calibration trial, or validated model before enabling assistance.");
-                    if (_runtime()?.SetVisionArmed(armed) != true && armed)
-                        throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
+                    await ArmWhenReadyAsync(cancellation);
                     return null;
                 case "detectAreas":
                     if (_areaDetection is { IsCompleted: false }) throw new InvalidOperationException("Capture area detection is already running.");
@@ -551,6 +538,20 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         RequireStopped();
         if (AssistantBusy) throw new InvalidOperationException("Finish the active vision operation before installing a game implementation.");
     }
+    private async Task ArmWhenReadyAsync(CancellationToken cancellation)
+    {
+        var session = _session ?? throw new InvalidOperationException("Start gameplay capture before enabling assistance.");
+        if (_runtime()?.HasOutput != true)
+            throw new InvalidOperationException("Connect controller output before enabling assistance.");
+        _waitingToArm = true;
+        try { await session.WaitForArmReadinessAsync(cancellation); }
+        finally { _waitingToArm = false; }
+        cancellation.ThrowIfCancellationRequested();
+        if (_runtime()?.SetVisionArmed(true) != true)
+            throw new InvalidOperationException(_runtime()?.VisionStatus.Message ?? "Controller output is unavailable.");
+        _notice = "Live assistance is on.";
+    }
+
     private void Start(bool loadModel)
     {
         if (_trainingJob.Running) throw new InvalidOperationException("Stop the offline training job before starting gameplay capture.");
@@ -578,7 +579,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         _feedbackOcr?.Dispose(); _feedbackOcr = null;
         _feedbackActionKey = predictor?.Action.ConfigurationKey;
         var captureSettings = _settings with { CorrectionMs = _settings.FeedbackCorrection(_feedbackActionKey) };
-        _timingRevalidationRequired = false; _feedbackLearning.Reset();
+        _feedbackLearning.Reset();
         Volatile.Write(ref _lastOcrFeedback, null);
         lock (_ocrGate) { _consecutiveOcrDir = 0; _consecutiveOcrTempoDir = 0; _excellentOcrStreak = 0; }
         var runtime = _runtime() ?? throw new InvalidOperationException("The controller engine is unavailable.");
@@ -1031,7 +1032,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
 
     private object BuildOcrEntry(OcrFeedbackRead read, VisionActionReceipt receipt,
         double? expectedPreAnchorMs, double? actualPreAnchorMs, bool strokeClamped,
-        double prevCorr, double nextCorr, double prevTempo, double nextTempo, string message) => new
+        double prevCorr, double nextCorr, double prevTempo, double nextTempo, string message, double? suggestedPracticeTempoMs = null) => new
     {
         timestampUtc = DateTimeOffset.UtcNow,
         profileId = _profile?.Id.ToString() ?? "",
@@ -1053,7 +1054,7 @@ internal sealed partial class DesktopVisionService : IDesktopModule
         adjustedTempo = nextTempo != prevTempo,
         previousCorrectionMs = prevCorr, nextCorrectionMs = nextCorr, deltaMs = nextCorr - prevCorr,
         previousTempoCorrectionMs = prevTempo, nextTempoCorrectionMs = nextTempo, tempoDeltaMs = nextTempo - prevTempo,
-        message
+        suggestedPracticeTempoMs, message
     };
 
     private void RecordOcrEntryLocked(object entry)
@@ -1096,29 +1097,22 @@ internal sealed partial class DesktopVisionService : IDesktopModule
             {
                 var step = ShotFeedbackAnalysis.ComputeAdaptiveFeedback(currentTiming, _settings.TempoCorrectionMs,
                     read, strokeClamped, ref _consecutiveOcrDir, ref _consecutiveOcrTempoDir, ref _excellentOcrStreak,
-                    confirmDirection: true);
-                bool applied = !step.Changed || _runtime()?.StageVisionFeedback(latestReceipt, step.Timing.NextCorrectionMs, step.Tempo.NextCorrectionMs) == true;
+                    liveAssistance: true);
+                bool applied = !step.Changed || _runtime()?.StageVisionFeedbackTiming(latestReceipt, step.Timing.NextCorrectionMs) == true;
                 string updateMessage = applied ? step.Message : "Timing update was not applied because the controller or session changed.";
                 if (applied && step.Changed)
                 {
-                    _settings = _settings.WithFeedbackCorrection(_feedbackActionKey, step.Timing.NextCorrectionMs)
-                        with { TempoCorrectionMs = step.Tempo.NextCorrectionMs };
+                    _settings = _settings.WithFeedbackCorrection(_feedbackActionKey, step.Timing.NextCorrectionMs);
                     try { _settingsStore.Save(_settingsProfile, _settings); }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     { updateMessage += " Applied for this session. Saving the correction failed. " + ex.Message; }
-                    if (step.Tempo.DeltaMs != 0)
-                    {
-                        _timingRevalidationRequired = true;
-                        _runtime()?.SetVisionArmed(false);
-                    }
                     _version++;
-                    if (_timingRevalidationRequired) updateMessage += " Validate the changed tempo in practice before continuing.";
                     _notice = updateMessage;
                 }
                 double nextCorr = applied ? step.Timing.NextCorrectionMs : currentTiming;
-                double nextTempo = applied ? step.Tempo.NextCorrectionMs : _settings.TempoCorrectionMs;
                 RecordOcrEntryLocked(BuildOcrEntry(read, latestReceipt, expectedPreAnchorMs, actualPreAnchorMs, strokeClamped,
-                    step.Timing.PreviousCorrectionMs, nextCorr, step.Tempo.PreviousCorrectionMs, nextTempo, updateMessage));
+                    step.Timing.PreviousCorrectionMs, nextCorr, _settings.TempoCorrectionMs, _settings.TempoCorrectionMs, updateMessage,
+                    step.SuggestedPracticeTempoMs));
                 return;
             }
             string passiveMessage = read.Disposition ?? (latestReceipt.Outcome == VisionActionOutcome.Cancelled

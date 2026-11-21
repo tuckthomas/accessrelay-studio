@@ -332,8 +332,8 @@ internal sealed class StudioRuntime : IDisposable
     }
 
     public VisionActionReceipt? LastVisionAction { get { lock (_sync) return _vision.LastAction; } }
-    internal bool StageVisionFeedback(VisionActionReceipt receipt, double timing, double tempo)
-    { lock (_sync) return _vision.StageFeedbackTiming(receipt, timing, tempo); }
+    internal bool StageVisionFeedbackTiming(VisionActionReceipt receipt, double timing)
+    { lock (_sync) return _vision.StageFeedbackTiming(receipt, timing); }
     public StreamTelemetryAssessment VisionStreamTelemetry { get { lock (_sync) return _vision.StreamTelemetry(Stopwatch.GetTimestamp()); } }
     internal void ObserveVisionStreamTelemetry(DirectStreamMetrics reading) { lock (_sync) _vision.ObserveStreamTelemetry(reading); }
     public void ObserveVisionStreamTelemetry(StreamTelemetryReading reading) { lock (_sync) _vision.ObserveStreamTelemetry(reading); }

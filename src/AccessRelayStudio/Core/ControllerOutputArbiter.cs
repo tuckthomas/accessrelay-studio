@@ -118,13 +118,13 @@ internal sealed class ControllerOutputArbiter
         if (action is not null) _action = action;
         return true;
     }
-    internal bool StageFeedbackTiming(VisionActionReceipt receipt, double timing, double tempo)
+    internal bool StageFeedbackTiming(VisionActionReceipt receipt, double timing)
     {
         if (receipt.Outcome != VisionActionOutcome.Completed || !receipt.EligibleForFeedback
             || receipt.RunId != _runId || LastAttempt?.Id != receipt.Id || receipt.SessionGeneration != _generation
             || receipt.CorrectionMs != _settings.CorrectionMs || receipt.TempoCorrectionMs != _settings.TempoCorrectionMs
             || _nextShotSettings is not null) return false;
-        var next = _settings with { CorrectionMs = timing, TempoCorrectionMs = tempo };
+        var next = _settings with { CorrectionMs = timing };
         next.Validate();
         if (!_held && _shot == 0 && !_strokeStarted && !_deadline.HasValue) _settings = next;
         else _nextShotSettings = next;

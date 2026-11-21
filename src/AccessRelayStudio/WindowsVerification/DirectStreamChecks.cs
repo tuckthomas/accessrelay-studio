@@ -90,11 +90,62 @@ internal static class DirectStreamChecks
             using var json = JsonDocument.Parse(File.ReadAllText(manifest));
             Check(json.RootElement.GetProperty("context").GetProperty("captureTimeBasis").GetString() == CapturePipelineSnapshot.DecoderReceipt &&
                 json.RootElement.GetProperty("storedFrames").GetInt32() == 1, "Direct recording lost its pixels or clock provenance.");
+            CheckCalibratedArm(recordings);
         }
         finally { if (Directory.Exists(recordings)) Directory.Delete(recordings, true); }
         track.End();
         Wait(() => !vision.Status.Running && track.Unsubscribed, "Track loss did not stop observation.");
         Check(vision.Status.CaptureFailed && !vision.Status.CanArm, "Track loss was reported as ready.");
+    }
+
+    private static void CheckCalibratedArm(string recordings)
+    {
+        using var input = new FakeControllerInput();
+        using var runtime = new StudioRuntime(input, StudioProfile.CreateDefault() with { ScriptsEnabled = false }, new(0, 0));
+        runtime.Attach(new FakeControllerOutput());
+        using var vision = new VisionSession(runtime);
+        var track = new TestTrack();
+        vision.StartDirect(track, VisionSettings.Default with { MaximumFrameAgeMs = 1000 }, predictor: new SizedPredictor());
+        Wait(() => track.Subscribed, "Reconfigured predictor did not subscribe.");
+        using var pause = new CancellationTokenSource();
+        var pending = vision.WaitForArmReadinessAsync(pause.Token);
+        pause.Cancel();
+        try { pending.GetAwaiter().GetResult(); throw new Exception("Pausing allowed an outstanding arm to proceed."); }
+        catch (OperationCanceledException) when (pause.IsCancellationRequested) { }
+
+        var ready = vision.WaitForArmReadinessAsync(CancellationToken.None);
+        Check(!ready.IsCompleted, "A newly started predictor reported readiness without a frame.");
+        track.Frame(8, 4, 1);
+        Wait(() => vision.Status.Frames > 0, "Predictor did not receive the initial dimensions.");
+        track.Frame(8, 4, 2);
+        ready.GetAwaiter().GetResult();
+        Check(!runtime.VisionStatus.Armed && runtime.SetVisionArmed(true), "A ready predictor could not be explicitly armed.");
+        vision.StartDiagnosticRecording(recordings, new { source = "Armed decoded test track" });
+        track.Frame(8, 4, 3);
+        Wait(() => vision.DiagnosticSnapshot?.ObservedFrames >= 1, "Armed diagnostic lost the frame.");
+        Check(runtime.VisionStatus.Armed, "Starting diagnostics disarmed a calibrated predictor.");
+        track.End();
+        Wait(() => !vision.Status.Running, "Ended capture did not stop.");
+        var unavailable = vision.WaitForArmReadinessAsync(CancellationToken.None);
+        Check(unavailable.IsFaulted && unavailable.Exception.GetBaseException().Message == vision.Status.Message
+            && !runtime.VisionStatus.Armed, "Capture loss did not retain its reason or disarm output.");
+        vision.FinishDiagnosticRecordingAsync(CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    private sealed class SizedPredictor : IVisionLivePredictor
+    {
+        public string Name => "Sized predictor";
+        public VisionControllerAction Action { get; } = new();
+        public bool CanArm { get; private set; }
+        public string Status => CanArm ? "Calibrated." : "Waiting for the calibrated size.";
+        public VisionSignalObservation Observe(ReadOnlySpan<byte> pixels, int width, int height, int stride,
+            long sequence, long generation, long captureTicks, VisionSignalContext context)
+        {
+            CanArm = width == 8 && height == 4;
+            return new(sequence, captureTicks, false, null, 0, 1, 0, null, 0, 0, Status);
+        }
+        public void Reset() => CanArm = false;
+        public void Dispose() { }
     }
 
     private static void CheckWriter()

@@ -12,6 +12,7 @@ internal static class AutoGreenReliabilityVerification
         StreamStatistics();
         LearningEvidence();
         SoloFeedback();
+        LiveTempoFeedback();
         RepeatedBanner();
         Console.WriteLine("SUCCESS Auto-green reliability: lead time, actual handoffs, cancellations, banner association, stream health and learning evidence.");
     }
@@ -159,7 +160,7 @@ internal static class AutoGreenReliabilityVerification
         Check(receipt.AnchorTimestamp == 148 && receipt.ActualAnchorTimestamp == 149 && receipt.ActualStartedTimestamp == 101
             && receipt.AnchorLatenessMs == 1 && receipt.EligibleForFeedback, "Receipt did not distinguish planned anchor from successful output handoff.");
         double previousLead = valid.MinimumStrokeLeadMs;
-        Check(valid.StageFeedbackTiming(receipt, -4, 0) && valid.MinimumStrokeLeadMs == previousLead, "Feedback moved a held shot.");
+        Check(valid.StageFeedbackTiming(receipt, -4) && valid.MinimumStrokeLeadMs == previousLead, "Feedback moved a held shot.");
         Poll(valid, 210, false);
         Check(valid.MinimumStrokeLeadMs == previousLead + 4, "The next press did not receive the scheduler's new lead.");
         Poll(valid, 215); Poll(valid, 225, false);
@@ -299,6 +300,43 @@ internal static class AutoGreenReliabilityVerification
             "Reloading changed another action, legacy history, or the confirmed baseline.");
         var trial = changed with { PluginAssistance = System.Text.Json.JsonSerializer.SerializeToElement(new { confirmed = true, calibrationTrial = true }) };
         Check(trial.FeedbackCorrection(key) == 2, "A new calibration trial inherited an automatic timing offset.");
+    }
+    private static void LiveTempoFeedback()
+    {
+        var arbiter = new ControllerOutputArbiter(1000);
+        arbiter.Configure(VisionSettings.Default with { CorrectionMs = -4, TempoCorrectionMs = 6 },
+            new() { Kind = VisionActionKind.RightStickStroke, TriggerControl = ControlId.LargeRight,
+                ContinueAfterTriggerRelease = true, StrokeDurationMs = 48, EndHoldMs = 6 });
+        arbiter.BeginSession(); Poll(arbiter, 1, false);
+        Check(arbiter.SetArmed(true), "Could not start calibrated assistance.");
+
+        VisionActionReceipt Tap(int at)
+        {
+            Poll(arbiter, at); Poll(arbiter, at + 2, false);
+            Check(arbiter.Submit(Prediction(arbiter, 1, at + 4, 75), at + 4), "Next P4 tap lost its forecast.");
+            for (int t = at + 6; t <= at + 140; t += 2) Poll(arbiter, t, false);
+            return arbiter.LastAction ?? throw new Exception("P4 tap did not complete its stroke.");
+        }
+        int timing = 0, tempo = 0, excellent = 0;
+        AdaptiveFeedbackResult Grade(VisionActionReceipt shot, string speed, string grade) =>
+            ShotFeedbackAnalysis.ComputeAdaptiveFeedback(shot.CorrectionMs, shot.TempoCorrectionMs,
+                new(shot.Id, shot.RunId, "rhythm", grade, speed, "", shot.CompletedTimestamp, 1), false,
+                ref timing, ref tempo, ref excellent, liveAssistance: true);
+
+        var first = Grade(Tap(100), "slow", "late");
+        Check(!first.Changed && first.SuggestedPracticeTempoMs is null, "One Slow/Late grade changed the setup.");
+        var second = Tap(300);
+        var update = Grade(second, "slow", "late");
+        Check(second.Id == 2 && update.Timing.NextCorrectionMs == -8 && update.Tempo.NextCorrectionMs == 6
+            && update.SuggestedPracticeTempoMs == 0 && arbiter.StageFeedbackTiming(second, update.Timing.NextCorrectionMs),
+            "Two Slow/Late grades failed to stage timing independently of the calibrated tempo.");
+        var third = Tap(500);
+        Check(arbiter.Status.Armed && third is { Id: 3, EligibleForFeedback: true, CorrectionMs: -8, TempoCorrectionMs: 6, StrokeDurationMs: 54 },
+            "The next tap lost assistance or used an unvalidated stroke duration.");
+        Grade(third, "fast", "excellent");
+        var fourth = Grade(Tap(700), "fast", "excellent");
+        Check(!fourth.Changed && fourth.SuggestedPracticeTempoMs == 12 && fourth.Tempo.NextCorrectionMs == 6,
+            "Tempo-only feedback changed a calibrated stroke or discarded the practice suggestion.");
     }
     private static void RepeatedBanner()
     {
